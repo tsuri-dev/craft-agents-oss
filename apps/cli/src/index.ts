@@ -523,6 +523,293 @@ async function cmdSend(client: CliRpcClient, args: CliArgs): Promise<void> {
   process.exit(exitCode)
 }
 
+// ---------------------------------------------------------------------------
+// Interactive chat REPL
+// ---------------------------------------------------------------------------
+
+async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
+  const readline = await import('node:readline')
+  const path = await import('node:path')
+  const fs = await import('node:fs')
+  const os = await import('node:os')
+  const { readFileAttachment } = await import('@craft-agent/shared/utils/files')
+
+  await client.connect()
+  await resolveWorkspace(client, args.workspace)
+
+  // Resolve initial session id: arg > pick from list > create new
+  let sessionId = args.rest[0]
+  if (!sessionId) {
+    const sessions = (await client.invoke('sessions:list')) as Array<{ id: string; name?: string; preview?: string; isProcessing?: boolean }>
+    if (!sessions.length) {
+      process.stdout.write('No sessions yet. Create one in the desktop app first, or run: craft-cli session create --name <name>' + '\n')
+      client.destroy()
+      process.exit(1)
+    }
+    process.stdout.write('Pick a session:' + '\n')
+    sessions.slice(0, 30).forEach((s, i) => {
+      const tag = s.isProcessing ? ' [processing]' : ''
+      process.stdout.write(`  [${String(i + 1).padStart(2)}] ${s.id}  ${s.name ?? ''}  ${truncate(s.preview ?? '', 50)}${tag}` + '\n')
+    })
+    const ans = await prompt('Number (or session-id): ')
+    const trimmed = ans.trim()
+    const asNum = parseInt(trimmed, 10)
+    if (!isNaN(asNum) && asNum >= 1 && asNum <= sessions.length) {
+      sessionId = sessions[asNum - 1]!.id
+    } else if (trimmed) {
+      sessionId = trimmed
+    } else {
+      client.destroy()
+      process.exit(0)
+    }
+  }
+
+  // Queued attachments for the next message
+  let queued: import('@craft-agent/shared/utils/files').FileAttachment[] = []
+
+  // Streaming state
+  let processing = false
+  let currentExitCode = 0
+  let resolveDone: (() => void) | null = null
+
+  const eventUnsub = client.on('session:event', (event: unknown) => {
+    const ev = event as { type: string; sessionId: string; [key: string]: unknown }
+    if (ev.sessionId !== sessionId) return
+    switch (ev.type) {
+      case 'text_delta':
+        process.stdout.write(ev.delta as string)
+        break
+      case 'tool_start':
+        process.stdout.write(`\n\x1b[2m[tool: ${ev.toolName}${ev.toolIntent ? ` — ${ev.toolIntent}` : ''}]\x1b[0m\n`)
+        break
+      case 'tool_result': {
+        const result = String(ev.result ?? '')
+        if (result.length > 200) {
+          process.stdout.write(`\x1b[2m${result.slice(0, 200)}...\x1b[0m\n`)
+        } else if (result) {
+          process.stdout.write(`\x1b[2m${result}\x1b[0m\n`)
+        }
+        break
+      }
+      case 'error':
+        process.stdout.write(`\n\x1b[31m[error] ${String(ev.error)}\x1b[0m\n`)
+        currentExitCode = 1
+        processing = false
+        resolveDone?.()
+        break
+      case 'complete':
+        process.stdout.write('\n')
+        processing = false
+        resolveDone?.()
+        break
+      case 'interrupted':
+        process.stdout.write('\n\x1b[33m[interrupted]\x1b[0m\n')
+        processing = false
+        resolveDone?.()
+        break
+    }
+  })
+
+  const histPath = path.join(os.homedir(), '.craft-cli-history')
+  let history: string[] = []
+  try { history = fs.readFileSync(histPath, 'utf8').split('\n').filter(Boolean).slice(-500) } catch {}
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: true,
+    history: history.slice().reverse(),
+    historySize: 500,
+    prompt: '',
+  })
+
+  const setPrompt = () => {
+    const tag = queued.length ? `\x1b[36m[+${queued.length}]\x1b[0m ` : ''
+    rl.setPrompt(`${tag}\x1b[35m${shortId(sessionId!)}\x1b[0m \x1b[1m›\x1b[0m `)
+  }
+
+  const persistHistory = () => {
+    try {
+      const h = (rl as unknown as { history: string[] }).history
+      fs.writeFileSync(histPath, h.slice().reverse().filter(Boolean).join('\n') + '\n')
+    } catch {}
+  }
+
+  process.stdout.write(`\x1b[2mConnected to session \x1b[0m\x1b[35m${sessionId}\x1b[0m\x1b[2m. Type /help for commands, Ctrl-D to exit.\x1b[0m` + '\n')
+  setPrompt()
+  rl.prompt()
+
+  rl.on('SIGINT', () => {
+    if (processing) {
+      // Cancel current processing, stay in REPL
+      client.invoke('sessions:cancel', sessionId, false).catch(() => {})
+    } else {
+      // Empty line + Ctrl-C → exit
+      process.stdout.write('' + '\n')
+      rl.close()
+    }
+  })
+
+  rl.on('line', async (rawLine) => {
+    const line = rawLine.trim()
+    if (processing) {
+      // Ignore input while streaming (user can Ctrl-C to cancel)
+      return
+    }
+    if (!line) {
+      rl.prompt()
+      return
+    }
+
+    // Slash commands
+    if (line.startsWith('/')) {
+      const [cmd, ...rest] = line.slice(1).split(/\s+/)
+      const argLine = rest.join(' ').trim()
+      try {
+        switch (cmd) {
+          case 'help':
+          case '?':
+            process.stdout.write(`\x1b[2mCommands:
+  /help                       Show this help
+  /sessions                   List recent sessions
+  /switch <id|number>         Switch to another session
+  /new [name]                 Create a new session and switch to it
+  /attach <path>  (or /f)     Queue a file to send with next message
+  /files                      Show queued attachments
+  /clear                      Clear queued attachments
+  /cancel                     Cancel in-progress processing
+  /history [n]                Show last n messages (default 10)
+  /exit  /quit                Exit (or Ctrl-D)\x1b[0m` + '\n')
+            break
+          case 'sessions': {
+            const list = (await client.invoke('sessions:list')) as Array<{ id: string; name?: string; preview?: string; isProcessing?: boolean }>
+            list.slice(0, 20).forEach((s, i) => {
+              const here = s.id === sessionId ? '\x1b[32m●\x1b[0m' : ' '
+              const tag = s.isProcessing ? ' [processing]' : ''
+              process.stdout.write(`${here} [${String(i + 1).padStart(2)}] ${s.id}  ${s.name ?? ''}  ${truncate(s.preview ?? '', 40)}${tag}` + '\n')
+            })
+            break
+          }
+          case 'switch': {
+            if (!argLine) { process.stdout.write('Usage: /switch <id|number>' + '\n'); break }
+            const list = (await client.invoke('sessions:list')) as Array<{ id: string }>
+            const asNum = parseInt(argLine, 10)
+            const target = (!isNaN(asNum) && list[asNum - 1]) ? list[asNum - 1]!.id : argLine
+            sessionId = target
+            queued = []
+            process.stdout.write(`\x1b[2mSwitched to \x1b[0m\x1b[35m${sessionId}\x1b[0m` + '\n')
+            break
+          }
+          case 'new': {
+            const wsId = await resolveWorkspace(client)
+            if (!wsId) { process.stdout.write('No workspace available' + '\n'); break }
+            const created = (await client.invoke('sessions:create', wsId, { name: argLine || undefined })) as { id: string }
+            sessionId = created.id
+            queued = []
+            process.stdout.write(`\x1b[2mCreated and switched to \x1b[0m\x1b[35m${sessionId}\x1b[0m` + '\n')
+            break
+          }
+          case 'attach':
+          case 'f':
+          case 'file': {
+            if (!argLine) { process.stdout.write('Usage: /attach <path>' + '\n'); break }
+            try {
+              const att = readFileAttachment(argLine)
+              if (!att) { process.stdout.write(`\x1b[31mFile not found: ${argLine}\x1b[0m` + '\n'); break }
+              queued.push(att)
+              process.stdout.write(`\x1b[2m+ ${att.name} (${att.type}, ${att.size}B)\x1b[0m` + '\n')
+            } catch (e) {
+              process.stdout.write(`\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m` + '\n')
+            }
+            break
+          }
+          case 'files': {
+            if (!queued.length) { process.stdout.write('\x1b[2m(no queued attachments)\x1b[0m' + '\n'); break }
+            queued.forEach((a, i) => process.stdout.write(`  [${i + 1}] ${a.name}  (${a.type}, ${a.size}B)` + '\n'))
+            break
+          }
+          case 'clear':
+            queued = []
+            process.stdout.write('\x1b[2mCleared queued attachments.\x1b[0m' + '\n')
+            break
+          case 'cancel':
+            await client.invoke('sessions:cancel', sessionId, false).catch(() => {})
+            process.stdout.write('\x1b[2mCancel requested.\x1b[0m' + '\n')
+            break
+          case 'history': {
+            const n = parseInt(argLine, 10) || 10
+            const info = (await client.invoke('sessions:get', sessionId)) as { messages?: Array<{ role: string; content: string }> }
+            const msgs = (info.messages ?? []).slice(-n)
+            for (const m of msgs) {
+              const tag = m.role === 'user' ? '\x1b[36muser\x1b[0m' : m.role === 'assistant' ? '\x1b[32massistant\x1b[0m' : `\x1b[31m${m.role}\x1b[0m`
+              process.stdout.write(`${tag}: ${truncate(m.content ?? '', 200)}` + '\n')
+            }
+            break
+          }
+          case 'exit':
+          case 'quit':
+          case 'q':
+            rl.close()
+            return
+          default:
+            process.stdout.write(`\x1b[31mUnknown command: /${cmd}\x1b[0m  (try /help)` + '\n')
+        }
+      } catch (e) {
+        process.stdout.write(`\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m` + '\n')
+      }
+      setPrompt()
+      rl.prompt()
+      return
+    }
+
+    // Normal message
+    processing = true
+    const attsToSend = queued.length ? queued : undefined
+    queued = []
+    const done = new Promise<void>((resolve) => { resolveDone = resolve })
+    try {
+      await client.invoke('sessions:sendMessage', sessionId, line, attsToSend)
+    } catch (e) {
+      process.stdout.write(`\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m` + '\n')
+      processing = false
+      resolveDone = null
+      setPrompt()
+      rl.prompt()
+      return
+    }
+    await done
+    resolveDone = null
+    setPrompt()
+    rl.prompt()
+  })
+
+  rl.on('close', () => {
+    persistHistory()
+    eventUnsub()
+    client.destroy()
+    process.stdout.write('\x1b[2mbye.\x1b[0m' + '\n')
+    process.exit(currentExitCode)
+  })
+}
+
+function shortId(id: string): string {
+  // 260428-fit-opal -> fit-opal
+  const parts = id.split('-')
+  return parts.length >= 3 ? parts.slice(1).join('-') : id
+}
+
+function truncate(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n) + '…' : s
+}
+
+function prompt(question: string): Promise<string> {
+  return new Promise(async (resolve) => {
+    const readline = await import('node:readline')
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+    rl.question(question, (a) => { rl.close(); resolve(a) })
+  })
+}
+
 interface LocalServer {
   client: CliRpcClient
   stop: () => Promise<void>
@@ -1965,6 +2252,9 @@ Commands:
   session delete <id>    Delete a session
   send <id> <message>    Send message and stream AI response
                          --file <path> / -f      Attach a file (repeatable)
+  chat [id]              Interactive REPL bound to a session (alias: repl)
+                         Slash commands inside: /help /sessions /switch /new
+                                                /attach /files /clear /cancel /exit
   cancel <id>            Cancel in-progress processing
   invoke <channel> [...] Raw RPC call with JSON args
   listen <channel>       Subscribe to push events (Ctrl+C to stop)
@@ -2083,6 +2373,10 @@ export async function main(argv: string[] = process.argv): Promise<void> {
       case 'send':
         await cmdSend(client, args)
         break // cmdSend calls process.exit
+      case 'chat':
+      case 'repl':
+        await cmdChat(client, args)
+        break // cmdChat calls process.exit
       case 'cancel':
         await cmdCancel(client, args)
         break
