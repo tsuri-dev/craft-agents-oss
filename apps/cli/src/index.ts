@@ -825,6 +825,13 @@ async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
     process.stdout.write('\x1b[2mbye.\x1b[0m' + '\n')
     process.exit(currentExitCode)
   })
+
+  // Block cmdChat from resolving while the REPL is alive. Without this,
+  // cmdChat returns as soon as the rl handlers are attached, which lets
+  // main()'s `finally { client.destroy() }` run and destroy the client
+  // out from under us. The rl 'close' handler above is what eventually
+  // ends the process.
+  await new Promise<never>(() => {})
 }
 
 function shortId(id: string): string {
