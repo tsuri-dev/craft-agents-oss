@@ -38,6 +38,8 @@ export interface CliArgs {
   model: string
   apiKey: string
   baseUrl: string
+  // File attachments (for `send` / `run`)
+  files: string[]
 }
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -63,6 +65,7 @@ export function parseArgs(argv: string[]): CliArgs {
   let model = ''
   let apiKey = ''
   let baseUrl = ''
+  const files: string[] = []
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -126,6 +129,10 @@ export function parseArgs(argv: string[]): CliArgs {
       case '--base-url':
         baseUrl = args[++i] ?? ''
         break
+      case '--file':
+      case '-f':
+        files.push(args[++i] ?? '')
+        break
       case '--help':
       case '-h':
         command = 'help'
@@ -154,7 +161,7 @@ export function parseArgs(argv: string[]): CliArgs {
   if (!apiKey) apiKey = process.env.LLM_API_KEY ?? ''
   if (!baseUrl) baseUrl = process.env.LLM_BASE_URL ?? ''
 
-  return { url, token, workspace, timeout, json, tlsCa, sendTimeout, command, rest, sources, mode, outputFormat, noCleanup, noSpinner, verbose, serverEntry, workspaceDir, provider, model, apiKey, baseUrl }
+  return { url, token, workspace, timeout, json, tlsCa, sendTimeout, command, rest, sources, mode, outputFormat, noCleanup, noSpinner, verbose, serverEntry, workspaceDir, provider, model, apiKey, baseUrl, files }
 }
 
 // ---------------------------------------------------------------------------
@@ -404,6 +411,7 @@ async function sendAndStream(
   sessionId: string,
   message: string,
   args: CliArgs,
+  attachments?: import('@craft-agent/shared/utils/files').FileAttachment[],
 ): Promise<number> {
   let exitCode = 0
   let finished = false
@@ -452,7 +460,7 @@ async function sendAndStream(
     }
   })
 
-  await client.invoke('sessions:sendMessage', sessionId, message)
+  await client.invoke('sessions:sendMessage', sessionId, message, attachments)
 
   const deadline = Date.now() + args.sendTimeout
   while (!finished && Date.now() < deadline) {
@@ -472,18 +480,45 @@ async function sendAndStream(
 async function cmdSend(client: CliRpcClient, args: CliArgs): Promise<void> {
   const sessionId = args.rest[0]
   if (!sessionId) {
-    err('Usage: send <session-id> <message>')
+    err('Usage: send <session-id> <message> [--file <path>...]')
     process.exit(1)
   }
 
   const message = await readPrompt(args.rest.slice(1), args.rest)
-  if (!message.trim()) {
-    err('No message provided')
-    process.exit(1)
+
+  // Read file attachments (optional)
+  let attachments: import('@craft-agent/shared/utils/files').FileAttachment[] | undefined
+  if (args.files.length > 0) {
+    const { readFileAttachment } = await import('@craft-agent/shared/utils/files')
+    attachments = []
+    for (const f of args.files) {
+      try {
+        const att = readFileAttachment(f)
+        if (!att) {
+          err(`File not found or not a regular file: ${f}`)
+          process.exit(1)
+        }
+        attachments.push(att)
+      } catch (e) {
+        err(`Failed to read attachment ${f}: ${e instanceof Error ? e.message : String(e)}`)
+        process.exit(1)
+      }
+    }
+  }
+
+  // Allow empty message when attachments are provided (default to a placeholder)
+  let finalMessage = message
+  if (!finalMessage.trim()) {
+    if (attachments && attachments.length > 0) {
+      finalMessage = ''  // model will see attachments only
+    } else {
+      err('No message provided')
+      process.exit(1)
+    }
   }
 
   await client.connect()
-  const exitCode = await sendAndStream(client, sessionId, message, args)
+  const exitCode = await sendAndStream(client, sessionId, finalMessage, args, attachments)
   client.destroy()
   process.exit(exitCode)
 }
@@ -1929,6 +1964,7 @@ Commands:
   session messages <id>  Print session message history
   session delete <id>    Delete a session
   send <id> <message>    Send message and stream AI response
+                         --file <path> / -f      Attach a file (repeatable)
   cancel <id>            Cancel in-progress processing
   invoke <channel> [...] Raw RPC call with JSON args
   listen <channel>       Subscribe to push events (Ctrl+C to stop)
@@ -1947,6 +1983,7 @@ Examples:
   craft-cli ping
   craft-cli sessions
   craft-cli send abc-123 "What files are in the current directory?"
+  craft-cli send abc-123 "explain these" -f src/foo.ts -f src/bar.ts
   echo "Summarize this" | craft-cli send abc-123
   craft-cli --validate-server
   craft-cli invoke system:homeDir
