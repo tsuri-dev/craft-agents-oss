@@ -537,7 +537,24 @@ async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
   await client.connect()
   await resolveWorkspace(client, args.workspace)
 
+  // Helper: ensure the WS is still alive; if not, reconnect + rebind workspace
+  const ensureConnected = async (): Promise<void> => {
+    if (client.isConnected) return
+    process.stdout.write('\x1b[2m[reconnecting...]\x1b[0m\n')
+    await client.connect()
+    await resolveWorkspace(client, args.workspace)
+  }
+
+  // Keepalive: cheap RPC every 15s to keep the server's heartbeat happy
+  // (Bun's browser-style WebSocket does not always auto-pong)
+  const keepaliveTimer = setInterval(() => {
+    if (client.isConnected) {
+      client.invoke('server:getStatus').catch(() => {})
+    }
+  }, 15_000)
+
   const fetchSessions = async (): Promise<Array<{ id: string; name?: string; preview?: string; isProcessing?: boolean }>> => {
+    await ensureConnected()
     return (await client.invoke('sessions:get')) as Array<{ id: string; name?: string; preview?: string; isProcessing?: boolean }>
   }
 
@@ -772,6 +789,7 @@ async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
     queued = []
     const done = new Promise<void>((resolve) => { resolveDone = resolve })
     try {
+      await ensureConnected()
       await client.invoke('sessions:sendMessage', sessionId, line, attsToSend)
     } catch (e) {
       process.stdout.write(`\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m` + '\n')
@@ -788,6 +806,7 @@ async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
   })
 
   rl.on('close', () => {
+    clearInterval(keepaliveTimer)
     persistHistory()
     eventUnsub()
     client.destroy()
