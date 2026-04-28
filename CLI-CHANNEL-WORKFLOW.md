@@ -8,14 +8,29 @@
 ## Daily use
 
 ```bash
-# Sessions list
-craft-cli sessions
+# 🌟 Interactive REPL bound to a session (recommended)
+craft-cli chat                  # picks session interactively
+craft-cli chat <session-id>     # bind directly
+#   inside REPL:
+#     hello world                 -> sends a message, streams the reply
+#     /attach src/foo.ts          -> queues a file for the next message
+#     /files                      -> shows queued attachments
+#     /switch <id|number>         -> switch sessions without exiting
+#     /new my-task                -> create + switch
+#     /sessions                   -> list recent sessions
+#     /history 20                 -> show last 20 messages
+#     /cancel                     -> cancel in-progress processing
+#     /exit                       -> quit (or Ctrl-D)
+#   Ctrl-C while streaming -> cancel current turn, stay in REPL
 
-# Send message + files to existing session
+# One-shot send
 craft-cli send <session-id> "explain these" -f src/foo.ts -f src/bar.ts
 
 # Pipe stdin
 echo "summarize" | craft-cli send <session-id> -f some-file.md
+
+# List sessions
+craft-cli sessions
 ```
 
 Connection env vars (set in `~/.zshrc`):
@@ -67,12 +82,15 @@ grep -A3 serverConfig ~/.craft-agent/config.json | grep token
 
 ## What's actually patched
 
-Single file, single commit on `cli-channel`:
+Two commits on `cli-channel`, both in `apps/cli/src/index.ts`:
 
-- `apps/cli/src/index.ts` — adds `--file/-f` flag to `send` command.
-  Reads each path via `@craft-agent/shared/utils/files.readFileAttachment`
-  and forwards the resulting `FileAttachment[]` as the third arg to
-  `sessions:sendMessage` RPC.
+1. **`--file/-f` for `send`** — reads each path via
+   `@craft-agent/shared/utils/files.readFileAttachment` and forwards the
+   resulting `FileAttachment[]` as the third arg to `sessions:sendMessage`.
+
+2. **`chat` / `repl` interactive REPL** — readline loop bound to one session,
+   slash commands for switching/attaching/listing, persistent history at
+   `~/.craft-cli-history`.
 
 Rebase risk: very low. Only conflicts if upstream changes:
 
