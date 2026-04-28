@@ -537,10 +537,14 @@ async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
   await client.connect()
   await resolveWorkspace(client, args.workspace)
 
+  const fetchSessions = async (): Promise<Array<{ id: string; name?: string; preview?: string; isProcessing?: boolean }>> => {
+    return (await client.invoke('sessions:get')) as Array<{ id: string; name?: string; preview?: string; isProcessing?: boolean }>
+  }
+
   // Resolve initial session id: arg > pick from list > create new
   let sessionId = args.rest[0]
   if (!sessionId) {
-    const sessions = (await client.invoke('sessions:list')) as Array<{ id: string; name?: string; preview?: string; isProcessing?: boolean }>
+    const sessions = await fetchSessions()
     if (!sessions.length) {
       process.stdout.write('No sessions yet. Create one in the desktop app first, or run: craft-cli session create --name <name>' + '\n')
       client.destroy()
@@ -682,7 +686,7 @@ async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
   /exit  /quit                Exit (or Ctrl-D)\x1b[0m` + '\n')
             break
           case 'sessions': {
-            const list = (await client.invoke('sessions:list')) as Array<{ id: string; name?: string; preview?: string; isProcessing?: boolean }>
+            const list = await fetchSessions()
             list.slice(0, 20).forEach((s, i) => {
               const here = s.id === sessionId ? '\x1b[32m●\x1b[0m' : ' '
               const tag = s.isProcessing ? ' [processing]' : ''
@@ -692,7 +696,7 @@ async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
           }
           case 'switch': {
             if (!argLine) { process.stdout.write('Usage: /switch <id|number>' + '\n'); break }
-            const list = (await client.invoke('sessions:list')) as Array<{ id: string }>
+            const list = await fetchSessions()
             const asNum = parseInt(argLine, 10)
             const target = (!isNaN(asNum) && list[asNum - 1]) ? list[asNum - 1]!.id : argLine
             sessionId = target
@@ -738,7 +742,7 @@ async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
             break
           case 'history': {
             const n = parseInt(argLine, 10) || 10
-            const info = (await client.invoke('sessions:get', sessionId)) as { messages?: Array<{ role: string; content: string }> }
+            const info = (await client.invoke('sessions:getMessages', sessionId)) as { messages?: Array<{ role: string; content: string }> }
             const msgs = (info.messages ?? []).slice(-n)
             for (const m of msgs) {
               const tag = m.role === 'user' ? '\x1b[36muser\x1b[0m' : m.role === 'assistant' ? '\x1b[32massistant\x1b[0m' : `\x1b[31m${m.role}\x1b[0m`
