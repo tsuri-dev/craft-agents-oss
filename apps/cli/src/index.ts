@@ -558,28 +558,50 @@ async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
     return (await client.invoke('sessions:get')) as Array<{ id: string; name?: string; preview?: string; isProcessing?: boolean }>
   }
 
+  // Read history (load before creating rl so it can pre-populate)
+  const histPath = path.join(os.homedir(), '.craft-cli-history')
+  let history: string[] = []
+  try { history = fs.readFileSync(histPath, 'utf8').split('\n').filter(Boolean).slice(-500) } catch {}
+
+  // Create the readline ONCE; we use rl.question() for the picker too.
+  // (Do NOT spin up a throwaway readline for the picker — closing it
+  // ends stdin, which then synthetically closes the main rl and triggers
+  // client.destroy(). That's why early versions reported 'Client destroyed'
+  // on the first message after picking.)
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: true,
+    history: history.slice().reverse(),
+    historySize: 500,
+    prompt: '',
+  })
+  const askOnce = (q: string): Promise<string> =>
+    new Promise((resolve) => rl.question(q, (a) => resolve(a)))
+
   // Resolve initial session id: arg > pick from list > create new
   let sessionId = args.rest[0]
   if (!sessionId) {
     const sessions = await fetchSessions()
     if (!sessions.length) {
-      process.stdout.write('No sessions yet. Create one in the desktop app first, or run: craft-cli session create --name <name>' + '\n')
+      process.stdout.write('No sessions yet. Create one in the desktop app first, or run: craft-cli session create --name <name>\n')
+      rl.close()
       client.destroy()
       process.exit(1)
     }
-    process.stdout.write('Pick a session:' + '\n')
+    process.stdout.write('Pick a session:\n')
     sessions.slice(0, 30).forEach((s, i) => {
       const tag = s.isProcessing ? ' [processing]' : ''
-      process.stdout.write(`  [${String(i + 1).padStart(2)}] ${s.id}  ${s.name ?? ''}  ${truncate(s.preview ?? '', 50)}${tag}` + '\n')
+      process.stdout.write(`  [${String(i + 1).padStart(2)}] ${s.id}  ${s.name ?? ''}  ${truncate(s.preview ?? '', 50)}${tag}\n`)
     })
-    const ans = await prompt('Number (or session-id): ')
-    const trimmed = ans.trim()
-    const asNum = parseInt(trimmed, 10)
+    const ans = (await askOnce('Number (or session-id): ')).trim()
+    const asNum = parseInt(ans, 10)
     if (!isNaN(asNum) && asNum >= 1 && asNum <= sessions.length) {
       sessionId = sessions[asNum - 1]!.id
-    } else if (trimmed) {
-      sessionId = trimmed
+    } else if (ans) {
+      sessionId = ans
     } else {
+      rl.close()
       client.destroy()
       process.exit(0)
     }
@@ -631,18 +653,8 @@ async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
     }
   })
 
-  const histPath = path.join(os.homedir(), '.craft-cli-history')
-  let history: string[] = []
-  try { history = fs.readFileSync(histPath, 'utf8').split('\n').filter(Boolean).slice(-500) } catch {}
-
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    terminal: true,
-    history: history.slice().reverse(),
-    historySize: 500,
-    prompt: '',
-  })
+  const histPath2 = histPath  // already defined above; keep symbol stable
+  void histPath2
 
   const setPrompt = () => {
     const tag = queued.length ? `\x1b[36m[+${queued.length}]\x1b[0m ` : ''
@@ -825,12 +837,9 @@ function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + '…' : s
 }
 
-function prompt(question: string): Promise<string> {
-  return new Promise(async (resolve) => {
-    const readline = await import('node:readline')
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-    rl.question(question, (a) => { rl.close(); resolve(a) })
-  })
+function prompt(_question: string): Promise<string> {
+  // Deprecated. cmdChat uses its own rl.question() so it shares one readline.
+  return Promise.resolve('')
 }
 
 interface LocalServer {
