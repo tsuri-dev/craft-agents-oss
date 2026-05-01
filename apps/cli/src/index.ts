@@ -527,6 +527,21 @@ async function cmdSend(client: CliRpcClient, args: CliArgs): Promise<void> {
 // Interactive chat REPL
 // ---------------------------------------------------------------------------
 
+export type ChatLaunchRequest =
+  | { kind: 'pick' }
+  | { kind: 'new'; name?: string }
+  | { kind: 'existing'; sessionId: string }
+
+export function parseChatLaunchArgs(rest: string[]): ChatLaunchRequest {
+  const first = rest[0]
+  if (!first) return { kind: 'pick' }
+  if (first === 'new') {
+    const name = rest.slice(1).join(' ').trim()
+    return name ? { kind: 'new', name } : { kind: 'new' }
+  }
+  return { kind: 'existing', sessionId: first }
+}
+
 async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
   const readline = await import('node:readline')
   const path = await import('node:path')
@@ -535,14 +550,14 @@ async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
   const { readFileAttachment } = await import('@craft-agent/shared/utils/files')
 
   await client.connect()
-  await resolveWorkspace(client, args.workspace)
+  let currentWorkspaceId = await resolveWorkspace(client, args.workspace)
 
   // Helper: ensure the WS is still alive; if not, reconnect + rebind workspace
   const ensureConnected = async (): Promise<void> => {
     if (client.isConnected) return
     process.stdout.write('\x1b[2m[reconnecting...]\x1b[0m\n')
     await client.connect()
-    await resolveWorkspace(client, args.workspace)
+    currentWorkspaceId = await resolveWorkspace(client, args.workspace)
   }
 
   // Keepalive: cheap RPC every 15s to keep the server's heartbeat happy
@@ -579,9 +594,22 @@ async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
   const askOnce = (q: string): Promise<string> =>
     new Promise((resolve) => rl.question(q, (a) => resolve(a)))
 
-  // Resolve initial session id: arg > pick from list > create new
-  let sessionId = args.rest[0]
-  if (!sessionId) {
+  // Resolve initial session id: new > explicit id > pick from list
+  const launch = parseChatLaunchArgs(args.rest)
+  let sessionId: string | undefined
+  if (launch.kind === 'new') {
+    const wsId = currentWorkspaceId ?? await resolveWorkspace(client, args.workspace)
+    if (!wsId) {
+      process.stdout.write('No workspace available. Use --workspace <id>\n')
+      rl.close()
+      client.destroy()
+      process.exit(1)
+    }
+    const created = (await client.invoke('sessions:create', wsId, { name: launch.name })) as { id: string }
+    sessionId = created.id
+  } else if (launch.kind === 'existing') {
+    sessionId = launch.sessionId
+  } else {
     const sessions = await fetchSessions()
     if (!sessions.length) {
       process.stdout.write('No sessions yet. Create one in the desktop app first, or run: craft-cli session create --name <name>\n')
@@ -734,7 +762,7 @@ async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
             break
           }
           case 'new': {
-            const wsId = await resolveWorkspace(client)
+            const wsId = currentWorkspaceId ?? await resolveWorkspace(client, args.workspace)
             if (!wsId) { process.stdout.write('No workspace available' + '\n'); break }
             const created = (await client.invoke('sessions:create', wsId, { name: argLine || undefined })) as { id: string }
             sessionId = created.id
@@ -2291,7 +2319,9 @@ Commands:
   session delete <id>    Delete a session
   send <id> <message>    Send message and stream AI response
                          --file <path> / -f      Attach a file (repeatable)
-  chat [id]              Interactive REPL bound to a session (alias: repl)
+  chat                   Pick an existing session and enter REPL (alias: repl)
+  chat <id>              Enter REPL bound to an existing session
+  chat new [name]        Create a new session and enter REPL
                          Slash commands inside: /help /sessions /switch /new
                                                 /attach /files /clear /cancel /exit
   cancel <id>            Cancel in-progress processing
@@ -2313,6 +2343,7 @@ Examples:
   craft-cli sessions
   craft-cli send abc-123 "What files are in the current directory?"
   craft-cli send abc-123 "explain these" -f src/foo.ts -f src/bar.ts
+  craft-cli chat new "scratch task"
   echo "Summarize this" | craft-cli send abc-123
   craft-cli --validate-server
   craft-cli invoke system:homeDir
