@@ -289,6 +289,9 @@ For TLS connections (`wss://`), use `--tls-ca <path>` for self-signed certificat
 | `session messages <id>` | Print session message history |
 | `session delete <id>` | Delete a session |
 | `send <id> <message>` | Send message and stream AI response |
+| `chat` | Pick an existing session and enter an interactive REPL |
+| `chat <id>` | Enter an existing session directly |
+| `chat new [name]` | Create a new session and enter an interactive REPL |
 | `cancel <id>` | Cancel in-progress processing |
 | `invoke <channel> [args]` | Raw RPC call with JSON args |
 | `listen <channel>` | Subscribe to push events (Ctrl+C to stop) |
@@ -323,6 +326,9 @@ craft-cli sessions
 
 # Send a message and stream the AI response
 craft-cli send abc-123 "What files are in the current directory?"
+
+# Start a new interactive chat
+craft-cli chat new "scratch task"
 
 # Pipe input
 echo "Summarize this" | craft-cli send abc-123

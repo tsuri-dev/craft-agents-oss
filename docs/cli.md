@@ -98,6 +98,16 @@ The `send` command subscribes to session events and streams them to stdout:
 - `complete` — exit code 0
 - `interrupted` — exit code 130
 
+### Interactive Chat REPL
+
+```bash
+craft-cli chat                  # Pick an existing session
+craft-cli chat <session-id>     # Enter an existing session directly
+craft-cli chat new [name]       # Create a new session and enter it
+```
+
+Inside the REPL, use `/sessions`, `/switch`, `/new`, `/attach`, `/files`, `/history`, `/cancel`, and `/exit`.
+
 ### Power User
 
 ```bash

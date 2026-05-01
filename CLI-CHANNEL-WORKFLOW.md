@@ -11,6 +11,8 @@
 # 🌟 Interactive REPL bound to a session (recommended)
 craft-cli chat                  # picks session interactively
 craft-cli chat <session-id>     # bind directly
+craft-cli chat new              # create a new session and enter it
+craft-cli chat new my-task      # create a named session and enter it
 #   inside REPL:
 #     hello world                 -> sends a message, streams the reply
 #     /attach src/foo.ts          -> queues a file for the next message
@@ -82,7 +84,7 @@ grep -A3 serverConfig ~/.craft-agent/config.json | grep token
 
 ## What's actually patched
 
-Two commits on `cli-channel`, both in `apps/cli/src/index.ts`:
+Custom patches on `cli-channel` include:
 
 1. **`--file/-f` for `send`** — reads each path via
    `@craft-agent/shared/utils/files.readFileAttachment` and forwards the
@@ -90,7 +92,7 @@ Two commits on `cli-channel`, both in `apps/cli/src/index.ts`:
 
 2. **`chat` / `repl` interactive REPL** — readline loop bound to one session,
    slash commands for switching/attaching/listing, persistent history at
-   `~/.craft-cli-history`.
+   `~/.craft-cli-history`, plus `chat new [name]` for creating a fresh session.
 
 Rebase risk: very low. Only conflicts if upstream changes:
 

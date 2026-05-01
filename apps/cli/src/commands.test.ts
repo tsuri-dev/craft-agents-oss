@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { parseArgs, resolveApiKey, shouldSetupLlmConnection } from './index.ts'
+import { parseArgs, parseChatLaunchArgs, resolveApiKey, shouldSetupLlmConnection } from './index.ts'
 
 // ---------------------------------------------------------------------------
 // Arg parsing tests
@@ -122,6 +122,52 @@ describe('parseArgs', () => {
     ])
     expect(args.command).toBe('send')
     expect(args.rest).toEqual(['sess-123', 'What', 'files', 'are', 'here?'])
+  })
+
+  it('parses chat new as a create-new-session request', () => {
+    const args = parseArgs([
+      'bun', 'index.ts',
+      'chat', 'new', 'my', 'task',
+    ])
+
+    expect(parseChatLaunchArgs(args.rest)).toEqual({
+      kind: 'new',
+      name: 'my task',
+    })
+  })
+
+  it('parses chat new without a name as an unnamed create-new-session request', () => {
+    const args = parseArgs([
+      'bun', 'index.ts',
+      'chat', 'new',
+    ])
+
+    expect(parseChatLaunchArgs(args.rest)).toEqual({
+      kind: 'new',
+    })
+  })
+
+  it('parses chat without args as a pick-existing-session request', () => {
+    const args = parseArgs([
+      'bun', 'index.ts',
+      'chat',
+    ])
+
+    expect(parseChatLaunchArgs(args.rest)).toEqual({
+      kind: 'pick',
+    })
+  })
+
+  it('parses chat session id as an existing-session request', () => {
+    const args = parseArgs([
+      'bun', 'index.ts',
+      'chat', '260429-fit-opal',
+    ])
+
+    expect(parseChatLaunchArgs(args.rest)).toEqual({
+      kind: 'existing',
+      sessionId: '260429-fit-opal',
+    })
   })
 
   it('parses invoke with channel and JSON args', () => {
