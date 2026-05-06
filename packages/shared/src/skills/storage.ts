@@ -32,6 +32,16 @@ import {
 /** Global agent skills directory: ~/.agents/skills/ */
 export const GLOBAL_AGENT_SKILLS_DIR = join(homedir(), '.agents', 'skills');
 
+/**
+ * Resolve the global skills directory.
+ * CRAFT_GLOBAL_SKILLS_DIR is useful for dev/local builds that need a readable
+ * mirror instead of the default ~/.agents/skills path.
+ */
+export function getGlobalAgentSkillsDir(): string {
+  const configured = process.env.CRAFT_GLOBAL_SKILLS_DIR?.trim();
+  return configured || GLOBAL_AGENT_SKILLS_DIR;
+}
+
 /** Project-level agent skills relative directory name */
 export const PROJECT_AGENT_SKILLS_DIR = '.agents/skills';
 
@@ -224,7 +234,7 @@ export function loadAllSkills(workspaceRoot: string, projectRoot?: string): Load
   const skillsBySlug = new Map<string, LoadedSkill>();
 
   // 1. Global skills (lowest priority): ~/.agents/skills/
-  for (const skill of loadSkillsFromDir(GLOBAL_AGENT_SKILLS_DIR, 'global')) {
+  for (const skill of loadSkillsFromDir(getGlobalAgentSkillsDir(), 'global')) {
     skillsBySlug.set(skill.slug, skill);
   }
 
@@ -267,7 +277,7 @@ export function loadSkillBySlug(workspaceRoot: string, slug: string, projectRoot
   if (workspaceSkill) return workspaceSkill;
 
   // Lowest priority: global
-  return loadSkillFromDir(GLOBAL_AGENT_SKILLS_DIR, slug, 'global');
+  return loadSkillFromDir(getGlobalAgentSkillsDir(), slug, 'global');
 }
 
 /**

@@ -528,6 +528,7 @@ export async function updateSessionMetadata(
     | 'isFlagged'
     | 'name'
     | 'sessionStatus'
+    | 'boardPosition'
     | 'labels'
     | 'lastReadMessageId'
     | 'hasUnread'
@@ -549,6 +550,7 @@ export async function updateSessionMetadata(
   if (updates.isFlagged !== undefined) session.isFlagged = updates.isFlagged;
   if (updates.name !== undefined) session.name = updates.name;
   if (updates.sessionStatus !== undefined) session.sessionStatus = updates.sessionStatus;
+  if (updates.boardPosition !== undefined) session.boardPosition = updates.boardPosition;
   if (updates.labels !== undefined) session.labels = updates.labels;
   if (updates.enabledSourceSlugs !== undefined) session.enabledSourceSlugs = updates.enabledSourceSlugs;
   if (updates.workingDirectory !== undefined) session.workingDirectory = updates.workingDirectory;
@@ -589,6 +591,17 @@ export async function setSessionStatus(
   sessionStatus: SessionStatus
 ): Promise<void> {
   await updateSessionMetadata(workspaceRootPath, sessionId, { sessionStatus });
+}
+
+/**
+ * Set board position for a session
+ */
+export async function setSessionBoardPosition(
+  workspaceRootPath: string,
+  sessionId: string,
+  boardPosition: number
+): Promise<void> {
+  await updateSessionMetadata(workspaceRootPath, sessionId, { boardPosition });
 }
 
 /**

@@ -27,6 +27,7 @@ export interface Session {
   isArchived?: boolean;          // Whether this session is archived
   isFlagged?: boolean;           // Whether this session is flagged
   status?: SessionStatus;        // Workflow status (todo, in_progress, needs_review, done, cancelled)
+  boardPosition?: number;        // Manual board ordering within a status column
   // Read/unread tracking
   lastReadMessageId?: string;    // ID of the last message the user has read
 }
@@ -56,5 +57,6 @@ export interface SessionMetadata {
   isArchived?: boolean;    // Whether this session is archived
   isFlagged?: boolean;     // Whether this session is flagged
   status?: SessionStatus;  // Workflow status
+  boardPosition?: number;  // Manual board ordering within a status column
   hidden?: boolean;        // Whether this session is hidden from session list
 }

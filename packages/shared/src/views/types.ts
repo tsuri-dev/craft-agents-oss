@@ -35,6 +35,12 @@ export interface ViewConfig {
    * @example "daysSince(lastUsedAt) > 7"
    */
   expression: string;
+
+  /** Preferred session navigator display mode when opening this view. */
+  displayMode?: 'list' | 'board';
+
+  /** Preferred board grouping for this view. */
+  boardGroupBy?: 'status' | 'label' | 'recent';
 }
 
 /**

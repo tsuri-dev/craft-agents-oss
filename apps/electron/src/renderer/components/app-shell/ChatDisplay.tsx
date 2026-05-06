@@ -74,6 +74,11 @@ import { CHAT_LAYOUT } from "@/config/layout"
 import { collectFileChangesFromActivities, getFirstFileChangeIdForActivity } from "@/lib/file-changes"
 import { resolveBranchNewPanelOption } from "./branching"
 import { handleErrorMessageAction } from "./error-message-actions"
+import {
+  BranchContinueDialog,
+  type BranchContinueSelection,
+} from "./BranchContinueDialog"
+import { buildHandoffDraftInstruction, buildHandoffPackageMarkdown } from "./branch-handoff"
 
 // ============================================================================
 // CSS Custom Highlight API helper
@@ -534,6 +539,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     nonce: number
   } | null>(null)
   const followUpOpenNonceRef = React.useRef(0)
+  const [branchDialogState, setBranchDialogState] = React.useState<{
+    messageId: string
+    options?: { newPanel?: boolean }
+  } | null>(null)
 
   // Navigation for session branching
   const { navigate } = useNavigation()
@@ -558,6 +567,56 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const { tasks: backgroundTasks, killTask } = useBackgroundTasks({
     sessionId: session?.id ?? ''
   })
+
+  const handleBranchContinueConfirm = React.useCallback(async (selection: BranchContinueSelection) => {
+    if (!session || !branchDialogState) return
+    try {
+      const openInNewPanel = resolveBranchNewPanelOption(branchDialogState.options)
+      if (selection.mode === "exact") {
+        const child = await appShellContext.onCreateSession(
+          session.workspaceId,
+          {
+            branchFromMessageId: branchDialogState.messageId,
+            branchFromSessionId: session.id,
+            name: `Branch of ${session.name || 'Untitled'}`,
+            llmConnection: selection.connection || session.llmConnection,
+            permissionMode: session.permissionMode,
+            workingDirectory: session.workingDirectory,
+            enabledSourceSlugs: session.enabledSourceSlugs,
+          }
+        )
+        navigate(routes.view.allSessions(child.id), { newPanel: openInNewPanel })
+      } else {
+        const handoffPackage = buildHandoffPackageMarkdown({
+          session,
+          branchMessageId: branchDialogState.messageId,
+        })
+        const child = await appShellContext.onCreateSession(
+          session.workspaceId,
+          {
+            name: `Handoff of ${session.name || 'Untitled'}`,
+            llmConnection: selection.connection,
+            permissionMode: 'safe',
+            workingDirectory: session.workingDirectory,
+            enabledSourceSlugs: session.enabledSourceSlugs,
+          }
+        )
+        await window.electronAPI.setSessionNotes(child.id, handoffPackage)
+        const pathResult = await window.electronAPI.sessionCommand(child.id, { type: 'copyPath' }) as { success?: boolean; path?: string } | undefined
+        const handoffPath = pathResult?.success && pathResult.path ? `${pathResult.path}/notes.md` : undefined
+        appShellContext.onInputChange(child.id, buildHandoffDraftInstruction(handoffPath))
+        navigate(routes.view.allSessions(child.id), { newPanel: openInNewPanel })
+      }
+      setBranchDialogState(null)
+    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : 'Failed to create branch'
+      const message = rawMessage.includes('source and target providers must match')
+        || rawMessage.includes('same provider/backend')
+        ? 'Branching is only supported within the same provider/backend. Use Handoff package to continue with another provider.'
+        : rawMessage
+      toast.error(t('toast.couldNotCreateBranch'), { description: message })
+    }
+  }, [appShellContext, branchDialogState, navigate, session, t])
 
   // TurnCard expansion state — persisted to localStorage across session switches
   const {
@@ -1714,32 +1773,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         compactMode={compactMode}
                         sendMessageKey={sendMessageKey}
                         openAnnotationRequest={openAnnotationRequest}
-                        onBranch={session?.supportsBranching ? async (messageId: string, options?: { newPanel?: boolean }) => {
-                          if (!session) return
-                          try {
-                            const child = await appShellContext.onCreateSession(
-                              session.workspaceId,
-                              {
-                                branchFromMessageId: messageId,
-                                branchFromSessionId: session.id,
-                                name: `Branch of ${session.name || 'Untitled'}`,
-                                // Keep branch on the same backend/provider by inheriting parent session settings.
-                                llmConnection: session.llmConnection,
-                                model: session.model,
-                                permissionMode: session.permissionMode,
-                                workingDirectory: session.workingDirectory,
-                                enabledSourceSlugs: session.enabledSourceSlugs,
-                              }
-                            )
-                            navigate(routes.view.allSessions(child.id), { newPanel: resolveBranchNewPanelOption(options) })
-                          } catch (error) {
-                            const rawMessage = error instanceof Error ? error.message : 'Failed to create branch'
-                            const message = rawMessage.includes('source and target providers must match')
-                              || rawMessage.includes('same provider/backend')
-                              ? 'Branching is only supported within the same provider/backend. Switch this panel connection and try again.'
-                              : rawMessage
-                            toast.error(t('toast.couldNotCreateBranch'), { description: message })
-                          }
+                        onBranch={session?.supportsBranching ? (messageId: string, options?: { newPanel?: boolean }) => {
+                          setBranchDialogState({ messageId, options })
                         } : undefined}
                         onAddAnnotation={async (messageId, annotation) => {
                           if (!session) return
@@ -1959,6 +1994,18 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           </div>
         </div>
       ) : null}
+
+      <BranchContinueDialog
+        open={!!branchDialogState}
+        session={session}
+        branchMessageId={branchDialogState?.messageId ?? null}
+        llmConnections={appShellContext.llmConnections}
+        workspaceDefaultLlmConnection={appShellContext.workspaceDefaultLlmConnection}
+        onOpenChange={(open) => {
+          if (!open) setBranchDialogState(null)
+        }}
+        onConfirm={handleBranchContinueConfirm}
+      />
 
       {/* ================================================================== */}
       {/* Preview Overlays - Rendered outside the main chat flow            */}

@@ -312,6 +312,8 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
         return sessionManager.renameSession(sessionId, command.name)
       case 'setSessionStatus':
         return sessionManager.setSessionStatus(sessionId, command.state)
+      case 'setBoardPosition':
+        return sessionManager.setSessionBoardPosition(sessionId, command.position)
       case 'markRead':
         return sessionManager.markSessionRead(sessionId)
       case 'markUnread':

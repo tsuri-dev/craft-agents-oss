@@ -649,6 +649,31 @@ export function SessionList({
     sessionOptions, contentSearchResults, activeChatMatchInfo, hasPendingPrompt,
   ])
 
+  const listHeader = (
+    <>
+      {searchActive && (
+        <SessionSearchHeader
+          searchQuery={searchQuery}
+          onSearchChange={onSearchChange}
+          onSearchClose={onSearchClose}
+          onKeyDown={handleSearchKeyDown}
+          onFocus={() => setIsSearchInputFocused(true)}
+          onBlur={() => setIsSearchInputFocused(false)}
+          isSearching={isSearchingContent}
+          isUnavailable={isSearchUnavailable}
+          resultCount={matchingFilterItems.length + otherResultItems.length}
+          exceededLimit={exceededSearchLimit}
+          inputRef={searchInputRef}
+        />
+      )}
+      {isSearchMode && matchingFilterItems.length === 0 && otherResultItems.length > 0 && (
+        <div className="px-4 py-3 text-sm text-muted-foreground">
+          {t("session.noResultsInFilter")}
+        </div>
+      )}
+    </>
+  )
+
   // --- Empty state (non-search) — render before EntityList ---
   // Don't show empty state when there are collapsed groups with content
   if (flatRows.length === 0 && rowData.groups.length === 0 && !searchActive) {
@@ -710,28 +735,7 @@ export function SessionList({
           )
         }}
         header={
-          <>
-            {searchActive && (
-              <SessionSearchHeader
-                searchQuery={searchQuery}
-                onSearchChange={onSearchChange}
-                onSearchClose={onSearchClose}
-                onKeyDown={handleSearchKeyDown}
-                onFocus={() => setIsSearchInputFocused(true)}
-                onBlur={() => setIsSearchInputFocused(false)}
-                isSearching={isSearchingContent}
-                isUnavailable={isSearchUnavailable}
-                resultCount={matchingFilterItems.length + otherResultItems.length}
-                exceededLimit={exceededSearchLimit}
-                inputRef={searchInputRef}
-              />
-            )}
-            {isSearchMode && matchingFilterItems.length === 0 && otherResultItems.length > 0 && (
-              <div className="px-4 py-3 text-sm text-muted-foreground">
-                {t("session.noResultsInFilter")}
-              </div>
-            )}
-          </>
+          listHeader
         }
         emptyState={
           isSearchMode && !isSearchingContent ? (

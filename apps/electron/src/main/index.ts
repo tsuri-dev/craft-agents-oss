@@ -203,6 +203,18 @@ let messagingHandle: MessagingBootstrapHandle | null = null
 // Store pending deep link if app not ready yet (cold start)
 let pendingDeepLink: string | null = null
 
+function createWindowForLastFocusedWorkspace(): void {
+  if (!windowManager) return
+
+  const workspaces = getWorkspaces()
+  if (workspaces.length === 0) return
+
+  const savedState = loadWindowState()
+  const wsId = savedState?.lastFocusedWorkspaceId || workspaces[0].id
+  const workspaceId = workspaces.some(ws => ws.id === wsId) ? wsId : workspaces[0].id
+  windowManager.createWindow({ workspaceId })
+}
+
 // Set app name early (before app.whenReady) to ensure correct macOS menu bar title
 // Supports multi-instance dev: CRAFT_APP_NAME env var (e.g., "Craft Agents [1]")
 app.setName(process.env.CRAFT_APP_NAME || 'Craft Agents')
@@ -300,6 +312,8 @@ if (!gotTheLock) {
         const win = windows[0].window
         if (win.isMinimized()) win.restore()
         win.focus()
+      } else {
+        createWindowForLastFocusedWorkspace()
       }
     }
   })
@@ -1076,18 +1090,7 @@ app.whenReady().then(async () => {
   // macOS: Re-create window when dock icon is clicked
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0 && windowManager) {
-      // Open first workspace or last focused
-      const workspaces = getWorkspaces()
-      if (workspaces.length > 0) {
-        const savedState = loadWindowState()
-        const wsId = savedState?.lastFocusedWorkspaceId || workspaces[0].id
-        // Verify workspace still exists
-        if (workspaces.some(ws => ws.id === wsId)) {
-          windowManager.createWindow({ workspaceId: wsId })
-        } else {
-          windowManager.createWindow({ workspaceId: workspaces[0].id })
-        }
-      }
+      createWindowForLastFocusedWorkspace()
     }
   })
 })

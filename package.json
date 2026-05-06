@@ -64,6 +64,7 @@
     "electron:build": "bun run electron:build:main && bun run electron:build:preload && bun run electron:build:renderer && bun run electron:build:resources && bun run electron:build:assets",
     "electron:start": "bun run electron:build && electron apps/electron",
     "electron:dev": "bun run scripts/electron-dev.ts",
+    "dev:iso": "CRAFT_CONFIG_DIR=$HOME/.craft-agent-dev CRAFT_APP_NAME='Craft Agents Dev' CRAFT_VITE_PORT=5173 bun run electron:dev",
     "electron:dev:terminal": "bun run scripts/electron-dev.ts --terminal",
     "electron:dev:menu": "bash scripts/electron-dev.sh",
     "electron:dev:logs": "pgrep -f 'tail -f.*@craft-agent/electron/main.log' > /dev/null || osascript -e \"tell application \\\"Terminal\\\" to do script \\\"$PWD/scripts/tail-electron-logs.sh\\\"\"",

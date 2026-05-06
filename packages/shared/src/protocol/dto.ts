@@ -57,6 +57,7 @@ export interface Session {
   /** Permission mode for this session ('safe', 'ask', 'allow-all') */
   permissionMode?: PermissionMode
   sessionStatus?: SessionStatus
+  boardPosition?: number
   /** Labels (additive tags, many-per-session — bare IDs or "id::value" entries) */
   labels?: string[]
   lastReadMessageId?: string
@@ -199,6 +200,7 @@ export type SessionEvent =
   | { type: 'name_changed'; sessionId: string; name?: string }
   | { type: 'session_model_changed'; sessionId: string; model: string | null }
   | { type: 'session_status_changed'; sessionId: string; sessionStatus: SessionStatus }
+  | { type: 'session_board_position_changed'; sessionId: string; boardPosition: number }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_created'; sessionId: string }
   | { type: 'session_shared'; sessionId: string; sharedUrl: string }
@@ -227,6 +229,7 @@ export type SessionCommand =
   | { type: 'unarchive' }
   | { type: 'rename'; name: string }
   | { type: 'setSessionStatus'; state: SessionStatus }
+  | { type: 'setBoardPosition'; position: number }
   | { type: 'markRead' }
   | { type: 'markUnread' }
   | { type: 'setActiveViewing'; workspaceId: string }
