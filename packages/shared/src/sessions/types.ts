@@ -29,7 +29,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   // Timestamps
   'createdAt', 'lastUsedAt', 'lastMessageAt',
   // Display
-  'name', 'isFlagged', 'sessionStatus', 'labels', 'hidden',
+  'name', 'isFlagged', 'sessionStatus', 'boardPosition', 'labels', 'hidden',
   // Read tracking
   'lastReadMessageId', 'hasUnread',
   // Config
@@ -117,6 +117,8 @@ export interface SessionConfig {
   previousPermissionMode?: PermissionMode;
   /** User-controlled session status - determines inbox vs completed */
   sessionStatus?: SessionStatus;
+  /** Manual board ordering within a session status column. */
+  boardPosition?: number;
   /** Labels applied to this session (bare IDs or "id::value" entries) */
   labels?: string[];
   /** ID of last message user has read */
@@ -233,6 +235,8 @@ export interface SessionHeader {
   previousPermissionMode?: PermissionMode;
   /** User-controlled session status - determines inbox vs completed */
   sessionStatus?: SessionStatus;
+  /** Manual board ordering within a session status column. */
+  boardPosition?: number;
   /** Labels applied to this session (bare IDs or "id::value" entries) */
   labels?: string[];
   /** ID of last message user has read */
@@ -320,6 +324,8 @@ export interface SessionMetadata {
   isFlagged?: boolean;
   /** User-controlled session status */
   sessionStatus?: SessionStatus;
+  /** Manual board ordering within a session status column. */
+  boardPosition?: number;
   /** Labels applied to this session (bare IDs or "id::value" entries) */
   labels?: string[];
   /** Permission mode for this session */

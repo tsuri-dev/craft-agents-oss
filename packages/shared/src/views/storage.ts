@@ -16,6 +16,8 @@ import { debug } from '../utils/debug.ts';
 import { readJsonFileSync } from '../utils/files.ts';
 
 const VIEWS_FILE = 'views.json';
+const VIEWS_CONFIG_VERSION = 2;
+const RECENT_SEVEN_DAYS_VIEW_ID = 'view-recent-7-days';
 
 /**
  * Views configuration file structure.
@@ -45,7 +47,7 @@ export function loadViewsConfig(workspaceRootPath: string): ViewsConfig {
     }
 
     // No legacy data — seed with defaults
-    const defaults: ViewsConfig = { version: 1, views: getDefaultViews() };
+    const defaults: ViewsConfig = { version: VIEWS_CONFIG_VERSION, views: getDefaultViews() };
     debug('[loadViewsConfig] No config found, seeding with default views');
     saveViewsConfig(workspaceRootPath, defaults);
     return defaults;
@@ -53,10 +55,10 @@ export function loadViewsConfig(workspaceRootPath: string): ViewsConfig {
 
   try {
     const config = readJsonFileSync<ViewsConfig>(configPath);
-    return config;
+    return migrateViewsConfig(workspaceRootPath, config);
   } catch (error) {
     debug('[loadViewsConfig] Failed to parse config:', error);
-    return { version: 1, views: getDefaultViews() };
+    return { version: VIEWS_CONFIG_VERSION, views: getDefaultViews() };
   }
 }
 
@@ -119,14 +121,30 @@ function migrateFromSmartLabels(workspaceRootPath: string): ViewsConfig | null {
     }));
 
     const config: ViewsConfig = { version: 1, views };
-    saveViewsConfig(workspaceRootPath, config);
+    const migratedConfig = migrateViewsConfig(workspaceRootPath, config);
 
     // Remove smartLabels from labels config to avoid confusion
     delete labelsConfig.smartLabels;
     writeFileSync(labelsConfigPath, JSON.stringify(labelsConfig, null, 2), 'utf-8');
 
-    return config;
+    return migratedConfig;
   } catch {
     return null;
   }
+}
+
+function migrateViewsConfig(workspaceRootPath: string, config: ViewsConfig): ViewsConfig {
+  if ((config.version ?? 1) >= VIEWS_CONFIG_VERSION) return config;
+
+  const views = config.views ?? [];
+  const hasRecentView = views.some(view => view.id === RECENT_SEVEN_DAYS_VIEW_ID);
+  const recentView = getDefaultViews().find(view => view.id === RECENT_SEVEN_DAYS_VIEW_ID);
+  const next: ViewsConfig = {
+    ...config,
+    version: VIEWS_CONFIG_VERSION,
+    views: hasRecentView || !recentView ? views : [...views, recentView],
+  };
+
+  saveViewsConfig(workspaceRootPath, next);
+  return next;
 }

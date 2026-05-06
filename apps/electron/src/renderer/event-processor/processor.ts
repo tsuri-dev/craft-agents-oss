@@ -22,6 +22,7 @@ import {
   handleSourcesChanged,
   handleLabelsChanged,
   handleSessionStatusChanged,
+  handleSessionBoardPositionChanged,
   handleSessionFlagged,
   handleSessionUnflagged,
   handleSessionArchived,
@@ -158,6 +159,9 @@ export function processEvent(
 
     case 'session_status_changed':
       return handleSessionStatusChanged(state, event)
+
+    case 'session_board_position_changed':
+      return handleSessionBoardPositionChanged(state, event)
 
     case 'session_flagged':
       return handleSessionFlagged(state, event)

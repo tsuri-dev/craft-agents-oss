@@ -56,6 +56,7 @@ export interface ISessionManager {
   unarchiveSession(sessionId: string): Promise<void>
   renameSession(sessionId: string, name: string): Promise<void>
   setSessionStatus(sessionId: string, status: SessionStatus): Promise<void>
+  setSessionBoardPosition(sessionId: string, position: number): Promise<void>
   markSessionRead(sessionId: string): Promise<void>
   markSessionUnread(sessionId: string): Promise<void>
   markAllSessionsRead(workspaceId: string): Promise<void>

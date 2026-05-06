@@ -32,6 +32,8 @@ import {
   Bot,
   Info,
   MailOpen,
+  Columns3,
+  List,
 } from "lucide-react"
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
 import { SourceAvatar } from "@/components/ui/source-avatar"
@@ -113,7 +115,7 @@ import {
   isSettingsNavigation,
   isSkillsNavigation,
   isAutomationsNavigation,
-  type NavigationState,
+  type SessionFilter,
 } from "@/contexts/NavigationContext"
 import type { SettingsSubpage } from "../../../shared/types"
 import { SourcesListPanel } from "./SourcesListPanel"
@@ -168,6 +170,26 @@ interface AppShellProps {
 type FilterMode = 'include' | 'exclude'
 
 const altClickTooltipLabel = isMac ? '⌥ click to exclude' : 'Alt click to exclude'
+
+function routeForSessionFilterRoot(filter: SessionFilter | null | undefined) {
+  if (!filter) return routes.view.allSessions()
+  switch (filter.kind) {
+    case 'allSessions':
+      return routes.view.allSessions()
+    case 'flagged':
+      return routes.view.flagged()
+    case 'archived':
+      return routes.view.archived()
+    case 'state':
+      return routes.view.state(filter.stateId)
+    case 'label':
+      return routes.view.label(filter.labelId)
+    case 'view':
+      return routes.view.view(filter.viewId)
+    default:
+      return routes.view.allSessions()
+  }
+}
 
 /** Wraps children in a Tooltip that shows instantly on hover — only rendered when `show` is true. */
 function AltExcludeTooltip({ show, children }: { show: boolean; children: React.ReactNode }) {
@@ -517,6 +539,7 @@ function AppShellContent({
     onMarkSessionRead,
     onMarkSessionUnread,
     onSessionStatusChange,
+    onSessionBoardPositionChange,
     onRenameSession,
     onOpenSettings,
     onOpenKeyboardShortcuts,
@@ -722,6 +745,18 @@ function AppShellContent({
   // Search state for session list
   const [searchActive, setSearchActive] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState('')
+  const [sessionBoardViewMode, setSessionBoardViewMode] = React.useState<'list' | 'board'>(() => {
+    const stored = storage.get<string>(storage.KEYS.sessionBoardViewMode, 'list')
+    return stored === 'board' ? 'board' : 'list'
+  })
+  const [sessionBoardGroupBy, setSessionBoardGroupBy] = React.useState<'status' | 'label' | 'recent'>(() => {
+    const stored = storage.get<string>(storage.KEYS.sessionBoardGroupBy, 'status')
+    if (stored === 'recent') return 'recent'
+    return stored === 'label' ? 'label' : 'status'
+  })
+  const [hiddenBoardStatusIds, setHiddenBoardStatusIds] = React.useState<Set<string>>(() =>
+    new Set(storage.get<string[]>(storage.KEYS.sessionBoardHiddenStatuses, [], activeWorkspaceId ?? undefined))
+  )
 
   // Grouping mode for chat list: per-view (stored in viewFiltersMap), forced to 'date' for state sub-views
   const isStateSubView = sessionFilter?.kind === 'state'
@@ -740,6 +775,34 @@ function AppShellContent({
       }
     })
   }, [sessionFilterKey])
+
+  React.useEffect(() => {
+    storage.set(storage.KEYS.sessionBoardViewMode, sessionBoardViewMode)
+  }, [sessionBoardViewMode])
+
+  React.useEffect(() => {
+    storage.set(storage.KEYS.sessionBoardGroupBy, sessionBoardGroupBy)
+  }, [sessionBoardGroupBy])
+
+  React.useEffect(() => {
+    setHiddenBoardStatusIds(new Set(storage.get<string[]>(storage.KEYS.sessionBoardHiddenStatuses, [], activeWorkspaceId ?? undefined)))
+  }, [activeWorkspaceId])
+
+  React.useEffect(() => {
+    storage.set(storage.KEYS.sessionBoardHiddenStatuses, Array.from(hiddenBoardStatusIds), activeWorkspaceId ?? undefined)
+  }, [hiddenBoardStatusIds, activeWorkspaceId])
+
+  const handleHideBoardStatus = useCallback((statusId: string) => {
+    setHiddenBoardStatusIds(prev => new Set(prev).add(statusId))
+  }, [])
+
+  const handleShowBoardStatus = useCallback((statusId: string) => {
+    setHiddenBoardStatusIds(prev => {
+      const next = new Set(prev)
+      next.delete(statusId)
+      return next
+    })
+  }, [])
 
   // Ref for ChatDisplay navigation (exposed via forwardRef)
   const chatDisplayRef = React.useRef<ChatDisplayHandle>(null)
@@ -1581,6 +1644,13 @@ function AppShellContent({
     onSessionLabelsChange: handleSessionLabelsChange,
     enabledModes,
     sessionStatuses: effectiveSessionStatuses,
+    sessionBoardViewMode,
+    onSessionBoardViewModeChange: setSessionBoardViewMode,
+    sessionBoardGroupBy,
+    onSessionBoardGroupByChange: setSessionBoardGroupBy,
+    hiddenBoardStatusIds,
+    onHideBoardStatus: handleHideBoardStatus,
+    onShowBoardStatus: handleShowBoardStatus,
     onSessionSourcesChange: handleSessionSourcesChange,
     rightSidebarButton: null,
     isCompactMode: isAutoCompact,
@@ -1596,7 +1666,7 @@ function AppShellContent({
     automationTestResults,
     getAutomationHistory,
     onReplayAutomation: handleReplayAutomation,
-  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
+  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, sessionBoardViewMode, sessionBoardGroupBy, hiddenBoardStatusIds, handleHideBoardStatus, handleShowBoardStatus, handleSessionSourcesChange, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
 
   // Persist expanded folders to localStorage (workspace-scoped)
   React.useEffect(() => {
@@ -1662,10 +1732,6 @@ function AppShellContent({
   // Handler for label filter views (hierarchical — includes descendant labels)
   const handleLabelClick = useCallback((labelId: string) => {
     navigate(routes.view.label(labelId))
-  }, [])
-
-  const handleViewClick = useCallback((viewId: string) => {
-    navigate(routes.view.view(viewId))
   }, [])
 
   // DnD handler: reorder statuses (flat list drag-and-drop)
@@ -1742,7 +1808,7 @@ function AppShellContent({
   // We use controlled popovers instead of deep links so the user can type
   // their request in the popover UI before opening a new chat window.
   // add-source variants: add-source (generic), add-source-api, add-source-mcp, add-source-local
-  const [editPopoverOpen, setEditPopoverOpen] = useState<'statuses' | 'labels' | 'views' | 'add-source' | 'add-source-api' | 'add-source-mcp' | 'add-source-local' | 'add-skill' | 'add-label' | 'automation-config' | null>(null)
+  const [editPopoverOpen, setEditPopoverOpen] = useState<'statuses' | 'labels' | 'add-source' | 'add-source-api' | 'add-source-mcp' | 'add-source-local' | 'add-skill' | 'add-label' | 'automation-config' | null>(null)
 
   // Stores the Y position of the last right-clicked sidebar item so the EditPopover
   // appears near it rather than at a fixed location. Updated synchronously before
@@ -1798,25 +1864,6 @@ function AppShellContent({
     captureContextMenuPosition()
     setTimeout(() => setEditPopoverOpen('labels'), 50)
   }, [captureContextMenuPosition])
-
-  // Handler for "Edit Views" context menu action
-  // Opens the EditPopover for view configuration
-  const openConfigureViews = useCallback(() => {
-    captureContextMenuPosition()
-    setTimeout(() => setEditPopoverOpen('views'), 50)
-  }, [captureContextMenuPosition])
-
-  // Handler for "Delete View" context menu action
-  // Removes the view from config by filtering it out and saving
-  const handleDeleteView = useCallback(async (viewId: string) => {
-    if (!activeWorkspace?.id) return
-    try {
-      const updated = viewConfigs.filter(v => v.id !== viewId)
-      await window.electronAPI.saveViews(activeWorkspace.id, updated)
-    } catch (err) {
-      console.error('[AppShell] Failed to delete view:', err)
-    }
-  }, [activeWorkspace?.id, viewConfigs])
 
   // Handler for "Add New Label" context menu action
   // Opens the EditPopover with 'add-label' context, storing which label was right-clicked
@@ -1965,7 +2012,7 @@ function AppShellContent({
     result.push({ id: 'nav:whats-new', type: 'nav', action: handleWhatsNewClick })
 
     return result
-  }, [handleAllSessionsClick, handleFlaggedClick, handleArchivedClick, handleSessionStatusClick, effectiveSessionStatuses, handleLabelClick, labelConfigs, labelTree, viewConfigs, handleViewClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick, handleWhatsNewClick])
+  }, [handleAllSessionsClick, handleFlaggedClick, handleArchivedClick, handleSessionStatusClick, effectiveSessionStatuses, handleLabelClick, labelTree, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick, handleWhatsNewClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -2116,6 +2163,70 @@ function AppShellContent({
         return t("sidebar.allSessions")
     }
   }, [navState, t, sessionFilter, automationFilter, labelConfigs, viewConfigs, effectiveSessionStatuses])
+
+  const handleSessionBoardModeChange = useCallback((mode: 'list' | 'board') => {
+    setSessionBoardViewMode(mode)
+    if (mode === 'board' && isSessionsNavigation(navState)) {
+      navigate(routeForSessionFilterRoot(sessionFilter), { skipAutoSelect: true })
+    }
+  }, [navState, sessionFilter])
+
+  const isBoardEligibleView = isSessionsNavigation(navState) && sessionFilter?.kind !== 'archived'
+  const sessionBoardToggle = isBoardEligibleView ? (
+    <>
+      <HeaderIconButton
+        icon={<List className="h-4 w-4" />}
+        tooltip="List view"
+        onClick={() => handleSessionBoardModeChange('list')}
+        aria-pressed={sessionBoardViewMode === 'list'}
+        className={cn(
+          sessionBoardViewMode === 'list'
+            ? "bg-foreground/5 text-foreground shadow-minimal"
+            : undefined,
+        )}
+      />
+      <HeaderIconButton
+        icon={<Columns3 className="h-4 w-4" />}
+        tooltip="Board view"
+        onClick={() => handleSessionBoardModeChange('board')}
+        aria-pressed={sessionBoardViewMode === 'board'}
+        className={cn(
+          sessionBoardViewMode === 'board'
+            ? "bg-foreground/5 text-foreground shadow-minimal"
+            : undefined,
+        )}
+      />
+      {sessionBoardViewMode === 'board' && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <HeaderIconButton
+              icon={<Layers className="h-4 w-4" />}
+              tooltip="Board grouping"
+              className="rounded-[8px]"
+            />
+          </DropdownMenuTrigger>
+          <StyledDropdownMenuContent align="end" light minWidth="min-w-[150px]">
+            <StyledDropdownMenuItem onClick={() => setSessionBoardGroupBy('status')}>
+              <Inbox className="h-3.5 w-3.5" />
+              <span className="flex-1">Status</span>
+              {sessionBoardGroupBy === 'status' && <Check className="h-3 w-3 text-muted-foreground" />}
+            </StyledDropdownMenuItem>
+            <StyledDropdownMenuItem onClick={() => setSessionBoardGroupBy('label')}>
+              <Tag className="h-3.5 w-3.5" />
+              <span className="flex-1">Label</span>
+              {sessionBoardGroupBy === 'label' && <Check className="h-3 w-3 text-muted-foreground" />}
+            </StyledDropdownMenuItem>
+            <StyledDropdownMenuSeparator />
+            <StyledDropdownMenuItem onClick={() => setSessionBoardGroupBy('recent')}>
+              <Clock className="h-3.5 w-3.5" />
+              <span className="flex-1">Recent 7 Days</span>
+              {sessionBoardGroupBy === 'recent' && <Check className="h-3 w-3 text-muted-foreground" />}
+            </StyledDropdownMenuItem>
+          </StyledDropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </>
+  ) : null
 
   // Build recursive sidebar items from the shared display-sorted label tree.
   // Each node renders with condensed height (compact: true) since many labels expected.
@@ -2876,8 +2987,8 @@ function AppShellContent({
                               </StyledDropdownMenuSubContent>
                             </DropdownMenuSub>
 
-                            {/* Group by submenu - hidden in state sub-views (always date there) */}
-                            {!isStateSubView && (
+                            {/* List group-by submenu. Board mode has its own board grouping control. */}
+                            {!isStateSubView && sessionBoardViewMode !== 'board' && (
                               <>
                                 <StyledDropdownMenuSeparator />
                                 <DropdownMenuSub>
@@ -3108,6 +3219,7 @@ function AppShellContent({
                     </DropdownMenu>
                     )
                   )}
+                  {sessionBoardToggle}
                   {/* Add Source button (only for sources mode) - uses filter-aware edit config */}
                   {isSourcesNavigation(navState) && activeWorkspace && (
                     <EditPopover
@@ -3405,26 +3517,6 @@ function AppShellContent({
                 },
               }
             })()}
-          />
-          {/* Edit Views EditPopover - anchored near sidebar */}
-          <EditPopover
-            open={editPopoverOpen === 'views'}
-            onOpenChange={(isOpen) => setEditPopoverOpen(isOpen ? 'views' : null)}
-            modal={true}
-            trigger={
-              <div
-                className="fixed w-0 h-0 pointer-events-none"
-                style={{ left: sidebarWidth + 20, top: editPopoverAnchorY.current }}
-                aria-hidden="true"
-              />
-            }
-            side="bottom"
-            align="start"
-            secondaryAction={{
-              label: 'Edit File',
-              filePath: `${activeWorkspace.rootPath}/views.json`,
-            }}
-            {...getEditConfig('edit-views', activeWorkspace.rootPath)}
           />
           {/* Add Source EditPopovers - one for each variant (generic + filter-specific)
            * editPopoverOpen can be: 'add-source', 'add-source-api', 'add-source-mcp', 'add-source-local'

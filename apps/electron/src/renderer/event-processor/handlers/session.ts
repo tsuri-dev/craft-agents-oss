@@ -14,6 +14,7 @@ import type {
   SourcesChangedEvent,
   LabelsChangedEvent,
   SessionStatusChangedEvent,
+  SessionBoardPositionChangedEvent,
   SessionFlaggedEvent,
   SessionUnflaggedEvent,
   SessionArchivedEvent,
@@ -671,6 +672,23 @@ export function handleSessionStatusChanged(
 }
 
 /**
+ * Handle session_board_position_changed - update session's manual board order
+ */
+export function handleSessionBoardPositionChanged(
+  state: SessionState,
+  event: SessionBoardPositionChangedEvent
+): ProcessResult {
+  const { session, streaming } = state
+  return {
+    state: {
+      session: { ...session, boardPosition: event.boardPosition },
+      streaming,
+    },
+    effects: [],
+  }
+}
+
+/**
  * Handle session_flagged - mark session as flagged
  */
 export function handleSessionFlagged(
@@ -946,4 +964,3 @@ export function handleUsageUpdate(
     effects: [],
   }
 }
-

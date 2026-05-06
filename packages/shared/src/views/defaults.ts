@@ -41,5 +41,13 @@ export function getDefaultViews(): ViewConfig[] {
       color: 'success',
       expression: 'isProcessing == true',
     },
+    {
+      id: 'view-recent-7-days',
+      name: 'Recent 7 Days',
+      description: 'Sessions active in the last 7 days, shown by recent activity',
+      color: 'accent',
+      expression: 'daysSince(lastUsedAt) <= 7',
+      displayMode: 'list',
+    },
   ];
 }

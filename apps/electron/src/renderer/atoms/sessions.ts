@@ -47,6 +47,8 @@ export interface SessionMeta {
   permissionMode?: string
   /** Session status for filtering */
   sessionStatus?: string
+  /** Manual board ordering within a session status column */
+  boardPosition?: number
   /** Role/type of the last message (for badge display without loading messages) */
   lastMessageRole?: 'user' | 'assistant' | 'plan' | 'tool' | 'error'
   /** Whether an async operation is ongoing (sharing, updating share, revoking, title regeneration) */

@@ -21,11 +21,13 @@ import { useAtomValue } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { Panel } from './Panel'
 import { MultiSelectPanel } from './MultiSelectPanel'
+import { SessionBoard } from './SessionBoard'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { sessionMetaMapAtom, type SessionMeta } from '@/atoms/sessions'
 import { StoplightProvider } from '@/context/StoplightContext'
 import {
   useNavigationState,
+  useNavigation,
   isSessionsNavigation,
   isSourcesNavigation,
   isSettingsNavigation,
@@ -34,7 +36,7 @@ import {
 } from '@/contexts/NavigationContext'
 import { useSessionSelection, useIsMultiSelectActive, useSelectedIds, useSelectionCount } from '@/hooks/useSession'
 import { sourceSelection, skillSelection, automationSelection } from '@/hooks/useEntitySelection'
-import { extractLabelId } from '@craft-agent/shared/labels'
+import { extractLabelId, flattenLabels, getDescendantIds } from '@craft-agent/shared/labels'
 import type { SessionStatusId } from '@/config/session-status-config'
 import { SourceInfoPage, ChatPage } from '@/pages'
 import SkillInfoPage from '@/pages/SkillInfoPage'
@@ -64,15 +66,23 @@ export function MainContentPanel({
 }: MainContentPanelProps) {
   const { t } = useTranslation()
   const globalNavState = useNavigationState()
+  const { navigateToSession } = useNavigation()
   const navState = navStateOverride ?? globalNavState
   const {
     activeWorkspaceId,
     workspaces,
     onSessionStatusChange,
+    onSessionBoardPositionChange,
     onArchiveSession,
     onSessionLabelsChange,
     sessionStatuses,
     labels,
+    sessionBoardViewMode,
+    sessionBoardGroupBy,
+    onSessionBoardViewModeChange,
+    hiddenBoardStatusIds,
+    onHideBoardStatus,
+    onShowBoardStatus,
     onTestAutomation,
     onToggleAutomation,
     onDuplicateAutomation,
@@ -160,6 +170,34 @@ export function MainContentPanel({
     })
     return metas
   }, [selectedIds, sessionMetaMap])
+
+  const boardSessions = useMemo(() => {
+    if (!activeWorkspaceId) return []
+    const activeSessions = Array.from(sessionMetaMap.values()).filter(meta =>
+      meta.workspaceId === activeWorkspaceId &&
+      !meta.hidden &&
+      !meta.isArchived
+    )
+    if (!isSessionsNavigation(navState)) return activeSessions
+    const filter = navState.filter
+    if (!filter || filter.kind === 'allSessions') return activeSessions
+    if (filter.kind === 'flagged') return activeSessions.filter(meta => meta.isFlagged)
+    if (filter.kind === 'state') return activeSessions.filter(meta => (meta.sessionStatus || 'todo') === filter.stateId)
+    if (filter.kind === 'label') {
+      if (filter.labelId === '__all__') return activeSessions.filter(meta => (meta.labels?.length ?? 0) > 0)
+      const labelIds = new Set([filter.labelId, ...getDescendantIds(labels ?? [], filter.labelId)])
+      return activeSessions.filter(meta => meta.labels?.some(label => labelIds.has(extractLabelId(label))))
+    }
+    if (filter.kind === 'view') return activeSessions
+    return activeSessions
+  }, [activeWorkspaceId, labels, navState, sessionMetaMap])
+
+  const flatLabels = useMemo(() => flattenLabels(labels ?? []), [labels])
+
+  const handleBoardSelectSession = useCallback((sessionId: string) => {
+    onSessionBoardViewModeChange?.('list')
+    navigateToSession(sessionId)
+  }, [navigateToSession, onSessionBoardViewModeChange])
 
   const activeStatusId = useMemo((): SessionStatusId | null => {
     if (selectedMetas.length === 0) return null
@@ -376,6 +414,28 @@ export function MainContentPanel({
       )
     }
 
+    if (!navState.details && navState.filter?.kind !== 'archived' && sessionBoardViewMode === 'board') {
+      return wrapWithStoplight(
+        <Panel variant="grow" className={className}>
+          <div className="flex h-full min-h-0 flex-col bg-background">
+            <SessionBoard
+              sessions={boardSessions}
+              statuses={sessionStatuses ?? []}
+              hiddenStatusIds={hiddenBoardStatusIds ?? new Set()}
+              labels={flatLabels}
+              groupBy={sessionBoardGroupBy ?? 'status'}
+              onLabelsChange={onSessionLabelsChange}
+              onHideStatus={onHideBoardStatus ?? (() => {})}
+              onShowStatus={onShowBoardStatus ?? (() => {})}
+              onSelectSession={handleBoardSelectSession}
+              onSessionStatusChange={onSessionStatusChange}
+              onSessionBoardPositionChange={onSessionBoardPositionChange}
+            />
+          </div>
+        </Panel>
+      )
+    }
+
     if (navState.details) {
       return wrapWithStoplight(
         <Panel variant="grow" className={className}>
@@ -383,6 +443,7 @@ export function MainContentPanel({
         </Panel>
       )
     }
+
     // No session selected - empty state
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>

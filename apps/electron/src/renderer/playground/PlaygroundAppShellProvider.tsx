@@ -54,6 +54,7 @@ const playgroundValue: AppShellContextType = {
   onMarkSessionUnread: logCall('onMarkSessionUnread'),
   onSetActiveViewingSession: logCall('onSetActiveViewingSession'),
   onSessionStatusChange: logCall('onSessionStatusChange'),
+  onSessionBoardPositionChange: logCall('onSessionBoardPositionChange'),
   onDeleteSession: async () => {
     console.log('[Playground AppShell] onDeleteSession called')
     return false

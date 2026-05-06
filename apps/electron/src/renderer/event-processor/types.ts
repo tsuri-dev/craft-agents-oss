@@ -150,6 +150,15 @@ export interface SessionStatusChangedEvent {
 }
 
 /**
+ * Session board position changed event
+ */
+export interface SessionBoardPositionChangedEvent {
+  type: 'session_board_position_changed'
+  sessionId: string
+  boardPosition?: number
+}
+
+/**
  * Session flagged/unflagged events (external metadata change)
  */
 export interface SessionFlaggedEvent {
@@ -485,6 +494,7 @@ export type AgentEvent =
   | SourcesChangedEvent
   | LabelsChangedEvent
   | SessionStatusChangedEvent
+  | SessionBoardPositionChangedEvent
   | SessionFlaggedEvent
   | SessionUnflaggedEvent
   | SessionArchivedEvent

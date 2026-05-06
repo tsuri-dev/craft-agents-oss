@@ -47,4 +47,8 @@ export function useSessionListContext(): SessionListContextValue {
   return ctx
 }
 
+export function useOptionalSessionListContext(): SessionListContextValue | null {
+  return useContext(SessionListContext)
+}
+
 export const SessionListProvider = SessionListContext.Provider

@@ -36,7 +36,7 @@ import {
 } from '../../config/cli-domains.ts';
 import { FEATURE_FLAGS } from '../../feature-flags.ts';
 import { AGENTS_PLUGIN_NAME } from '../../skills/types.ts';
-import { GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR } from '../../skills/storage.ts';
+import { getGlobalAgentSkillsDir, PROJECT_AGENT_SKILLS_DIR } from '../../skills/storage.ts';
 import {
   shouldAllowToolInMode,
   isApiEndpointAllowed,
@@ -273,8 +273,8 @@ function resolveSkillPlugin(
     return `${workspaceSlug}:${bareSlug}`;
   }
 
-  // 3. Global: ~/.agents/skills/{slug}/SKILL.md
-  if (existsSync(join(GLOBAL_AGENT_SKILLS_DIR, bareSlug, 'SKILL.md'))) {
+  // 3. Global: ~/.agents/skills/{slug}/SKILL.md or CRAFT_GLOBAL_SKILLS_DIR/{slug}/SKILL.md
+  if (existsSync(join(getGlobalAgentSkillsDir(), bareSlug, 'SKILL.md'))) {
     return `${AGENTS_PLUGIN_NAME}:${bareSlug}`;
   }
 

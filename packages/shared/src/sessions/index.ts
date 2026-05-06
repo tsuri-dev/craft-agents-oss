@@ -51,6 +51,7 @@ export {
   flagSession,
   unflagSession,
   setSessionStatus,
+  setSessionBoardPosition,
   // Pending plan execution (Accept & Compact flow)
   setPendingPlanExecution,
   markCompactionComplete,
@@ -123,5 +124,4 @@ export {
   validateBundle,
   MAX_BUNDLE_SIZE_BYTES,
 } from './bundle.ts';
-
 
