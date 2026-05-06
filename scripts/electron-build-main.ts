@@ -4,11 +4,12 @@
  */
 
 import { spawn } from "bun";
-import { existsSync, readFileSync, statSync, mkdirSync } from "fs";
+import { cpSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "fs";
 import { join } from "path";
 
 const ROOT_DIR = join(import.meta.dir, "..");
 const DIST_DIR = join(ROOT_DIR, "apps/electron/dist");
+const ELECTRON_RESOURCES_DIR = join(ROOT_DIR, "apps/electron/resources");
 const OUTPUT_FILE = join(DIST_DIR, "main.cjs");
 const INTERCEPTOR_SOURCE = join(ROOT_DIR, "packages/shared/src/unified-network-interceptor.ts");
 const INTERCEPTOR_OUTPUT = join(DIST_DIR, "interceptor.cjs");
@@ -136,6 +137,65 @@ function verifySessionToolsCore(): void {
   console.log("✅ Session tools core verified");
 }
 
+function targetPlatform(): NodeJS.Platform {
+  return (process.env.CRAFT_BUILD_PLATFORM as NodeJS.Platform | undefined) || process.platform;
+}
+
+function targetArch(): string {
+  return process.env.CRAFT_BUILD_ARCH || process.env.npm_config_arch || process.arch;
+}
+
+function koffiPlatformDir(): string {
+  const arch = targetArch() === "x64" ? "x64" : "arm64";
+  return `${targetPlatform()}_${arch}`;
+}
+
+function stageSessionServer(): void {
+  const destDir = join(ELECTRON_RESOURCES_DIR, "session-mcp-server");
+  mkdirSync(destDir, { recursive: true });
+  copyFileSync(SESSION_SERVER_OUTPUT, join(destDir, "index.js"));
+  console.log("✅ Session server staged for packaging");
+}
+
+function stagePiAgentServer(): void {
+  const destDir = join(ELECTRON_RESOURCES_DIR, "pi-agent-server");
+  mkdirSync(destDir, { recursive: true });
+  copyFileSync(PI_AGENT_SERVER_OUTPUT, join(destDir, "index.js"));
+
+  const koffiSource = join(ROOT_DIR, "node_modules/koffi");
+  if (!existsSync(koffiSource)) {
+    console.warn("⚠️  koffi not found in node_modules. Pi SDK sessions may not work.");
+    return;
+  }
+
+  const koffiDest = join(destDir, "node_modules/koffi");
+  rmSync(koffiDest, { recursive: true, force: true });
+  mkdirSync(koffiDest, { recursive: true });
+
+  for (const entry of ["package.json", "index.js", "indirect.js", "index.d.ts", "lib"]) {
+    const src = join(koffiSource, entry);
+    if (existsSync(src)) {
+      cpSync(src, join(koffiDest, entry), { recursive: true, force: true });
+    }
+  }
+
+  const nativeDir = koffiPlatformDir();
+  const nativeSource = join(koffiSource, "build/koffi", nativeDir);
+  const nativeDest = join(koffiDest, "build/koffi", nativeDir);
+  if (existsSync(nativeSource)) {
+    mkdirSync(nativeDest, { recursive: true });
+    cpSync(nativeSource, nativeDest, { recursive: true, force: true });
+  } else {
+    console.warn(`⚠️  koffi native binary not found for ${nativeDir}; copying all native binaries.`);
+    const buildSource = join(koffiSource, "build");
+    if (existsSync(buildSource)) {
+      cpSync(buildSource, join(koffiDest, "build"), { recursive: true, force: true });
+    }
+  }
+
+  console.log("✅ Pi agent server staged for packaging");
+}
+
 // Build the unified network interceptor (bundled CJS loaded via --require into Node-based SDK subprocesses)
 async function buildInterceptor(): Promise<void> {
   console.log("🔌 Building unified network interceptor...");
@@ -206,6 +266,7 @@ async function buildSessionServer(): Promise<void> {
   }
 
   console.log("✅ Session server built successfully");
+  stageSessionServer();
 }
 
 // Build the Pi Agent Server (subprocess for Pi SDK sessions)
@@ -255,6 +316,7 @@ async function buildPiAgentServer(): Promise<void> {
   }
 
   console.log("✅ Pi agent server built successfully");
+  stagePiAgentServer();
 }
 
 // Build the WhatsApp worker (Baileys-backed subprocess spawned by WhatsAppAdapter)
