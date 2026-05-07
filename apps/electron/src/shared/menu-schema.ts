@@ -311,9 +311,9 @@ export const HELP_LINKS: MenuItemUrl[] = [
 /**
  * Debug submenu — only rendered when `window.electronAPI.isDebugMode()` resolves true.
  *
- * `checkForUpdates` and `installUpdate` invoke renderer-only electronAPI methods
- * (`checkForUpdates()` / `installUpdate()`) that bypass the menu IPC channels, so
- * their `ipcChannel` field is intentionally empty.
+ * `checkForUpdates` invokes a renderer-only electronAPI method that bypasses the
+ * menu IPC channels, so its `ipcChannel` field is intentionally empty. In-app
+ * update installation is intentionally not exposed.
  */
 export const DEBUG_MENU: MenuSection = {
   id: 'debug',
@@ -325,17 +325,6 @@ export const DEBUG_MENU: MenuSection = {
       id: 'checkForUpdates',
       actionId: 'app.checkForUpdates',
       labelKey: 'menu.checkForUpdates',
-      shortcut: '',
-      shortcutDisplayMac: '',
-      shortcutDisplayOther: '',
-      ipcChannel: '',
-      icon: 'Download',
-    },
-    {
-      type: 'action',
-      id: 'installUpdate',
-      actionId: 'app.installUpdate',
-      labelKey: 'menu.installUpdate',
       shortcut: '',
       shortcutDisplayMac: '',
       shortcutDisplayOther: '',

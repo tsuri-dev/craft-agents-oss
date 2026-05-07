@@ -102,7 +102,7 @@ import { setPerfEnabled, enableDebug } from '@craft-agent/shared/utils'
 import { registerPiModelResolver } from '@craft-agent/shared/config'
 import { getPiModelsForAuthProvider, getAllPiModels } from '@craft-agent/shared/config'
 import { initNotificationService, initBadgeIcon, initInstanceBadge, updateBadgeCount } from './notifications'
-import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating, setBeforeUpdateQuitHook } from './auto-update'
+import { checkForUpdatesOnLaunch, setAutoUpdateEventSink, isUpdating } from './auto-update'
 import type { EventSink } from '@craft-agent/server-core/transport'
 import { validateGitBashPath, checkVCRedistInstalled } from '@craft-agent/server-core/services'
 
@@ -415,7 +415,7 @@ app.whenReady().then(async () => {
   // (first call before app.whenReady only configured Node-level proxy)
   await applyConfiguredProxySettings()
 
-  // Note: electron-updater handles pending updates internally via autoInstallOnAppQuit
+  // Note: in-app update installation is disabled; electron-updater is only used for checks.
 
   // Application menu is created after windowManager initialization (see below)
 
@@ -1057,11 +1057,6 @@ app.whenReady().then(async () => {
     // Initialize auto-update (check immediately on launch)
     // Skip in dev mode to avoid replacing /Applications app and launching it instead
     if (moduleSink) setAutoUpdateEventSink(moduleSink)
-    // Snapshot multi-window state BEFORE quitAndInstall. electron-updater
-    // (Squirrel.Mac) destroys BrowserWindows between quitAndInstall and
-    // before-quit firing; saving from before-quit alone would overwrite
-    // window-state.json with an empty array.
-    setBeforeUpdateQuitHook(() => captureAndSaveWindowState('pre-update'))
     if (app.isPackaged) {
       checkForUpdatesOnLaunch().catch(err => {
         mainLog.error('[auto-update] Launch check failed:', err)
@@ -1108,15 +1103,9 @@ let isQuitting = false
 
 /**
  * Capture the current multi-window state and persist it to disk.
- * Called from two sites:
- *   - before-quit (normal quit path, reason='before-quit')
- *   - installUpdate hook (auto-update path, reason='pre-update'), because
- *     electron-updater destroys BrowserWindows between quitAndInstall and
- *     before-quit firing — by the time before-quit runs, getWindowStates()
- *     returns an empty array and would clobber the on-disk state.
  * Returns the number of windows saved, or -1 if windowManager isn't ready.
  */
-function captureAndSaveWindowState(reason: 'before-quit' | 'pre-update'): number {
+function captureAndSaveWindowState(reason: 'before-quit'): number {
   if (!windowManager) return -1
   const windows = windowManager.getWindowStates()
   const focusedWindow = BrowserWindow.getFocusedWindow()
