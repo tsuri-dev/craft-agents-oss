@@ -110,7 +110,7 @@ export default function AppSettingsPage() {
   const [proxyError, setProxyError] = useState<string | undefined>()
   const [isSavingProxy, setIsSavingProxy] = useState(false)
 
-  // Auto-update state (Check Now / Update Ready only shown in Electron, not WebUI)
+  // Update check state (Check Now / Update Available only shown in Electron, not WebUI)
   const isElectron = window.electronAPI.getRuntimeEnvironment() === 'electron'
   const updateChecker = useUpdateChecker()
   const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false)
@@ -343,14 +343,11 @@ export default function AppSettingsPage() {
                       </Button>
                     </SettingsRow>
                   )}
-                  {isElectron && updateChecker.isReadyToInstall && updateChecker.updateInfo?.latestVersion && (
+                  {isElectron && updateChecker.updateAvailable && updateChecker.updateInfo?.latestVersion && (
                     <SettingsRow label={t("settings.about.updateReady")}>
-                      <Button
-                        size="sm"
-                        onClick={updateChecker.installUpdate}
-                      >
+                      <span className="text-sm text-muted-foreground">
                         {t("settings.about.restartToUpdate", { version: updateChecker.updateInfo.latestVersion })}
-                      </Button>
+                      </span>
                     </SettingsRow>
                   )}
                 </SettingsCard>
