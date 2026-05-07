@@ -30,6 +30,7 @@ import {
   RefreshCw,
   Tag,
   Send,
+  Layers,
 } from 'lucide-react'
 import { useMenuComponents } from '@/components/ui/menu-context'
 import { getStateColor, getStateIcon, type SessionStatusId } from '@/config/session-status-config'
@@ -41,6 +42,7 @@ import type { SessionMeta } from '@/atoms/sessions'
 import { getSessionStatus, hasUnreadMeta, hasMessagesMeta } from '@/utils/session'
 import { MessagingSessionMenuItem } from '@/components/messaging/MessagingSessionMenuItem'
 import { useSessionMenuActions } from '@/hooks/useSessionMenuActions'
+import { getSessionGroupValues, removeSessionGroupLabel } from '@/utils/session-group-filter'
 
 export interface SessionMenuProps {
   /** Session data — display state is derived from this */
@@ -99,6 +101,10 @@ export function SessionMenu({
   const _hasUnread = hasUnreadMeta(item)
 
   const actions = useSessionMenuActions({ item, onLabelsChange })
+  const sessionGroups = React.useMemo(
+    () => getSessionGroupValues(item),
+    [item]
+  )
 
   // Get menu components from context (works with both DropdownMenu and ContextMenu)
   const { MenuItem, Separator, Sub, SubTrigger, SubContent } = useMenuComponents()
@@ -184,6 +190,27 @@ export function SessionMenu({
               onToggle={actions.toggleLabel}
               menu={{ MenuItem, Separator, Sub, SubTrigger, SubContent }}
             />
+          </SubContent>
+        </Sub>
+      )}
+
+      {sessionGroups.length > 0 && onLabelsChange && (
+        <Sub>
+          <SubTrigger className="pr-2">
+            <Layers className="h-3.5 w-3.5" />
+            <span className="flex-1">Groups</span>
+            <span className="text-[10px] text-muted-foreground tabular-nums -mr-2.5">
+              {sessionGroups.length}
+            </span>
+          </SubTrigger>
+          <SubContent>
+            {sessionGroups.map(group => (
+              <MenuItem key={group} onClick={() => onLabelsChange(removeSessionGroupLabel(sessionLabels, group))}>
+                <Layers className="h-3.5 w-3.5" />
+                <span className="flex-1 truncate">{group}</span>
+                <span className="text-[10px] text-muted-foreground">Remove</span>
+              </MenuItem>
+            ))}
           </SubContent>
         </Sub>
       )}

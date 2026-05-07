@@ -35,7 +35,7 @@ export interface ParsedRoute {
 // Compound Route Types (new format)
 // =============================================================================
 
-export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'automations' | 'settings'
+export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'automations' | 'stories' | 'settings'
 
 export interface ParsedCompoundRoute {
   /** The navigator type */
@@ -61,7 +61,7 @@ export interface ParsedCompoundRoute {
  * Known prefixes that indicate a compound route
  */
 const COMPOUND_ROUTE_PREFIXES = [
-  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'automations', 'settings'
+  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'automations', 'stories', 'settings'
 ]
 
 /**
@@ -197,6 +197,15 @@ export function parseCompoundRoute(route: string): ParsedCompoundRoute | null {
     return null
   }
 
+  // Story board navigator
+  if (first === 'stories') {
+    if (segments.length === 1) {
+      return { navigator: 'stories', details: null }
+    }
+
+    return null
+  }
+
   // Sessions navigator (allSessions, flagged, state)
   let sessionFilter: SessionFilter
   let detailsStartIndex: number
@@ -287,6 +296,10 @@ export function buildCompoundRoute(parsed: ParsedCompoundRoute): string {
     }
     if (!parsed.details) return base
     return `${base}/automation/${parsed.details.id}`
+  }
+
+  if (parsed.navigator === 'stories') {
+    return 'stories'
   }
 
   // Sessions navigator
@@ -410,6 +423,11 @@ function convertCompoundToViewRoute(compound: ParsedCompoundRoute): ParsedRoute 
       return { type: 'view', name: 'automations', params: {} }
     }
     return { type: 'view', name: 'automation-info', id: compound.details.id, params: {} }
+  }
+
+  // Stories
+  if (compound.navigator === 'stories') {
+    return { type: 'view', name: 'stories', params: {} }
   }
 
   // Sessions
@@ -547,6 +565,11 @@ function convertCompoundToNavigationState(compound: ParsedCompoundRoute): Naviga
     }
   }
 
+  // Stories
+  if (compound.navigator === 'stories') {
+    return { navigator: 'stories' }
+  }
+
   // Sessions
   const filter = compound.sessionFilter || { kind: 'allSessions' as const }
   if (compound.details) {
@@ -624,6 +647,8 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
         }
       }
       return { navigator: 'automations', details: null }
+    case 'stories':
+      return { navigator: 'stories' }
     case 'session':
       if (parsed.id) {
         // Reconstruct filter from params
@@ -729,6 +754,13 @@ function navigationStateToCompoundRoute(state: NavigationState): ParsedCompoundR
       navigator: 'automations',
       automationFilter: state.filter ?? undefined,
       details: state.details ? { type: 'automation', id: state.details.automationId } : null,
+    }
+  }
+
+  if (state.navigator === 'stories') {
+    return {
+      navigator: 'stories',
+      details: null,
     }
   }
 

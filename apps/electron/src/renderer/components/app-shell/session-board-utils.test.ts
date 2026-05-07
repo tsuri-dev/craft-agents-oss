@@ -4,6 +4,7 @@ import type { SessionStatus } from "@/config/session-status-config"
 import {
   buildSessionBoardLabelColumns,
   buildSessionBoardColumns,
+  buildSessionBoardProjectColumns,
   buildSessionBoardRecentColumns,
   computeBoardPosition,
   resolveBoardStatusId,
@@ -68,6 +69,19 @@ describe("session-board-utils", () => {
     expect(columns.map((column) => column.group.id)).toEqual(["bug", "__unlabeled"])
     expect(columns[0]!.sessions.map((item) => item.id)).toEqual(["with-label"])
     expect(columns[1]!.sessions.map((item) => item.id)).toEqual(["without-label"])
+  })
+
+  it("builds project columns from valued project labels", () => {
+    const columns = buildSessionBoardProjectColumns([
+      session({ id: "craft-newer", labels: ["project::Craft Agents"], lastMessageAt: 20 }),
+      session({ id: "craft-older", labels: ["project::Craft Agents"], lastMessageAt: 10 }),
+      session({ id: "pi", labels: ["project::Pi"] }),
+      session({ id: "none", labels: ["bug"] }),
+    ])
+
+    expect(columns.map((column) => column.group.id)).toEqual(["Craft Agents", "Pi", "__no_project__"])
+    expect(columns[0]!.sessions.map((item) => item.id)).toEqual(["craft-newer", "craft-older"])
+    expect(columns[2]!.sessions.map((item) => item.id)).toEqual(["none"])
   })
 
   it("builds recent seven day columns ordered by date and recent activity", () => {

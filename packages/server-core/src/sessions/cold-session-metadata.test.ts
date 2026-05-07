@@ -131,18 +131,47 @@ describe('cold-session metadata persistence', () => {
     expect(reloaded?.labels).toEqual(['urgent', 'bug'])
   })
 
-  it('renameSession on a cold session persists (with explicit flushSession)', async () => {
+  it('renameSession on a cold session is on disk when renameSession resolves', async () => {
     const sessionId = 'cold-rename'
     seedColdSession(sessionId, { name: 'old name' })
 
-    // renameSession does not flush internally; mirror the production order
-    // (rename → flushSession). Without the cold-load fix, this assertion fails
-    // because persistSession silently dropped the enqueue.
     await sm.renameSession(sessionId, 'new name')
-    await sm.flushSession(sessionId)
 
     const header = readDiskHeader(sessionId)
     expect(header.name).toBe('new name')
+  })
+
+  it('renameSession appends incrementing numbers when the requested name already exists', async () => {
+    seedColdSession('existing-1', { name: 'Project' })
+    seedColdSession('existing-2', { name: 'Project (2)' })
+    seedColdSession('target', { name: 'Old name' })
+
+    await sm.renameSession('target', 'Project')
+
+    expect(readDiskHeader('target').name).toBe('Project (3)')
+  })
+
+  it('manual rename wins over an in-flight generated title', async () => {
+    const sessionId = 'manual-over-ai-title'
+    seedColdSession(sessionId, { name: 'Initial title' })
+    const managed = (sm as unknown as { sessions: Map<string, { agent?: unknown }> })
+      .sessions.get(sessionId)!
+
+    let resolveTitle!: (title: string) => void
+    const titlePromise = new Promise<string>((resolve) => { resolveTitle = resolve })
+    managed.agent = {
+      generateTitle: () => titlePromise,
+    }
+
+    const generatePromise = (sm as unknown as {
+      generateTitle: (managed: unknown, userMessage: string) => Promise<void>
+    }).generateTitle(managed, 'first user message')
+
+    await sm.renameSession(sessionId, 'Manual title')
+    resolveTitle('AI title')
+    await generatePromise
+
+    expect(readDiskHeader(sessionId).name).toBe('Manual title')
   })
 
   it('cold-session persist preserves existing messages on disk', async () => {

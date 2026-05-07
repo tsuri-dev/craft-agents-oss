@@ -4794,19 +4794,50 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  private resolveUniqueSessionName(managed: ManagedSession, requestedName: string): string {
+    const trimmed = requestedName.trim()
+    if (!trimmed) {
+      throw new Error('Session name cannot be empty')
+    }
+
+    const suffixMatch = trimmed.match(/^(.*) \((\d+)\)$/)
+    const baseName = suffixMatch ? suffixMatch[1].trim() : trimmed
+    const existingNames = new Set(
+      Array.from(this.sessions.values())
+        .filter((session) => session.id !== managed.id && session.workspace.rootPath === managed.workspace.rootPath)
+        .map((session) => session.name?.trim())
+        .filter((name): name is string => !!name),
+    )
+
+    if (!existingNames.has(trimmed)) return trimmed
+
+    let next = suffixMatch ? Number(suffixMatch[2]) + 1 : 2
+    let candidate = `${baseName} (${next})`
+    while (existingNames.has(candidate)) {
+      next += 1
+      candidate = `${baseName} (${next})`
+    }
+    return candidate
+  }
+
   async renameSession(sessionId: string, name: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (managed) {
-      managed.name = name
-      this.persistSession(managed)
-      // Notify renderer of the name change
-      this.sendEvent({ type: 'title_generated', sessionId, title: name }, managed.workspace.id)
-      // Workaround: Bun's fs.watch({ recursive: true }) on Linux doesn't track
-      // directories created after the watcher started.
-      // https://github.com/oven-sh/bun/issues/15939
-      const watcher = this.configWatchers.get(managed.workspace.rootPath)
-      watcher?.notifyFileChange(`sessions/${sessionId}/session.jsonl`)
+    if (!managed) {
+      throw new Error(`Session ${sessionId} not found`)
     }
+
+    const resolvedName = this.resolveUniqueSessionName(managed, name)
+    managed.name = resolvedName
+    this.setMetadataWriteGuard(managed)
+    this.persistSession(managed)
+    await this.flushSession(managed.id)
+    // Notify renderer of the name change
+    this.sendEvent({ type: 'title_generated', sessionId, title: resolvedName }, managed.workspace.id)
+    // Workaround: Bun's fs.watch({ recursive: true }) on Linux doesn't track
+    // directories created after the watcher started.
+    // https://github.com/oven-sh/bun/issues/15939
+    const watcher = this.configWatchers.get(managed.workspace.rootPath)
+    watcher?.notifyFileChange(`sessions/${sessionId}/session.jsonl`)
   }
 
   /**
@@ -6588,6 +6619,7 @@ export class SessionManager implements ISessionManager {
    */
   private async generateTitle(managed: ManagedSession, userMessage: string): Promise<void> {
     sessionLog.info(`[generateTitle] Starting for session ${managed.id}`)
+    const titleBaseline = managed.name
 
     // Use existing agent or create temporary one
     let agent: AgentInstance | null = managed.agent
@@ -6639,6 +6671,10 @@ export class SessionManager implements ISessionManager {
       const genLangEntry = LOCALE_REGISTRY[genLangCode]
       const title = await agent.generateTitle(userMessage, { language: genLangEntry?.nativeName })
       if (title) {
+        if (managed.name !== titleBaseline) {
+          sessionLog.info(`[generateTitle] Skipping generated title for ${managed.id}; title changed while generation was in flight`)
+          return
+        }
         managed.name = title
         this.persistSession(managed)
         // Flush immediately to ensure disk is up-to-date before notifying renderer.

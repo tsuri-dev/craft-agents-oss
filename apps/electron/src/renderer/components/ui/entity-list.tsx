@@ -38,6 +38,8 @@ export interface EntityListGroup<T> {
   collapsible?: boolean
   /** Number of hidden items when collapsed. Present on collapsed placeholder groups (items will be []). */
   collapsedCount?: number
+  /** Header label style. Default preserves legacy uppercase compact section labels. */
+  labelStyle?: 'default' | 'plain'
 }
 
 export interface EntityListProps<T> {
@@ -78,10 +80,16 @@ export interface EntityListProps<T> {
 // Section Header
 // ============================================================================
 
-function SectionHeader({ label }: { label: string }) {
+function getSectionLabelClassName(labelStyle: EntityListGroup<unknown>['labelStyle']) {
+  return labelStyle === 'plain'
+    ? "text-sm font-medium text-muted-foreground normal-case tracking-normal"
+    : "text-sm font-medium text-muted-foreground uppercase tracking-wider"
+}
+
+function SectionHeader({ label, labelStyle }: { label: string; labelStyle?: EntityListGroup<unknown>['labelStyle'] }) {
   return (
     <div className="px-4 py-2">
-      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+      <span className={getSectionLabelClassName(labelStyle)}>
         {label}
       </span>
     </div>
@@ -96,10 +104,12 @@ function CollapsibleGroupHeader({
   onToggle,
   onCollapseAll,
   onExpandAll,
+  labelStyle,
 }: {
   label: string
   isCollapsed: boolean
   itemCount: number
+  labelStyle?: EntityListGroup<unknown>['labelStyle']
   onToggle: () => void
   onCollapseAll?: () => void
   onExpandAll?: () => void
@@ -118,7 +128,7 @@ function CollapsibleGroupHeader({
               !isCollapsed && "rotate-90"
             )}
           />
-          <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground relative">
+          <span className={cn(getSectionLabelClassName(labelStyle), "relative")}>
             {label}{isCollapsed && <> · <span className="text-muted-foreground/50">{itemCount}</span></>}
           </span>
         </button>
@@ -200,9 +210,10 @@ export function EntityList<T>({
                           onToggle={() => onToggleCollapse(group.key)}
                           onCollapseAll={onCollapseAll}
                           onExpandAll={onExpandAll}
+                          labelStyle={group.labelStyle}
                         />
                       ) : (
-                        <SectionHeader label={group.label} />
+                        <SectionHeader label={group.label} labelStyle={group.labelStyle} />
                       )}
                       {group.items.map((item, indexInGroup) =>
                         <React.Fragment key={getKey(item)}>

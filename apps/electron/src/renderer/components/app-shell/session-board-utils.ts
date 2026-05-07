@@ -2,13 +2,14 @@ import type { ReactNode } from "react"
 import type { SessionMeta } from "@/atoms/sessions"
 import type { SessionStatus } from "@/config/session-status-config"
 import { extractLabelId, type LabelConfig } from "@craft-agent/shared/labels"
+import { buildSessionProjectFilterOptions, getSessionProjectFilterId } from "@/utils/session-project-filter"
 
 export interface SessionBoardColumnModel {
   group: SessionBoardGroup
   sessions: SessionMeta[]
 }
 
-export type SessionBoardGroupBy = "status" | "label" | "recent"
+export type SessionBoardGroupBy = "status" | "label" | "project" | "recent"
 
 export interface SessionBoardGroup {
   id: string
@@ -118,6 +119,28 @@ function formatRecentColumnLabel(dayStart: number, todayStart: number): string {
   if (diffDays === 0) return "Today"
   if (diffDays === 1) return "Yesterday"
   return new Date(dayStart).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+}
+
+export function buildSessionBoardProjectColumns(
+  sessions: SessionMeta[],
+): SessionBoardColumnModel[] {
+  const groups = buildSessionProjectFilterOptions(sessions).map((project) => ({
+    id: project.id,
+    label: project.label,
+    kind: "project" as const,
+  }))
+
+  const byProject = new Map<string, SessionMeta[]>()
+  for (const session of sessions) {
+    const projectId = getSessionProjectFilterId(session)
+    if (!byProject.has(projectId)) byProject.set(projectId, [])
+    byProject.get(projectId)!.push(session)
+  }
+
+  return groups.map((group) => ({
+    group,
+    sessions: (byProject.get(group.id) ?? []).slice().sort(compareBoardSessions),
+  }))
 }
 
 export function buildSessionBoardRecentColumns(

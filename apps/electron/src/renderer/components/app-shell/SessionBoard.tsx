@@ -17,12 +17,13 @@ import { Eye } from "lucide-react"
 import type { SessionMeta } from "@/atoms/sessions"
 import type { SessionStatus } from "@/config/session-status-config"
 import { cn } from "@/lib/utils"
-import type { LabelConfig } from "@craft-agent/shared/labels"
+import { formatLabelEntry, parseLabelEntry, type LabelConfig } from "@craft-agent/shared/labels"
 import { SessionBoardColumn } from "./SessionBoardColumn"
 import { SessionBoardDragOverlay } from "./SessionBoardCard"
 import {
   buildSessionBoardLabelColumns,
   buildSessionBoardColumns,
+  buildSessionBoardProjectColumns,
   buildSessionBoardRecentColumns,
   computeBoardPosition,
   resolveBoardLabelId,
@@ -30,6 +31,7 @@ import {
   UNLABELED_BOARD_GROUP_ID,
   type SessionBoardGroupBy,
 } from "./session-board-utils"
+import { getSessionProjectFilterId, NO_PROJECT_FILTER_ID, PROJECT_LABEL_ID } from "@/utils/session-project-filter"
 
 type ColumnState = Record<string, string[]>
 
@@ -43,9 +45,11 @@ function buildColumns(
   const columns: ColumnState = {}
   const models = groupBy === "recent"
     ? buildSessionBoardRecentColumns(sessions)
-    : groupBy === "label"
-      ? buildSessionBoardLabelColumns(sessions, labels)
-      : buildSessionBoardColumns(sessions, statuses, hidden)
+    : groupBy === "project"
+      ? buildSessionBoardProjectColumns(sessions)
+      : groupBy === "label"
+        ? buildSessionBoardLabelColumns(sessions, labels)
+        : buildSessionBoardColumns(sessions, statuses, hidden)
   for (const column of models) {
     columns[column.group.id] = column.sessions.map((session) => session.id)
   }
@@ -96,9 +100,11 @@ export function SessionBoard({
   const boardColumns = useMemo(
     () => groupBy === "recent"
       ? buildSessionBoardRecentColumns(sessions)
-      : groupBy === "label"
-        ? buildSessionBoardLabelColumns(sessions, flatLabels)
-        : buildSessionBoardColumns(sessions, statuses, hiddenStatusIds),
+      : groupBy === "project"
+        ? buildSessionBoardProjectColumns(sessions)
+        : groupBy === "label"
+          ? buildSessionBoardLabelColumns(sessions, flatLabels)
+          : buildSessionBoardColumns(sessions, statuses, hiddenStatusIds),
     [flatLabels, groupBy, hiddenStatusIds, sessions, statuses],
   )
   const groupIds = useMemo(() => new Set(boardColumns.map((column) => column.group.id)), [boardColumns])
@@ -196,7 +202,11 @@ export function SessionBoard({
     const nextPosition = computeBoardPosition(orderedSessions, activeId)
     const current = sessionMapRef.current.get(activeId)
     const currentGroup = current
-      ? groupBy === "label" ? resolveBoardLabelId(current) : resolveBoardStatusId(current, statuses)
+      ? groupBy === "label"
+        ? resolveBoardLabelId(current)
+        : groupBy === "project"
+          ? getSessionProjectFilterId(current)
+          : resolveBoardStatusId(current, statuses)
       : undefined
 
     if (groupBy === "status" && currentGroup !== finalColumn) {
@@ -207,6 +217,13 @@ export function SessionBoard({
       const nextLabels = currentLabels.filter((label) => resolveBoardLabelId({ labels: [label] }) !== currentGroup)
       if (finalColumn !== UNLABELED_BOARD_GROUP_ID && !nextLabels.some((label) => resolveBoardLabelId({ labels: [label] }) === finalColumn)) {
         nextLabels.unshift(finalColumn)
+      }
+      onLabelsChange(activeId, nextLabels)
+    }
+    if (groupBy === "project" && current && currentGroup !== finalColumn && onLabelsChange) {
+      const nextLabels = (current.labels ?? []).filter((label) => parseLabelEntry(label).id !== PROJECT_LABEL_ID)
+      if (finalColumn !== NO_PROJECT_FILTER_ID) {
+        nextLabels.unshift(formatLabelEntry(PROJECT_LABEL_ID, finalColumn))
       }
       onLabelsChange(activeId, nextLabels)
     }

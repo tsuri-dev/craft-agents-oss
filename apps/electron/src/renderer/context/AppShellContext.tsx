@@ -71,8 +71,10 @@ export interface AppShellContextType {
   sessionBoardViewMode?: 'list' | 'board'
   onSessionBoardViewModeChange?: (mode: 'list' | 'board') => void
   /** Current board grouping mode. */
-  sessionBoardGroupBy?: 'status' | 'label' | 'recent'
-  onSessionBoardGroupByChange?: (groupBy: 'status' | 'label' | 'recent') => void
+  sessionBoardGroupBy?: 'status' | 'label' | 'project' | 'recent'
+  onSessionBoardGroupByChange?: (groupBy: 'status' | 'label' | 'project' | 'recent') => void
+  /** Sessions after the navigator's current view filters; used by board mode to match All Sessions filtering. */
+  sessionBoardSessions?: import('../atoms/sessions').SessionMeta[]
   /** Workspace-scoped hidden board status columns. */
   hiddenBoardStatusIds?: Set<string>
   onHideBoardStatus?: (statusId: string) => void
