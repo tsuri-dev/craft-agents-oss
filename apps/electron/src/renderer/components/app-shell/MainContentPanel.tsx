@@ -19,9 +19,11 @@ import * as React from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAtomValue } from 'jotai'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { Panel } from './Panel'
 import { MultiSelectPanel } from './MultiSelectPanel'
 import { SessionBoard } from './SessionBoard'
+import { StoryBoard } from './StoryBoard'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { sessionMetaMapAtom, type SessionMeta } from '@/atoms/sessions'
 import { StoplightProvider } from '@/context/StoplightContext'
@@ -33,6 +35,7 @@ import {
   isSettingsNavigation,
   isSkillsNavigation,
   isAutomationsNavigation,
+  isStoriesNavigation,
 } from '@/contexts/NavigationContext'
 import { useSessionSelection, useIsMultiSelectActive, useSelectedIds, useSelectionCount } from '@/hooks/useSession'
 import { sourceSelection, skillSelection, automationSelection } from '@/hooks/useEntitySelection'
@@ -45,6 +48,14 @@ import { AutomationInfoPage } from '../automations/AutomationInfoPage'
 import type { ExecutionEntry } from '../automations/types'
 import { automationsAtom } from '@/atoms/automations'
 import { SendResourceToWorkspaceDialog, type SendResourceType } from './SendResourceToWorkspaceDialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  addSessionGroupLabel,
+  buildSessionGroupFilterOptions,
+  resolveUniqueSessionGroupName,
+} from '@/utils/session-group-filter'
 
 export interface MainContentPanelProps {
   /** Whether both sidebar and navigator are hidden (focus mode / CMD+.) */
@@ -79,6 +90,7 @@ export function MainContentPanel({
     labels,
     sessionBoardViewMode,
     sessionBoardGroupBy,
+    sessionBoardSessions,
     onSessionBoardViewModeChange,
     hiddenBoardStatusIds,
     onHideBoardStatus,
@@ -152,6 +164,8 @@ export function MainContentPanel({
   const [sendResourceType, setSendResourceType] = useState<SendResourceType>('source')
   const [sendResourceIds, setSendResourceIds] = useState<string[]>([])
   const [sendResourceLabel, setSendResourceLabel] = useState('')
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false)
+  const [newGroupName, setNewGroupName] = useState('')
   const hasOtherWorkspaces = workspaces.length > 1
 
   const openSendDialog = useCallback((type: SendResourceType, ids: Set<string>) => {
@@ -172,6 +186,7 @@ export function MainContentPanel({
   }, [selectedIds, sessionMetaMap])
 
   const boardSessions = useMemo(() => {
+    if (sessionBoardSessions) return sessionBoardSessions
     if (!activeWorkspaceId) return []
     const activeSessions = Array.from(sessionMetaMap.values()).filter(meta =>
       meta.workspaceId === activeWorkspaceId &&
@@ -190,9 +205,18 @@ export function MainContentPanel({
     }
     if (filter.kind === 'view') return activeSessions
     return activeSessions
-  }, [activeWorkspaceId, labels, navState, sessionMetaMap])
+  }, [activeWorkspaceId, labels, navState, sessionBoardSessions, sessionMetaMap])
 
   const flatLabels = useMemo(() => flattenLabels(labels ?? []), [labels])
+
+  const groupOptions = useMemo(() => {
+    const workspaceSessions = Array.from(sessionMetaMap.values()).filter(meta =>
+      (!activeWorkspaceId || meta.workspaceId === activeWorkspaceId) &&
+      !meta.hidden &&
+      !meta.isArchived
+    )
+    return buildSessionGroupFilterOptions(workspaceSessions)
+  }, [activeWorkspaceId, sessionMetaMap])
 
   const handleBoardSelectSession = useCallback((sessionId: string) => {
     onSessionBoardViewModeChange?.('list')
@@ -251,6 +275,31 @@ export function MainContentPanel({
     })
   }, [selectedMetas, onSessionLabelsChange])
 
+  const addSelectedSessionsToGroup = useCallback((groupName: string) => {
+    if (!onSessionLabelsChange) return
+    selectedMetas.forEach(meta => {
+      const nextLabels = addSessionGroupLabel(meta.labels, groupName)
+      if (nextLabels !== meta.labels) {
+        onSessionLabelsChange(meta.id, nextLabels)
+      }
+    })
+  }, [onSessionLabelsChange, selectedMetas])
+
+  const handleCreateGroup = useCallback(() => {
+    setNewGroupName('')
+    setGroupDialogOpen(true)
+  }, [])
+
+  const handleConfirmCreateGroup = useCallback(() => {
+    const trimmed = newGroupName.trim()
+    if (!trimmed) return
+    const groupName = resolveUniqueSessionGroupName(trimmed, groupOptions.map(option => option.value))
+    addSelectedSessionsToGroup(groupName)
+    setGroupDialogOpen(false)
+    setNewGroupName('')
+    toast.success(`Added ${selectionCount} session${selectionCount === 1 ? '' : 's'} to “${groupName}”`)
+  }, [addSelectedSessionsToGroup, groupOptions, newGroupName, selectionCount])
+
   // Wrap content with StoplightProvider so PanelHeaders auto-compensate in focused mode.
   // Also renders the Send to Workspace dialog (portal-based, so it overlays regardless of position).
   const wrapWithStoplight = (content: React.ReactNode) => (
@@ -265,6 +314,38 @@ export function MainContentPanel({
         workspaces={workspaces}
         activeWorkspaceId={activeWorkspaceId || ''}
       />
+      <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New Group</DialogTitle>
+            <DialogDescription>
+              Add {selectionCount} selected session{selectionCount === 1 ? '' : 's'} to a new group.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault()
+              handleConfirmCreateGroup()
+            }}
+          >
+            <Input
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              placeholder="Group name"
+              autoFocus
+            />
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setGroupDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!newGroupName.trim()}>
+                Create Group
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </StoplightProvider>
   )
 
@@ -393,6 +474,14 @@ export function MainContentPanel({
     )
   }
 
+  if (isStoriesNavigation(navState)) {
+    return wrapWithStoplight(
+      <Panel variant="grow" className={className}>
+        <StoryBoard labels={flatLabels} />
+      </Panel>
+    )
+  }
+
   // Chats navigator - show chat, multi-select panel, or empty state
   if (isSessionsNavigation(navState)) {
     // Multi-select mode: show batch actions panel
@@ -407,6 +496,9 @@ export function MainContentPanel({
             labels={labels}
             appliedLabelIds={appliedLabelIds}
             onToggleLabel={handleBatchToggleLabel}
+            groupOptions={groupOptions}
+            onCreateGroup={handleCreateGroup}
+            onAddToGroup={addSelectedSessionsToGroup}
             onArchive={handleBatchArchive}
             onClearSelection={clearMultiSelect}
           />

@@ -31,13 +31,14 @@ import { sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import type { ViewConfig } from "@craft-agent/shared/views"
 import type { SessionStatusId, SessionStatus } from "@/config/session-status-config"
 import { buildCollapsedGroupsScopeSuffix } from "@/utils/session-list-collapse"
+import { getSessionGroupValues } from "@/utils/session-group-filter"
 
 export interface SessionListRow {
   item: SessionMeta
 }
 
 /** Grouping mode for chat list */
-export type ChatGroupingMode = 'date' | 'status' | 'unread'
+export type ChatGroupingMode = 'date' | 'status' | 'unread' | 'group'
 
 interface SessionListProps {
   items: SessionMeta[]
@@ -75,7 +76,7 @@ interface SessionListProps {
   labels?: LabelConfig[]
   /** Callback when session labels are toggled (for labels submenu in SessionMenu) */
   onLabelsChange?: (sessionId: string, labels: string[]) => void
-  /** How to group sessions: 'date' (default) or 'status' */
+  /** How to group sessions: 'date' (default), 'status', 'unread', or 'group' */
   groupingMode?: ChatGroupingMode
   /** Workspace ID for content search (optional - if not provided, content search is disabled) */
   workspaceId?: string
@@ -329,6 +330,53 @@ export function SessionList({
       }
     }
 
+    if (groupingMode === 'group') {
+      const groupsByKey = new Map<string, { rows: SessionListRow[], label: string, sortLabel: string }>()
+      const upsertGroup = (key: string, label: string, sortLabel: string) => {
+        if (!groupsByKey.has(key)) groupsByKey.set(key, { rows: [], label, sortLabel })
+        return groupsByKey.get(key)!
+      }
+
+      for (const row of rows) {
+        const [firstGroup] = getSessionGroupValues(row.item)
+        const label = firstGroup || 'Ungrouped'
+        const key = firstGroup ? `group-${encodeURIComponent(firstGroup)}` : 'group-__ungrouped__'
+        upsertGroup(key, label, firstGroup || '\uffff').rows.push(row)
+      }
+
+      for (const meta of collapsedGroupsMeta) {
+        if (!groupsByKey.has(meta.key)) {
+          const rawName = meta.key === 'group-__ungrouped__'
+            ? ''
+            : decodeURIComponent(meta.key.replace('group-', ''))
+          upsertGroup(meta.key, rawName || 'Ungrouped', rawName || '\uffff')
+        }
+      }
+
+      const orderedGroups: EntityListGroup<SessionListRow>[] = Array.from(groupsByKey.entries())
+        .sort(([, a], [, b]) => a.sortLabel.localeCompare(b.sortLabel, undefined, { sensitivity: 'base' }))
+        .map(([key, group]) => {
+          group.rows.sort((a, b) => (b.item.lastMessageAt || 0) - (a.item.lastMessageAt || 0))
+          const collapsedMeta = collapsedGroupsMeta.find(m => m.key === key)
+          return {
+            key,
+            label: group.label,
+            items: group.rows,
+            collapsible: true,
+            ...(collapsedMeta ? { collapsedCount: collapsedMeta.count } : {}),
+          }
+        })
+
+      if (orderedGroups.length === 1) {
+        orderedGroups[0].collapsible = false
+      }
+
+      return {
+        rows: orderedGroups.flatMap(g => g.items),
+        groups: orderedGroups,
+      }
+    }
+
     if (groupingMode === 'status') {
       const statusOrder = new Map<string, number>()
       sessionStatuses.forEach((state, index) => statusOrder.set(state.id, index))
@@ -432,7 +480,7 @@ export function SessionList({
       rows,
       groups: orderedGroups,
     }
-  }, [isSearchMode, matchingFilterItems, otherResultItems, flatItems, groupingMode, sessionStatuses, collapsedGroupsMeta, t])
+  }, [isSearchMode, matchingFilterItems, otherResultItems, flatItems, groupingMode, sessionStatuses, collapsedGroupsMeta, t, i18n.resolvedLanguage])
 
   const flatRows = rowData.rows
 
@@ -442,6 +490,12 @@ export function SessionList({
       setCollapsedGroups(allKeys)
     } else if (groupingMode === 'unread') {
       const allKeys = new Set(items.map(item => item.hasUnread ? 'unread-yes' : 'unread-no'))
+      setCollapsedGroups(allKeys)
+    } else if (groupingMode === 'group') {
+      const allKeys = new Set(items.map(item => {
+        const [firstGroup] = getSessionGroupValues(item)
+        return firstGroup ? `group-${encodeURIComponent(firstGroup)}` : 'group-__ungrouped__'
+      }))
       setCollapsedGroups(allKeys)
     } else {
       const allKeys = new Set(items.map(item =>

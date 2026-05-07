@@ -103,34 +103,43 @@ function SessionInfoPopoverContent({ sessionId, sessionFolderPath }: { sessionId
   const { onRenameSession } = useAppShellContext()
   const [name, setName] = React.useState('')
   const renameTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingNameRef = React.useRef('')
 
   React.useEffect(() => {
     setName(session?.name || '')
+    pendingNameRef.current = session?.name || ''
   }, [session?.name])
+
+  const commitName = React.useCallback((value: string) => {
+    const trimmed = value.trim()
+    if (trimmed && trimmed !== session?.name) {
+      onRenameSession(sessionId, trimmed)
+    }
+  }, [onRenameSession, session?.name, sessionId])
 
   React.useEffect(() => {
     return () => {
       if (renameTimeoutRef.current) {
         clearTimeout(renameTimeoutRef.current)
+        commitName(pendingNameRef.current)
       }
     }
-  }, [])
+  }, [commitName])
 
   const handleNameChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const newName = e.target.value
     setName(newName)
+    pendingNameRef.current = newName
 
     if (renameTimeoutRef.current) {
       clearTimeout(renameTimeoutRef.current)
     }
 
     renameTimeoutRef.current = setTimeout(() => {
-      const trimmed = newName.trim()
-      if (trimmed) {
-        onRenameSession(sessionId, trimmed)
-      }
+      renameTimeoutRef.current = null
+      commitName(newName)
     }, 500)
-  }, [onRenameSession, sessionId])
+  }, [commitName])
 
   return (
     <div className="h-full min-h-0 flex flex-col">
@@ -142,6 +151,13 @@ function SessionInfoPopoverContent({ sessionId, sessionFolderPath }: { sessionId
           <Input
             value={name}
             onChange={handleNameChange}
+            onBlur={() => {
+              if (renameTimeoutRef.current) {
+                clearTimeout(renameTimeoutRef.current)
+                renameTimeoutRef.current = null
+              }
+              commitName(pendingNameRef.current)
+            }}
             placeholder={t("chat.titlePlaceholder")}
             className="h-9 py-2 text-sm border-0 shadow-none bg-transparent focus-visible:ring-0"
           />

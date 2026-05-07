@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react'
-import { Archive, Tag, CheckCircle2, Send } from 'lucide-react'
+import { Archive, Tag, CheckCircle2, Send, FolderOpen, Plus } from 'lucide-react'
 import { useTranslation, Trans } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
@@ -25,6 +25,7 @@ import {
 import type { SessionStatusId, SessionStatus } from '@/config/session-status-config'
 import type { LabelConfig } from '@craft-agent/shared/labels'
 import { LabelMenuItems, StatusMenuItems } from './SessionMenuParts'
+import type { SessionGroupFilterOption } from '@/utils/session-group-filter'
 
 type MultiSelectEntityType = 'automation' | 'session' | 'skill' | 'source'
 
@@ -45,6 +46,12 @@ export interface MultiSelectPanelProps {
   appliedLabelIds?: Set<string>
   /** Callback when toggling a label for all selected */
   onToggleLabel?: (labelId: string) => void
+  /** Existing session groups available for selected sessions */
+  groupOptions?: SessionGroupFilterOption[]
+  /** Callback to create a new group for all selected sessions */
+  onCreateGroup?: () => void
+  /** Callback to add all selected sessions to an existing group */
+  onAddToGroup?: (groupName: string) => void
   /** Callback when archiving all selected */
   onArchive?: () => void
   /** Callback when sending selected to another workspace */
@@ -64,6 +71,9 @@ export function MultiSelectPanel({
   labels = [],
   appliedLabelIds = new Set(),
   onToggleLabel,
+  groupOptions = [],
+  onCreateGroup,
+  onAddToGroup,
   onArchive,
   onSendToWorkspace,
   onClearSelection,
@@ -169,6 +179,40 @@ export function MultiSelectPanel({
                   SubContent: StyledDropdownMenuSubContent,
                 }}
               />
+            </StyledDropdownMenuContent>
+          </DropdownMenu>
+        )}
+        {(onCreateGroup || onAddToGroup) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-2 bg-background shadow-minimal hover:bg-foreground/[0.03]"
+              >
+                <FolderOpen className="w-4 h-4" />
+                Group
+              </Button>
+            </DropdownMenuTrigger>
+            <StyledDropdownMenuContent align="center" className="min-w-[220px]">
+              {onCreateGroup && (
+                <StyledDropdownMenuItem onClick={onCreateGroup}>
+                  <Plus className="h-3.5 w-3.5" />
+                  <span className="flex-1">New Group…</span>
+                </StyledDropdownMenuItem>
+              )}
+              {onAddToGroup && groupOptions.length > 0 && (
+                <>
+                  <StyledDropdownMenuSeparator />
+                  {groupOptions.map(group => (
+                    <StyledDropdownMenuItem key={group.id} onClick={() => onAddToGroup(group.value)}>
+                      <FolderOpen className="h-3.5 w-3.5" />
+                      <span className="flex-1 truncate">{group.label}</span>
+                      <span className="text-[10px] tabular-nums text-muted-foreground">{group.count}</span>
+                    </StyledDropdownMenuItem>
+                  ))}
+                </>
+              )}
             </StyledDropdownMenuContent>
           </DropdownMenu>
         )}
