@@ -2341,6 +2341,39 @@ function AppShellContent({
             : undefined,
         )}
       />
+      {sessionBoardViewMode === 'list' && !isStateSubView && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <HeaderIconButton
+              icon={<Layers className="h-4 w-4" />}
+              tooltip="List grouping"
+              className="rounded-[8px]"
+            />
+          </DropdownMenuTrigger>
+          <StyledDropdownMenuContent align="end" light minWidth="min-w-[170px]">
+            <StyledDropdownMenuItem onClick={() => setChatGroupingMode('date')}>
+              <Calendar className="h-3.5 w-3.5" />
+              <span className="flex-1">Date</span>
+              {chatGroupingMode === 'date' && <Check className="h-3 w-3 text-muted-foreground" />}
+            </StyledDropdownMenuItem>
+            <StyledDropdownMenuItem onClick={() => setChatGroupingMode('status')}>
+              <Inbox className="h-3.5 w-3.5" />
+              <span className="flex-1">Status</span>
+              {chatGroupingMode === 'status' && <Check className="h-3 w-3 text-muted-foreground" />}
+            </StyledDropdownMenuItem>
+            <StyledDropdownMenuItem onClick={() => setChatGroupingMode('unread')}>
+              <MailOpen className="h-3.5 w-3.5" />
+              <span className="flex-1">Unread</span>
+              {chatGroupingMode === 'unread' && <Check className="h-3 w-3 text-muted-foreground" />}
+            </StyledDropdownMenuItem>
+            <StyledDropdownMenuItem onClick={() => setChatGroupingMode('group')}>
+              <Layers className="h-3.5 w-3.5" />
+              <span className="flex-1">Group</span>
+              {chatGroupingMode === 'group' && <Check className="h-3 w-3 text-muted-foreground" />}
+            </StyledDropdownMenuItem>
+          </StyledDropdownMenuContent>
+        </DropdownMenu>
+      )}
       {sessionBoardViewMode === 'board' && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
