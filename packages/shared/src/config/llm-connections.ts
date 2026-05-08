@@ -77,6 +77,7 @@ export type LlmConnectionType = 'anthropic' | 'openai' | 'openai-compat';
  *
  * No auth:
  * - 'none': No authentication required (local models like Ollama)
+ * - 'external_cli': Authentication is owned by a Claude Code-compatible executable
  */
 export type LlmAuthType =
   | 'api_key'
@@ -86,6 +87,7 @@ export type LlmAuthType =
   | 'bearer_token'
   | 'service_account_file'
   | 'environment'
+  | 'external_cli'
   | 'none';
 
 /**
@@ -152,6 +154,9 @@ export interface LlmConnection {
 
   /** Authentication mechanism */
   authType: LlmAuthType;
+
+  /** Absolute path to a Claude Code-compatible executable for external_cli auth. */
+  claudeCodeExecutablePath?: string;
 
   /** Override available models (for custom endpoints that don't support model listing) */
   models?: Array<ModelDefinition | string>;
@@ -381,6 +386,7 @@ export function authTypeToCredentialStorageType(authType: LlmAuthType): LlmCrede
     case 'service_account_file':
       return 'service_account';
     case 'environment':
+    case 'external_cli':
     case 'none':
       return null;
   }
@@ -723,7 +729,7 @@ export function isValidProviderAuthCombination(
   authType: LlmAuthType
 ): boolean {
   const validCombinations: Record<LlmProviderType, LlmAuthType[]> = {
-    anthropic: ['api_key', 'oauth'],
+    anthropic: ['api_key', 'oauth', 'external_cli'],
     pi: ['api_key', 'oauth', 'iam_credentials', 'environment', 'none'],
     pi_compat: ['api_key_with_endpoint', 'none'],
   };
@@ -1019,6 +1025,9 @@ export async function resolveAuthEnvVars(
     }
   } else if (authType === 'environment') {
     // Environment auth — credentials come from process.env, nothing to inject
+    return { envVars, success: true };
+  } else if (authType === 'external_cli') {
+    // Claude Code-compatible external CLI owns auth via its native config/env.
     return { envVars, success: true };
   }
 

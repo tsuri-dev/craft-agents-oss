@@ -22,6 +22,8 @@ import type {
   PermissionModeState,
   UnreadSummary,
   ShareResult,
+  UsageStats,
+  UsageStatsRange,
 } from '@craft-agent/shared/protocol'
 import type { SessionBundle, DispatchMode } from '@craft-agent/shared/sessions'
 import type { EventSink } from '../transport'
@@ -191,6 +193,7 @@ export interface ISessionManager {
   refreshTitle(sessionId: string): Promise<{ success: boolean; title?: string; error?: string }>
   refreshBadge(): void
   getUnreadSummary(): UnreadSummary
+  getUsageStats(workspaceId: string, range?: UsageStatsRange): Promise<UsageStats>
 
   // ---------------------------------------------------------------------------
   // Workspace

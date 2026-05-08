@@ -128,7 +128,30 @@ describe('resolveClaudeBinaryPath (native binary, SDK ≥ 0.2.113)', () => {
   const tmpBase = join(tmpdir(), `claude-bin-resolver-test-${Date.now()}`);
 
   afterEach(() => {
+    delete process.env.CRAFT_CLAUDE_CODE_EXECUTABLE;
+    delete process.env.CRAFT_CLAUDE_CODE_PATH;
     try { rmSync(tmpBase, { recursive: true, force: true }); } catch {}
+  });
+
+  it('honors CRAFT_CLAUDE_CODE_EXECUTABLE for Claude Code compatible internal CLIs', () => {
+    const appRoot = join(tmpBase, 'override-app');
+    const overrideDir = join(tmpBase, 'override-bin');
+    mkdirSync(appRoot, { recursive: true });
+    mkdirSync(overrideDir, { recursive: true });
+    const binaryName = process.platform === 'win32' ? 'claude-internal.exe' : 'claude-internal';
+    const overridePath = join(overrideDir, binaryName);
+    writeFileSync(overridePath, '#!/bin/sh\n');
+    chmodSync(overridePath, 0o755);
+    process.env.CRAFT_CLAUDE_CODE_EXECUTABLE = overridePath;
+
+    const hostRuntime: BackendHostRuntimeContext = {
+      appRootPath: appRoot,
+      resourcesPath: appRoot,
+      isPackaged: true,
+    };
+
+    const paths = resolveBackendRuntimePaths(hostRuntime);
+    expect(paths.claudeCliPath).toBe(overridePath);
   });
 
   it('finds the per-platform native binary in the optional-dep package', () => {

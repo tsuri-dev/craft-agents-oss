@@ -235,7 +235,7 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
     const provider = connection.providerType || connection.type
     const isSubscription = connection.authType === 'oauth'
     switch (provider) {
-      case 'anthropic': parts.push(isSubscription ? 'Anthropic Subscription' : 'Anthropic API'); break
+      case 'anthropic': parts.push(connection.authType === 'external_cli' ? 'Claude Code CLI' : isSubscription ? 'Anthropic Subscription' : 'Anthropic API'); break
       case 'pi': {
         // Show upstream provider name for API key connections (e.g. "Google AI Studio")
         const piLabel = !isSubscription && connection.piAuthProvider
@@ -254,7 +254,7 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
 
     // Base URL for API key connections (show custom endpoint or default for provider)
     if (connection.authType !== 'oauth') {
-      let endpoint = connection.baseUrl
+      let endpoint = connection.authType === 'external_cli' ? connection.claudeCodeExecutablePath : connection.baseUrl
       // Use default endpoints for standard providers if no custom baseUrl
       if (!endpoint) {
         if (provider === 'anthropic') endpoint = 'https://api.anthropic.com'
@@ -590,6 +590,7 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
 
 /** Map a connection's provider type to the corresponding API key setup method. */
 function getApiKeyMethodForConnection(conn: LlmConnectionWithStatus): ApiSetupMethod {
+  if (conn.authType === 'external_cli') return 'claude_cli'
   const provider = conn.providerType || conn.type
   if (provider === 'pi' || provider === 'pi_compat') return 'pi_api_key'
   return 'anthropic_api_key'
@@ -614,6 +615,7 @@ export default function AiSettingsPage() {
     activePreset?: string
     models?: string[]
     customApi?: CustomEndpointApi
+    claudeCodeExecutablePath?: string
   } | undefined>(undefined)
   const setFullscreenOverlayOpen = useSetAtom(fullscreenOverlayOpenAtom)
 
@@ -819,6 +821,7 @@ export default function AiSettingsPage() {
       activePreset: isCustomEndpointConnection ? 'custom' : (connection.piAuthProvider || undefined),
       models: modelIds,
       customApi: connection.customEndpoint?.api,
+      claudeCodeExecutablePath: connection.claudeCodeExecutablePath,
     })
 
     // Open overlay and jump directly to credentials step (no reset — jumpToCredentials sets state)

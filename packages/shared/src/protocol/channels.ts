@@ -33,6 +33,7 @@ export const RPC_CHANNELS = {
     COMMAND: 'sessions:command',
     GET_PENDING_PLAN_EXECUTION: 'sessions:getPendingPlanExecution',
     GET_PERMISSION_MODE_STATE: 'sessions:getPermissionModeState',
+    GET_USAGE_STATS: 'sessions:getUsageStats',
     EVENT: 'session:event',
     GET_MODEL: 'session:getModel',
     SET_MODEL: 'session:setModel',

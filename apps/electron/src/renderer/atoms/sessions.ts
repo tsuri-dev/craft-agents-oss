@@ -66,6 +66,9 @@ export interface SessionMeta {
     totalTokens: number
     costUsd: number
     contextTokens: number
+    cacheReadTokens?: number
+    cacheCreationTokens?: number
+    contextWindow?: number
   }
   /** When the session was created (ms timestamp) */
   createdAt?: number

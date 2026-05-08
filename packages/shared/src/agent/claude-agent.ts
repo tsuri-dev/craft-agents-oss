@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { getSystemPrompt } from '../prompts/system.ts';
 import { BaseAgent, type MiniAgentConfig, MINI_AGENT_TOOLS, MINI_AGENT_MCP_KEYS } from './base-agent.ts';
 import type { BackendConfig, PostInitResult, PermissionRequestType, SdkMcpServerConfig } from './backend/types.ts';
+import { getBackendRuntime } from './backend/internal/driver-types.ts';
 // Plan types are used by UI components; not needed in craft-agent.ts since Safe Mode is user-controlled
 import { parseError, type AgentError } from './errors.ts';
 import { mapClaudeSdkAssistantError, type ClaudeSdkApiError } from './claude-sdk-error-mapper.ts';
@@ -675,17 +676,29 @@ export class ClaudeAgent extends BaseAgent {
     delete process.env.ANTHROPIC_BASE_URL;
     clearClaudeBedrockRoutingEnvVars();
 
-    // Resolve auth env vars via shared utility
-    const manager = getCredentialManager();
-    const result = await resolveAuthEnvVars(connection, slug, manager, getValidClaudeOAuthToken);
+    // When a Claude Code compatible executable is explicitly provided (for example,
+    // an internal company wrapper), let that executable own authentication via its
+    // native config store/environment. Injecting Craft's Anthropic API/OAuth env vars
+    // can accidentally route the internal CLI through the wrong auth path.
+    const usesExternalClaudeExecutable = connection.authType === 'external_cli' || !!(
+      connection.claudeCodeExecutablePath?.trim() ||
+      process.env.CRAFT_CLAUDE_CODE_EXECUTABLE?.trim() ||
+      process.env.CRAFT_CLAUDE_CODE_PATH?.trim()
+    );
 
-    if (!result.success) {
-      return { authInjected: false, authWarning: result.warning, authWarningLevel: 'error' };
-    }
+    if (!usesExternalClaudeExecutable) {
+      // Resolve auth env vars via shared utility
+      const manager = getCredentialManager();
+      const result = await resolveAuthEnvVars(connection, slug, manager, getValidClaudeOAuthToken);
 
-    // Apply env vars to process.env (for SDK subprocess) and envOverrides (per-session isolation)
-    for (const [key, value] of Object.entries(result.envVars)) {
-      process.env[key] = value;
+      if (!result.success) {
+        return { authInjected: false, authWarning: result.warning, authWarningLevel: 'error' };
+      }
+
+      // Apply env vars to process.env (for SDK subprocess) and envOverrides (per-session isolation)
+      for (const [key, value] of Object.entries(result.envVars)) {
+        process.env[key] = value;
+      }
     }
 
     // Pass mini model to SDK subprocess so built-in tools like WebFetch
@@ -962,8 +975,10 @@ export class ClaudeAgent extends BaseAgent {
       // chatImpl invocation, not state left over from an earlier call.
       const resolvedCwd = this.resolveSpawnCwd({ isRetry: _isRetry, sessionId });
 
+      const runtimeClaudeCliPath = getBackendRuntime(this.config).paths?.claudeCli;
       const options: Options = {
         ...getDefaultOptions(this.config.envOverrides),
+        ...(runtimeClaudeCliPath ? { pathToClaudeCodeExecutable: runtimeClaudeCliPath } : {}),
         model: effectiveModel,
         // Capture stderr from SDK subprocess for error diagnostics
         // This helps identify why sessions fail with "process exited with code 1"
@@ -2730,9 +2745,11 @@ This is a branched conversation. All prior messages in this conversation are par
       throw new Error('ClaudeAgent.runMiniCompletion: config.miniModel is required');
     }
     const model = this.config.miniModel;
+    const runtimeClaudeCliPath = getBackendRuntime(this.config).paths?.claudeCli;
 
     const options = {
       ...getDefaultOptions(this.config.envOverrides),
+      ...(runtimeClaudeCliPath ? { pathToClaudeCodeExecutable: runtimeClaudeCliPath } : {}),
       model,
       maxTurns: 1,
       systemPrompt: 'Reply with ONLY the requested text. No explanation.', // Minimal - no Claude Code preset
@@ -2859,9 +2876,11 @@ This is a branched conversation. All prior messages in this conversation are par
 
   async queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     const model = request.model ?? this.config.miniModel ?? getDefaultSummarizationModel();
+    const runtimeClaudeCliPath = getBackendRuntime(this.config).paths?.claudeCli;
 
     const options = {
       ...getDefaultOptions(this.config.envOverrides),
+      ...(runtimeClaudeCliPath ? { pathToClaudeCodeExecutable: runtimeClaudeCliPath } : {}),
       model,
       // Reasoning-model outputs (Opus 4.7 extended thinking) can span multiple SDK-counted
       // turns even with no tools exposed. Tool surface here is empty, so no tool-use loop risk.

@@ -1,7 +1,58 @@
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { ProviderDriver } from '../driver-types.ts';
-import { applyAnthropicRuntimeBootstrap } from '../runtime-resolver.ts';
+import { applyAnthropicRuntimeBootstrap, type ResolvedBackendRuntimePaths } from '../runtime-resolver.ts';
 import { validateAnthropicConnection } from '../../../../config/llm-validation.ts';
 import { getModelContextWindow } from '../../../../config/models.ts';
+import type { LlmConnection } from '../../../../config/storage.ts';
+
+function resolveConnectionClaudeCliPath(
+  connection: LlmConnection | null,
+  resolvedPaths: ResolvedBackendRuntimePaths,
+): string | undefined {
+  const configuredPath = connection?.claudeCodeExecutablePath?.trim();
+  return configuredPath ? resolve(configuredPath) : resolvedPaths.claudeCliPath;
+}
+
+async function validateExternalClaudeCli(args: {
+  executablePath: string;
+  cwd: string;
+  model?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), 60_000);
+  try {
+    let succeeded = false;
+    for await (const msg of query({
+      prompt: 'Reply exactly: ok',
+      options: {
+        pathToClaudeCodeExecutable: args.executablePath,
+        cwd: args.cwd,
+        model: args.model || 'Default',
+        maxTurns: 1,
+        tools: [],
+        systemPrompt: 'Reply with only the requested text.',
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        abortController,
+      },
+    })) {
+      if (msg.type === 'result') {
+        succeeded = msg.subtype === 'success';
+        if (!succeeded) {
+          const resultText = 'result' in msg ? String(msg.result || '') : '';
+          return { success: false, error: resultText || 'Claude CLI test failed' };
+        }
+      }
+    }
+    return succeeded ? { success: true } : { success: false, error: 'Claude CLI test produced no result event.' };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 export const anthropicDriver: ProviderDriver = {
   provider: 'anthropic',
@@ -10,10 +61,17 @@ export const anthropicDriver: ProviderDriver = {
     // Missing paths will be caught at session start (prepareRuntime).
     applyAnthropicRuntimeBootstrap(hostRuntime, resolvedPaths, { strict: false });
   },
-  prepareRuntime: ({ hostRuntime, resolvedPaths }) => {
-    applyAnthropicRuntimeBootstrap(hostRuntime, resolvedPaths);
+  prepareRuntime: ({ hostRuntime, resolvedPaths, context }) => {
+    applyAnthropicRuntimeBootstrap(hostRuntime, {
+      ...resolvedPaths,
+      claudeCliPath: resolveConnectionClaudeCliPath(context.connection, resolvedPaths),
+    });
   },
-  buildRuntime: () => ({}),
+  buildRuntime: ({ context, resolvedPaths }) => ({
+    paths: {
+      claudeCli: resolveConnectionClaudeCliPath(context.connection, resolvedPaths),
+    },
+  }),
   fetchModels: async ({ connection, credentials }) => {
     // After legacy migration, only direct 'anthropic' connections reach this driver.
     // iam_credentials and service_account_file are no longer valid auth types for anthropic.
@@ -94,8 +152,23 @@ export const anthropicDriver: ProviderDriver = {
 
     return { models };
   },
-  validateStoredConnection: async ({ slug, connection, credentialManager }) => {
+  validateStoredConnection: async ({ slug, connection, credentialManager, hostRuntime }) => {
     // After legacy migration, only direct 'anthropic' connections reach this driver.
+
+    if (connection.providerType === 'anthropic' && connection.authType === 'external_cli') {
+      const executablePath = connection.claudeCodeExecutablePath?.trim();
+      if (!executablePath) {
+        return { success: false, error: 'Claude executable path is required.' };
+      }
+      if (!existsSync(executablePath)) {
+        return { success: false, error: `Claude executable not found: ${executablePath}` };
+      }
+      return validateExternalClaudeCli({
+        executablePath,
+        cwd: hostRuntime.appRootPath,
+        model: connection.defaultModel,
+      });
+    }
 
     if (connection.providerType === 'anthropic' && connection.authType === 'oauth') {
       const { getValidClaudeOAuthToken } = await import('../../../../auth/state.ts');

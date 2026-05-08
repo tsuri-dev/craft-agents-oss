@@ -226,6 +226,7 @@ const EXPECTED_CHANNELS: string[] = [
   'sessions:getPendingPlanExecution',
   'sessions:getPermissionModeState',
   'sessions:getUnreadSummary',
+  'sessions:getUsageStats',
   'sessions:import',
   'sessions:importRemoteTransfer',
   'sessions:killShell',

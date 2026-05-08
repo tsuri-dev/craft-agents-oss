@@ -4,6 +4,7 @@ import type { SessionStatusId, SessionStatus } from "@/config/session-status-con
 import type { SessionMeta } from "@/atoms/sessions"
 import type { SessionOptions } from "@/hooks/useSessionOptions"
 import type { ContentSearchResult } from "@/hooks/useSessionSearch"
+import type { SessionGroupFilterOption } from "@/utils/session-group-filter"
 
 export interface SessionListContextValue {
   // Session action callbacks (shared across all items)
@@ -16,6 +17,9 @@ export interface SessionListContextValue {
   onMarkUnread: (sessionId: string) => void
   onDelete: (sessionId: string, skipConfirmation?: boolean) => Promise<boolean>
   onLabelsChange?: (sessionId: string, labels: string[]) => void
+  groupOptions?: SessionGroupFilterOption[]
+  onCreateGroupForSession?: (item: SessionMeta) => void
+  onToggleGroupForSession?: (item: SessionMeta, groupName: string) => void
   onSelectSessionById: (sessionId: string) => void
   onOpenInNewWindow: (item: SessionMeta) => void
   onSendToWorkspace?: (sessionIds: string[]) => void

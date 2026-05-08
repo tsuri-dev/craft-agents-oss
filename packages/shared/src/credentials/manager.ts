@@ -511,6 +511,7 @@ export class CredentialManager {
       // No credentials needed
       case 'none':
       case 'environment':
+      case 'external_cli':
         return true;
 
       // API key variants - all use the same storage
@@ -673,7 +674,7 @@ export class CredentialManager {
 
       if (defaultSlug) {
         const connection = getLlmConnection(defaultSlug);
-        if (connection && connection.authType !== 'none' && connection.authType !== 'environment') {
+        if (connection && connection.authType !== 'none' && connection.authType !== 'environment' && connection.authType !== 'external_cli') {
           const hasCredentials = await this.hasLlmCredentials(
             defaultSlug,
             connection.authType,

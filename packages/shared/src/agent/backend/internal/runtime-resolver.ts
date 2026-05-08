@@ -11,6 +11,16 @@ import { setPathToClaudeCodeExecutable } from '../../options.ts';
  */
 const IS_DEV_RUNTIME = !!process.env.CRAFT_DEV_RUNTIME;
 
+/**
+ * Optional escape hatch for Claude Code compatible internal/forked CLIs.
+ * The executable must speak the Claude Code SDK JSON protocol, because the
+ * TypeScript SDK still drives it through `pathToClaudeCodeExecutable`.
+ */
+const CLAUDE_EXECUTABLE_OVERRIDE_ENV = [
+  'CRAFT_CLAUDE_CODE_EXECUTABLE',
+  'CRAFT_CLAUDE_CODE_PATH',
+] as const;
+
 export interface ResolvedBackendRuntimePaths {
   /**
    * Absolute path to the native `claude` binary (since SDK 0.2.113).
@@ -116,7 +126,18 @@ function nativeBinaryName(): string {
  *   3. Dev-runtime walk-up across both lookups for ad-hoc local builds
  *      (`electron:dist:dev:mac`).
  */
+function resolveClaudeExecutableOverride(): string | undefined {
+  for (const key of CLAUDE_EXECUTABLE_OVERRIDE_ENV) {
+    const value = process.env[key]?.trim();
+    if (value && existsSync(value)) return resolve(value);
+  }
+  return undefined;
+}
+
 function resolveClaudeBinaryPath(hostRuntime: BackendHostRuntimeContext): string | undefined {
+  const override = resolveClaudeExecutableOverride();
+  if (override) return override;
+
   const binaryName = nativeBinaryName();
   const aliasRel = join('node_modules', '@anthropic-ai', 'claude-agent-sdk-binary', binaryName);
   const pkg = platformBinaryPkg();

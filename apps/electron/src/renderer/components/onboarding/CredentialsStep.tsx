@@ -5,11 +5,20 @@
  * with StepFormLayout for the onboarding wizard context.
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, type FormEvent } from "react"
 import { useTranslation } from "react-i18next"
-import { Check, ExternalLink } from "lucide-react"
+import { Check, ExternalLink, Terminal } from "lucide-react"
 import type { ApiSetupMethod } from "./APISetupStep"
 import { StepFormLayout, BackButton, ContinueButton } from "./primitives"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   ApiKeyInput,
   type ApiKeyStatus,
@@ -20,6 +29,13 @@ import {
 import type { CustomEndpointApi } from '@config/llm-connections'
 
 export type CredentialStatus = ApiKeyStatus | OAuthStatus
+
+const DEFAULT_CLAUDE_CLI_MODELS = ['Sonnet', 'Opus', 'Haiku', 'Default'] as const
+type ClaudeCliModel = typeof DEFAULT_CLAUDE_CLI_MODELS[number]
+
+function normalizeClaudeCliModel(model?: string): ClaudeCliModel {
+  return DEFAULT_CLAUDE_CLI_MODELS.includes(model as ClaudeCliModel) ? model as ClaudeCliModel : 'Default'
+}
 
 interface CredentialsStepProps {
   apiSetupMethod: ApiSetupMethod
@@ -42,6 +58,7 @@ interface CredentialsStepProps {
     activePreset?: string
     models?: string[]
     customApi?: CustomEndpointApi
+    claudeCodeExecutablePath?: string
   }
 }
 
@@ -64,10 +81,13 @@ export function CredentialsStep({
   const isCopilotOAuth = apiSetupMethod === 'pi_copilot_oauth'
   const isAnthropicApiKey = apiSetupMethod === 'anthropic_api_key'
   const isPiApiKey = apiSetupMethod === 'pi_api_key'
+  const isClaudeCli = apiSetupMethod === 'claude_cli'
   const isApiKey = isAnthropicApiKey || isPiApiKey
 
   // Copilot device code clipboard handling
   const [copiedCode, setCopiedCode] = useState(false)
+  const [cliExecutablePath, setCliExecutablePath] = useState(editInitialValues?.claudeCodeExecutablePath ?? '')
+  const [cliDefaultModel, setCliDefaultModel] = useState<ClaudeCliModel>(normalizeClaudeCliModel(editInitialValues?.connectionDefaultModel))
 
   // Auto-copy device code to clipboard when it appears
   useEffect(() => {
@@ -88,6 +108,102 @@ export function CredentialsStep({
         setTimeout(() => setCopiedCode(false), 2000)
       })
     }
+  }
+
+  if (isClaudeCli) {
+    const submitClaudeCli = (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      onSubmit({
+        apiKey: '',
+        claudeCodeExecutablePath: cliExecutablePath,
+        connectionDefaultModel: cliDefaultModel,
+        models: [...DEFAULT_CLAUDE_CLI_MODELS],
+      })
+    }
+
+    return (
+      <StepFormLayout
+        title="Claude Code CLI"
+        description="Connect a Claude Code-compatible executable, such as claude-internal. Authentication is handled by that CLI."
+        actions={
+          <>
+            <BackButton onClick={onBack} disabled={status === 'validating'} />
+            <ContinueButton
+              type="submit"
+              form="claude-cli-form"
+              disabled={false}
+              loading={status === 'validating'}
+              loadingText={t("common.validating")}
+            />
+          </>
+        }
+      >
+        <form id="claude-cli-form" onSubmit={submitClaudeCli} className="space-y-4">
+          <div className="rounded-xl bg-foreground-2 p-4 text-sm text-muted-foreground">
+            <div className="flex items-start gap-3">
+              <Terminal className="mt-0.5 size-4 shrink-0 text-foreground/60" />
+              <p>
+                The executable must support Claude Code SDK JSON mode. For your machine, try <code className="text-foreground/70">/Users/corinli/.volta/bin/claude-internal</code>.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="claude-cli-path">Executable path</Label>
+            <Input
+              id="claude-cli-path"
+              value={cliExecutablePath}
+              onChange={event => setCliExecutablePath(event.target.value)}
+              placeholder="/Users/corinli/.volta/bin/claude-internal"
+              disabled={status === 'validating'}
+              autoFocus
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="claude-cli-default-model">Default model</Label>
+            <Select
+              value={cliDefaultModel}
+              onValueChange={value => setCliDefaultModel(normalizeClaudeCliModel(value))}
+              disabled={status === 'validating'}
+            >
+              <SelectTrigger id="claude-cli-default-model">
+                <SelectValue placeholder="Select default model" />
+              </SelectTrigger>
+              <SelectContent style={{ zIndex: 'calc(var(--z-splash, 600) + 1)' }}>
+                {DEFAULT_CLAUDE_CLI_MODELS.map(model => (
+                  <SelectItem key={model} value={model}>{model}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">This value is passed to claude-internal for new sessions.</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Available models</Label>
+            <div className="flex flex-wrap gap-2 rounded-md border border-foreground/10 bg-foreground-2 px-3 py-2">
+              {DEFAULT_CLAUDE_CLI_MODELS.map(model => (
+                <span key={model} className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs text-foreground/80">
+                  {model}
+                </span>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">Fixed to the claude-internal supported model names to avoid typos.</p>
+          </div>
+
+          {status === 'error' && errorMessage && (
+            <div className="rounded-lg bg-destructive/10 text-destructive text-sm p-3">
+              {errorMessage}
+            </div>
+          )}
+          {status === 'success' && (
+            <div className="rounded-lg bg-success/10 text-success text-sm p-3">
+              Claude CLI connected.
+            </div>
+          )}
+        </form>
+      </StepFormLayout>
+    )
   }
 
   // --- ChatGPT OAuth flow (native browser OAuth) ---

@@ -4,7 +4,7 @@ import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-c
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@craft-agent/server-core/runtime'
 import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
-import { readFile, writeFile, mkdir } from 'fs/promises'
+import { appendFile, readFile, writeFile, mkdir } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary } from '@craft-agent/shared/agent'
 import {
@@ -35,7 +35,7 @@ import {
   type Workspace,
   type WorkspaceInfo,
 } from '@craft-agent/shared/config'
-import type { ActiveSessionInfo, SessionProcessingStatus } from '@craft-agent/core/types'
+import type { ActiveSessionInfo, AgentEventUsage, SessionProcessingStatus } from '@craft-agent/core/types'
 import { loadWorkspaceConfig } from '@craft-agent/shared/workspaces'
 import {
   // Session persistence functions
@@ -79,7 +79,7 @@ import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { restoreFiles } from '@craft-agent/shared/utils/bundle-files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
+import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SessionUsageEntry, type UsageStats, type UsageStatsRange, type UsageTotals, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
@@ -1067,6 +1067,36 @@ const DEFAULT_TOKEN_USAGE = {
   contextTokens: 0, costUsd: 0,
 }
 
+const USAGE_LEDGER_FILE = 'usage.jsonl'
+
+function createEmptyUsageTotals(): UsageTotals {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    costUsd: 0,
+    requests: 0,
+  }
+}
+
+function addUsageEntryToTotals(totals: UsageTotals, entry: SessionUsageEntry): void {
+  totals.inputTokens += entry.inputTokens || 0
+  totals.outputTokens += entry.outputTokens || 0
+  totals.totalTokens += entry.totalTokens || 0
+  totals.cacheReadTokens += entry.cacheReadTokens || 0
+  totals.cacheCreationTokens += entry.cacheCreationTokens || 0
+  totals.costUsd += entry.costUsd || 0
+  totals.requests += 1
+}
+
+function isUsageEntryInRange(entry: SessionUsageEntry, range: UsageStatsRange): boolean {
+  if (range.start != null && entry.timestamp < range.start) return false
+  if (range.end != null && entry.timestamp >= range.end) return false
+  return true
+}
+
 /**
  * Convert a ManagedSession to a renderer-side Session object.
  * Uses pickSessionFields() for persistent fields so new fields propagate automatically.
@@ -1180,6 +1210,133 @@ export class SessionManager implements ISessionManager {
    *  Resolves immediately if already initialized. */
   waitForInit(): Promise<void> {
     return this.initGate.wait()
+  }
+
+  private getUsageLedgerPath(workspaceRootPath: string): string {
+    return join(workspaceRootPath, USAGE_LEDGER_FILE)
+  }
+
+  private async appendUsageEntry(managed: ManagedSession, usage: AgentEventUsage, turnId?: string): Promise<void> {
+    const timestamp = Date.now()
+    const entry: SessionUsageEntry = {
+      id: randomUUID(),
+      workspaceId: managed.workspace.id,
+      sessionId: managed.id,
+      sessionName: managed.name,
+      turnId,
+      timestamp,
+      model: managed.model,
+      llmConnection: managed.llmConnection,
+      inputTokens: usage.inputTokens || 0,
+      outputTokens: usage.outputTokens || 0,
+      totalTokens: (usage.inputTokens || 0) + (usage.outputTokens || 0),
+      cacheReadTokens: usage.cacheReadTokens || 0,
+      cacheCreationTokens: usage.cacheCreationTokens || 0,
+      costUsd: usage.costUsd || 0,
+      contextWindow: usage.contextWindow,
+    }
+
+    try {
+      await appendFile(this.getUsageLedgerPath(managed.workspace.rootPath), `${JSON.stringify(entry)}\n`, 'utf-8')
+    } catch (error) {
+      sessionLog.warn(`Failed to append usage entry for session ${managed.id}:`, error)
+    }
+  }
+
+  private async readUsageEntries(workspaceRootPath: string): Promise<SessionUsageEntry[]> {
+    const usagePath = this.getUsageLedgerPath(workspaceRootPath)
+    if (!existsSync(usagePath)) return []
+
+    try {
+      const content = await readFile(usagePath, 'utf-8')
+      const entries: SessionUsageEntry[] = []
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        try {
+          const parsed = JSON.parse(trimmed) as SessionUsageEntry
+          if (parsed && typeof parsed.sessionId === 'string' && typeof parsed.timestamp === 'number') {
+            entries.push(parsed)
+          }
+        } catch {
+          // Ignore malformed/truncated ledger lines rather than failing the UI.
+        }
+      }
+      return entries
+    } catch (error) {
+      sessionLog.warn(`Failed to read usage ledger at ${usagePath}:`, error)
+      return []
+    }
+  }
+
+  async getUsageStats(workspaceId: string, range: UsageStatsRange = { kind: 'all' }): Promise<UsageStats> {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) {
+      throw new Error(`Workspace not found: ${workspaceId}`)
+    }
+
+    const ledgerEntries = await this.readUsageEntries(workspace.rootPath)
+    const sessions = this.getSessions(workspace.id)
+    const sessionsById = new Map(sessions.map(session => [session.id, session]))
+    const sessionsWithLedger = new Set(ledgerEntries.map(entry => entry.sessionId))
+    const allEntries = [...ledgerEntries]
+
+    // Backfill old sessions that predate the ledger. Their timestamp is approximate
+    // (lastMessageAt), but it preserves useful total/session-level visibility.
+    for (const session of sessions) {
+      if (sessionsWithLedger.has(session.id)) continue
+      const usage = session.tokenUsage
+      if (!usage || usage.totalTokens <= 0) continue
+      allEntries.push({
+        id: `synthetic-${session.id}`,
+        workspaceId: workspace.id,
+        sessionId: session.id,
+        sessionName: session.name || session.preview,
+        timestamp: session.lastMessageAt || session.createdAt || Date.now(),
+        model: session.model,
+        llmConnection: session.llmConnection,
+        inputTokens: usage.inputTokens || 0,
+        outputTokens: usage.outputTokens || 0,
+        totalTokens: usage.totalTokens || ((usage.inputTokens || 0) + (usage.outputTokens || 0)),
+        cacheReadTokens: usage.cacheReadTokens || 0,
+        cacheCreationTokens: usage.cacheCreationTokens || 0,
+        costUsd: usage.costUsd || 0,
+        contextWindow: usage.contextWindow,
+        synthetic: true,
+      })
+    }
+
+    const entries = allEntries
+      .filter(entry => entry.workspaceId === workspace.id || !entry.workspaceId)
+      .filter(entry => isUsageEntryInRange(entry, range))
+      .sort((a, b) => b.timestamp - a.timestamp)
+
+    const totals = createEmptyUsageTotals()
+    const bySessionMap = new Map<string, UsageStats['bySession'][number]>()
+
+    for (const entry of entries) {
+      addUsageEntryToTotals(totals, entry)
+      const session = sessionsById.get(entry.sessionId)
+      const existing = bySessionMap.get(entry.sessionId) ?? {
+        ...createEmptyUsageTotals(),
+        sessionId: entry.sessionId,
+        sessionName: entry.sessionName || session?.name || session?.preview,
+        lastUsedAt: session?.lastMessageAt || session?.createdAt || entry.timestamp,
+      }
+      addUsageEntryToTotals(existing, entry)
+      existing.sessionName = existing.sessionName || entry.sessionName || session?.name || session?.preview
+      existing.lastUsedAt = Math.max(existing.lastUsedAt || 0, entry.timestamp)
+      bySessionMap.set(entry.sessionId, existing)
+    }
+
+    return {
+      workspaceId: workspace.id,
+      range,
+      generatedAt: Date.now(),
+      totals,
+      bySession: Array.from(bySessionMap.values()).sort((a, b) => b.totalTokens - a.totalTokens),
+      entries,
+    }
   }
 
   /**
@@ -1684,17 +1841,27 @@ export class SessionManager implements ISessionManager {
 
       sessionLog.info(`Reinitializing auth for connection: ${slug} (${connection.authType})`)
 
-      // Resolve auth env vars via shared utility (provider-agnostic)
-      const result = await resolveAuthEnvVars(connection, slug!, manager, getValidClaudeOAuthToken)
+      const usesExternalClaudeExecutable = connection.authType === 'external_cli' || !!(
+        connection.claudeCodeExecutablePath?.trim() ||
+        process.env.CRAFT_CLAUDE_CODE_EXECUTABLE?.trim() ||
+        process.env.CRAFT_CLAUDE_CODE_PATH?.trim()
+      )
 
-      if (!result.success) {
-        sessionLog.error(`Auth resolution failed for ${slug}: ${result.warning}`)
+      if (usesExternalClaudeExecutable) {
+        sessionLog.info('Skipping Anthropic auth env injection because a custom Claude executable override is configured')
       } else {
-        // Apply resolved env vars to process.env
-        for (const [key, value] of Object.entries(result.envVars)) {
-          process.env[key] = value
+        // Resolve auth env vars via shared utility (provider-agnostic)
+        const result = await resolveAuthEnvVars(connection, slug!, manager, getValidClaudeOAuthToken)
+
+        if (!result.success) {
+          sessionLog.error(`Auth resolution failed for ${slug}: ${result.warning}`)
+        } else {
+          // Apply resolved env vars to process.env
+          for (const [key, value] of Object.entries(result.envVars)) {
+            process.env[key] = value
+          }
+          sessionLog.info(`Auth env vars set for connection: ${slug}`)
         }
-        sessionLog.info(`Auth env vars set for connection: ${slug}`)
       }
 
       // Reset cached summarization client so it picks up new credentials/base URL
@@ -7340,6 +7507,7 @@ export class SessionManager implements ISessionManager {
           if (event.usage.contextWindow) {
             managed.tokenUsage.contextWindow = event.usage.contextWindow
           }
+          void this.appendUsageEntry(managed, event.usage)
         }
         break
 

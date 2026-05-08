@@ -72,7 +72,7 @@ const LlmProviderTypeSchema = z.enum([
 
 const LlmAuthTypeSchema = z.enum([
   'api_key', 'api_key_with_endpoint', 'oauth', 'iam_credentials',
-  'bearer_token', 'service_account_file', 'environment', 'none',
+  'bearer_token', 'service_account_file', 'environment', 'external_cli', 'none',
 ]);
 
 const CustomEndpointSchema = z.object({
@@ -86,6 +86,7 @@ const LlmConnectionSchema = z.object({
   providerType: LlmProviderTypeSchema,
   authType: LlmAuthTypeSchema,
   baseUrl: z.string().optional(),
+  claudeCodeExecutablePath: z.string().optional(),
   models: z.array(z.union([z.string(), z.object({ id: z.string() }).passthrough()])).optional(),
   defaultModel: z.string().optional(),
   modelSelectionMode: z.enum(['automaticallySyncedFromProvider', 'userDefined3Tier']).optional(),

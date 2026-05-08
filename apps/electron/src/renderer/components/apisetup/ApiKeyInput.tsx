@@ -56,6 +56,8 @@ export interface ApiKeySubmitData {
   awsRegion?: string
   /** Bedrock authentication method — determines auth type for Pi+Bedrock connections */
   bedrockAuthMethod?: 'iam_credentials' | 'environment'
+  /** Absolute path to a Claude Code-compatible executable. */
+  claudeCodeExecutablePath?: string
 }
 
 export interface ApiKeyInputProps {

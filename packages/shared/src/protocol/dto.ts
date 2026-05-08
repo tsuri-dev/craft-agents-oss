@@ -104,6 +104,56 @@ export interface Session {
   supportsBranching?: boolean
 }
 
+export interface SessionUsageEntry {
+  id: string
+  workspaceId: string
+  sessionId: string
+  sessionName?: string
+  turnId?: string
+  timestamp: number
+  model?: string
+  llmConnection?: string
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  cacheReadTokens?: number
+  cacheCreationTokens?: number
+  costUsd?: number
+  contextWindow?: number
+  synthetic?: boolean
+}
+
+export interface UsageTotals {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  costUsd: number
+  requests: number
+}
+
+export interface UsageStatsRange {
+  kind: 'day' | 'week' | 'all' | 'custom'
+  start?: number
+  end?: number
+}
+
+export interface UsageSessionBreakdown extends UsageTotals {
+  sessionId: string
+  sessionName?: string
+  lastUsedAt?: number
+}
+
+export interface UsageStats {
+  workspaceId: string
+  range: UsageStatsRange
+  generatedAt: number
+  totals: UsageTotals
+  bySession: UsageSessionBreakdown[]
+  entries: SessionUsageEntry[]
+}
+
 export interface CreateSessionOptions {
   name?: string
   permissionMode?: PermissionMode
@@ -351,6 +401,8 @@ export interface LlmConnectionSetup {
   baseUrl?: string | null
   defaultModel?: string | null
   models?: string[] | null
+  /** Absolute path to a Claude Code-compatible executable for external_cli connections. */
+  claudeCodeExecutablePath?: string | null
   piAuthProvider?: string
   modelSelectionMode?: 'automaticallySyncedFromProvider' | 'userDefined3Tier'
   /** When true, reject setup if the connection doesn't already exist (reauth guard). */

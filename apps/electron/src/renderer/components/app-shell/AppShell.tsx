@@ -35,6 +35,7 @@ import {
   Columns3,
   List,
   Rocket,
+  BarChart3,
 } from "lucide-react"
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
 import { SourceAvatar } from "@/components/ui/source-avatar"
@@ -75,6 +76,7 @@ import {
 import { SessionList, type ChatGroupingMode } from "./SessionList"
 import { StoryListPanel } from "./StoryListPanel"
 import { StoryCreateDialog } from "./StoryCreateDialog"
+import { UsageStatsDialog } from "./UsageStatsDialog"
 import { MainContentPanel } from "./MainContentPanel"
 import { PanelStackContainer } from "./PanelStackContainer"
 import { CompactSessionListFilter } from "./CompactSessionListFilter"
@@ -164,6 +166,8 @@ import {
 import { hasOpenOverlay } from "@/lib/overlay-detection"
 import { clearSourceIconCaches } from "@/lib/icon-cache"
 import { dispatchFocusInputEvent } from "./input/focus-input-events"
+import { formatTokenCount } from "@/utils/session-usage"
+import { RPC_CHANNELS } from "@craft-agent/shared/protocol"
 
 /**
  * AppShellProps - Minimal props interface for AppShell component
@@ -1452,6 +1456,30 @@ function AppShellContent({
     [activeSessionMetas],
   )
 
+  const [usageDialogOpen, setUsageDialogOpen] = useState(false)
+  const [usageTodayTokens, setUsageTodayTokens] = useState<number | null>(null)
+  const usageWorkspaceId = activeWorkspace?.remoteServer?.remoteWorkspaceId ?? activeWorkspaceId
+
+  useEffect(() => {
+    if (!usageWorkspaceId || !window.electronAPI.isChannelAvailable(RPC_CHANNELS.sessions.GET_USAGE_STATS)) {
+      setUsageTodayTokens(null)
+      return
+    }
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 1)
+    let cancelled = false
+    window.electronAPI.getUsageStats(usageWorkspaceId, { kind: 'day', start: start.getTime(), end: end.getTime() })
+      .then(stats => {
+        if (!cancelled) setUsageTodayTokens(stats.totals.totalTokens)
+      })
+      .catch(() => {
+        if (!cancelled) setUsageTodayTokens(null)
+      })
+    return () => { cancelled = true }
+  }, [usageWorkspaceId, workspaceSessionMetas])
+
   const renameSessionGroup = useCallback((groupName: string) => {
     const rawName = window.prompt(`Rename group “${groupName}” to:`, groupName)
     if (rawName === null) return
@@ -2685,6 +2713,14 @@ function AppShellContent({
                         },
                       ],
                     },
+                    {
+                      id: "nav:usage",
+                      title: "Usage",
+                      label: usageTodayTokens != null ? formatTokenCount(usageTodayTokens) : undefined,
+                      icon: BarChart3,
+                      variant: usageDialogOpen ? "default" as const : "ghost" as const,
+                      onClick: () => setUsageDialogOpen(true),
+                    },
                     // Labels: navigable header (shows all labeled sessions) + hierarchical tree (drag-and-drop reorder + re-parent)
                     {
                       id: "nav:labels",
@@ -3916,6 +3952,11 @@ function AppShellContent({
                 defaultStatus={defaultNewStoryStatus}
               />
             )}
+            <UsageStatsDialog
+              open={usageDialogOpen}
+              onOpenChange={setUsageDialogOpen}
+              workspaceId={usageWorkspaceId}
+            />
             {/* Content: SessionList, SourcesListPanel, or SettingsNavigator based on navigation state */}
             {isStoriesNavigation(navState) && (
               <StoryListPanel labels={displayLabelConfigs} />
@@ -4010,6 +4051,7 @@ function AppShellContent({
                   evaluateViews={evaluateViews}
                   labels={displayLabelConfigs}
                   onLabelsChange={handleSessionLabelsChange}
+                  groupOptions={groupFilterOptions}
                   groupingMode={chatGroupingMode}
                   workspaceId={activeWorkspaceId ?? undefined}
                   statusFilter={listFilter}

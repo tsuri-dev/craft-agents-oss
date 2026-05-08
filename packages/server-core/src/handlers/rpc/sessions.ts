@@ -117,6 +117,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.sessions.COMMAND,
   RPC_CHANNELS.sessions.GET_PENDING_PLAN_EXECUTION,
   RPC_CHANNELS.sessions.GET_PERMISSION_MODE_STATE,
+  RPC_CHANNELS.sessions.GET_USAGE_STATS,
   RPC_CHANNELS.sessions.SEARCH_CONTENT,
   RPC_CHANNELS.sessions.GET_FILES,
   RPC_CHANNELS.sessions.GET_NOTES,
@@ -396,6 +397,14 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     sessionId: string
   ) => {
     return sessionManager.getSessionPermissionModeState(sessionId)
+  })
+
+  server.handle(RPC_CHANNELS.sessions.GET_USAGE_STATS, async (
+    _ctx,
+    workspaceId: string,
+    range?: import('@craft-agent/shared/protocol').UsageStatsRange,
+  ) => {
+    return sessionManager.getUsageStats(workspaceId, range)
   })
 
   // ============================================================

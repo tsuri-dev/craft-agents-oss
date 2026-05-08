@@ -12,6 +12,8 @@ import type { CredentialManager } from '../../../credentials/manager.ts';
 import type { ResolvedBackendRuntimePaths } from './runtime-resolver.ts';
 
 export interface BackendRuntimePaths {
+  /** Claude Code-compatible executable used by the Anthropic/Claude SDK backend. */
+  claudeCli?: string;
   copilotCli?: string;
   interceptor?: string;
   sessionServer?: string;

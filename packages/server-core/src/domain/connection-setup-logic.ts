@@ -127,6 +127,8 @@ export function resolveCustomEndpointSetup(input: {
 // Built-in Connection Templates
 // ============================================================
 
+const DEFAULT_CLAUDE_CLI_MODELS = ['Sonnet', 'Opus', 'Haiku', 'Default']
+
 /**
  * Built-in connection templates for the onboarding flow.
  * Each template defines the default configuration for a known connection slug.
@@ -146,6 +148,11 @@ export const BUILT_IN_CONNECTION_TEMPLATES: Record<string, {
     name: 'Claude Max',
     providerType: 'anthropic',
     authType: 'oauth',
+  },
+  'claude-cli': {
+    name: 'Claude Code CLI',
+    providerType: 'anthropic',
+    authType: 'external_cli',
   },
   'chatgpt-plus': {
     name: 'ChatGPT Plus',
@@ -235,8 +242,8 @@ export function createBuiltInConnection(slug: string, baseUrl?: string | null): 
     name,
     providerType,
     authType,
-    models: getDefaultModelsForConnection(providerType, template.piAuthProvider),
-    defaultModel: getDefaultModelForConnection(providerType, template.piAuthProvider),
+    models: authType === 'external_cli' ? DEFAULT_CLAUDE_CLI_MODELS : getDefaultModelsForConnection(providerType, template.piAuthProvider),
+    defaultModel: authType === 'external_cli' ? 'Default' : getDefaultModelForConnection(providerType, template.piAuthProvider),
     modelSelectionMode: providerType === 'pi' ? 'automaticallySyncedFromProvider' : undefined,
     piAuthProvider: template.piAuthProvider,
     midStreamBehavior: defaultMidStreamBehavior(providerType),
