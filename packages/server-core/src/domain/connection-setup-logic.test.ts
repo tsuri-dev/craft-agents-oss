@@ -127,6 +127,15 @@ describe('createBuiltInConnection seeds midStreamBehavior', () => {
     expect(conn.midStreamBehavior).toBe('queue')
   })
 
+  it("Claude Code CLI → external_cli with Default model", () => {
+    const conn = createBuiltInConnection('claude-cli')
+    expect(conn.providerType).toBe('anthropic')
+    expect(conn.authType).toBe('external_cli')
+    expect(conn.defaultModel).toBe('Default')
+    expect(conn.models).toEqual(['Sonnet', 'Opus', 'Haiku', 'Default'])
+    expect(conn.midStreamBehavior).toBe('queue')
+  })
+
   it("ChatGPT Plus → 'steer' (Pi backend, native polite steer)", () => {
     const conn = createBuiltInConnection('chatgpt-plus')
     expect(conn.providerType).toBe('pi')

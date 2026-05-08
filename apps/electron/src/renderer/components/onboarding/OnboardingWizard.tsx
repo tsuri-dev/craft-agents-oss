@@ -74,6 +74,7 @@ interface OnboardingWizardProps {
     activePreset?: string
     models?: string[]
     customApi?: CustomEndpointApi
+    claudeCodeExecutablePath?: string
   }
 
   className?: string

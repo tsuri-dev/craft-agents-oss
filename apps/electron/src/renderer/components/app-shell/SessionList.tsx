@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { useSetAtom } from "jotai"
+import { toast } from "sonner"
 import { isToday, isYesterday, format, startOfDay } from "date-fns"
 import { getDateLocale } from "@craft-agent/shared/i18n"
 import { useAction } from "@/actions"
@@ -16,6 +17,9 @@ import { Spinner } from "@craft-agent/ui"
 import { EntityListEmptyScreen } from "@/components/ui/entity-list-empty"
 import { EntityList, type EntityListGroup } from "@/components/ui/entity-list"
 import { RenameDialog } from "@/components/ui/rename-dialog"
+import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { SessionSearchHeader } from "./SessionSearchHeader"
 import { SessionItem } from "./SessionItem"
 import { SessionListProvider, type SessionListContextValue } from "@/context/SessionListContext"
@@ -31,7 +35,15 @@ import { sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import type { ViewConfig } from "@craft-agent/shared/views"
 import type { SessionStatusId, SessionStatus } from "@/config/session-status-config"
 import { buildCollapsedGroupsScopeSuffix } from "@/utils/session-list-collapse"
-import { getSessionGroupValues } from "@/utils/session-group-filter"
+import {
+  addSessionGroupLabel,
+  buildSessionGroupFilterOptions,
+  getSessionGroupValues,
+  removeSessionGroupLabel,
+  resolveUniqueSessionGroupName,
+  sessionHasGroup,
+  type SessionGroupFilterOption,
+} from "@/utils/session-group-filter"
 
 export interface SessionListRow {
   item: SessionMeta
@@ -76,6 +88,8 @@ interface SessionListProps {
   labels?: LabelConfig[]
   /** Callback when session labels are toggled (for labels submenu in SessionMenu) */
   onLabelsChange?: (sessionId: string, labels: string[]) => void
+  /** Existing workspace groups for the Groups submenu */
+  groupOptions?: SessionGroupFilterOption[]
   /** How to group sessions: 'date' (default), 'status', 'unread', or 'group' */
   groupingMode?: ChatGroupingMode
   /** Workspace ID for content search (optional - if not provided, content search is disabled) */
@@ -134,6 +148,7 @@ export function SessionList({
   evaluateViews,
   labels = [],
   onLabelsChange,
+  groupOptions,
   groupingMode = 'date',
   workspaceId,
   statusFilter,
@@ -163,12 +178,20 @@ export function SessionList({
   // Pre-flatten label tree once for efficient ID lookups in each SessionItem
   const flatLabels = useMemo(() => flattenLabels(labels), [labels])
 
+  const resolvedGroupOptions = useMemo(
+    () => groupOptions ?? buildSessionGroupFilterOptions(items),
+    [groupOptions, items]
+  )
+
   // Get current filter from navigation state (for preserving context in tab routes)
   const currentFilter = isSessionsNavigation(navState) ? navState.filter : undefined
 
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null)
   const [renameName, setRenameName] = useState("")
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false)
+  const [groupDialogSession, setGroupDialogSession] = useState<SessionMeta | null>(null)
+  const [newGroupName, setNewGroupName] = useState("")
   // Track if search input has actual DOM focus (for proper keyboard navigation gating)
   const [isSearchInputFocused, setIsSearchInputFocused] = useState(false)
 
@@ -646,6 +669,33 @@ export function SessionList({
     setRenameName("")
   }
 
+  const handleCreateGroupForSession = useCallback((item: SessionMeta) => {
+    setGroupDialogSession(item)
+    setNewGroupName('')
+    requestAnimationFrame(() => setGroupDialogOpen(true))
+  }, [])
+
+  const handleToggleGroupForSession = useCallback((item: SessionMeta, groupName: string) => {
+    if (!onLabelsChange) return
+    const nextLabels = sessionHasGroup(item, groupName)
+      ? removeSessionGroupLabel(item.labels, groupName)
+      : addSessionGroupLabel(item.labels, groupName)
+    onLabelsChange(item.id, nextLabels)
+  }, [onLabelsChange])
+
+  const handleConfirmCreateGroupForSession = useCallback(() => {
+    if (!groupDialogSession || !onLabelsChange) return
+    const trimmed = newGroupName.trim()
+    if (!trimmed) return
+    const groupName = resolveUniqueSessionGroupName(trimmed, resolvedGroupOptions.map(option => option.value))
+    const nextLabels = addSessionGroupLabel(groupDialogSession.labels, groupName)
+    onLabelsChange(groupDialogSession.id, nextLabels)
+    setGroupDialogOpen(false)
+    setGroupDialogSession(null)
+    setNewGroupName('')
+    toast.success(`Added “${groupDialogSession.name || 'Session'}” to “${groupName}”`)
+  }, [groupDialogSession, newGroupName, onLabelsChange, resolvedGroupOptions])
+
   // --- Search input key handler ---
   const handleSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') {
@@ -677,6 +727,9 @@ export function SessionList({
     onMarkUnread,
     onDelete: handleDeleteWithToast,
     onLabelsChange,
+    groupOptions: resolvedGroupOptions,
+    onCreateGroupForSession: onLabelsChange ? handleCreateGroupForSession : undefined,
+    onToggleGroupForSession: onLabelsChange ? handleToggleGroupForSession : undefined,
     onSelectSessionById: handleSelectSessionById,
     onOpenInNewWindow: handleOpenInNewWindow,
     onSendToWorkspace: (ids: string[]) => setSendToWorkspace(ids),
@@ -697,6 +750,7 @@ export function SessionList({
     onFlag, handleFlagWithToast, onUnflag, handleUnflagWithToast,
     onArchive, handleArchiveWithToast, onUnarchive, handleUnarchiveWithToast,
     onMarkUnread, handleDeleteWithToast, onLabelsChange,
+    resolvedGroupOptions, handleCreateGroupForSession, handleToggleGroupForSession,
     handleSelectSessionById, handleOpenInNewWindow, setSendToWorkspace, handleFocusZone, handleKeyDown,
     sessionStatuses, flatLabels, labels, resolvedSearchQuery,
     focusedSessionId, selectionStore.state.selected, isMultiSelectActive,
@@ -840,6 +894,39 @@ export function SessionList({
         onSubmit={handleRenameSubmit}
         placeholder={t("session.enterSessionName")}
       />
+
+      <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New Group</DialogTitle>
+            <DialogDescription>
+              Add “{groupDialogSession?.name || 'Session'}” to a new group.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault()
+              handleConfirmCreateGroupForSession()
+            }}
+          >
+            <Input
+              value={newGroupName}
+              onChange={(event) => setNewGroupName(event.target.value)}
+              placeholder="Group name"
+              autoFocus
+            />
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setGroupDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!newGroupName.trim()}>
+                Create Group
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

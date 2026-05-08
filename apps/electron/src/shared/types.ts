@@ -211,6 +211,8 @@ import type {
   DirectoryListingResult,
   RemoteSessionTransferPayload,
   ImportRemoteSessionTransferResult,
+  UsageStats,
+  UsageStatsRange,
 } from '@craft-agent/shared/protocol'
 
 export interface ElectronAPI {
@@ -230,6 +232,7 @@ export interface ElectronAPI {
 
   // Consolidated session command handler
   sessionCommand(sessionId: string, command: SessionCommand): Promise<void | ShareResult | RefreshTitleResult | { count: number }>
+  getUsageStats(workspaceId: string, range?: UsageStatsRange): Promise<UsageStats>
 
   // Server info (REMOTE_ELIGIBLE — returns data from whichever server owns the workspace)
   getServerHomeDir(): Promise<string>

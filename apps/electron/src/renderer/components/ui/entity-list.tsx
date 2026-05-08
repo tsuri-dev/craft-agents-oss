@@ -82,8 +82,8 @@ export interface EntityListProps<T> {
 
 function getSectionLabelClassName(labelStyle: EntityListGroup<unknown>['labelStyle']) {
   return labelStyle === 'plain'
-    ? "text-sm font-medium text-muted-foreground normal-case tracking-normal"
-    : "text-sm font-medium text-muted-foreground uppercase tracking-wider"
+    ? "text-[13px] leading-[18px] font-medium text-muted-foreground normal-case tracking-normal"
+    : "text-[13px] leading-[18px] font-medium text-muted-foreground uppercase tracking-wider"
 }
 
 function SectionHeader({ label, labelStyle }: { label: string; labelStyle?: EntityListGroup<unknown>['labelStyle'] }) {

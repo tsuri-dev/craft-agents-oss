@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
-import { Key, Monitor } from "lucide-react"
+import { Key, Monitor, Terminal } from "lucide-react"
 import { CraftAgentsSymbol } from "@/components/icons/CraftAgentsSymbol"
 import { StepFormLayout } from "./primitives"
 
@@ -12,7 +12,7 @@ import copilotIcon from "@/assets/provider-icons/copilot.svg"
  * The high-level provider choice the user makes on first launch.
  * This maps to one or more ApiSetupMethods downstream.
  */
-export type ProviderChoice = 'claude' | 'chatgpt' | 'copilot' | 'api_key' | 'local'
+export type ProviderChoice = 'claude' | 'claude_cli' | 'chatgpt' | 'copilot' | 'api_key' | 'local'
 
 interface ProviderOption {
   id: ProviderChoice
@@ -23,6 +23,7 @@ interface ProviderOption {
 
 const PROVIDER_ICONS: Record<ProviderChoice, React.ReactNode> = {
   claude: <img src={claudeIcon} alt="" className="size-5 rounded-[3px]" />,
+  claude_cli: <Terminal className="size-5" />,
   chatgpt: <img src={openaiIcon} alt="" className="size-5 rounded-[3px]" />,
   copilot: <img src={copilotIcon} alt="" className="size-5 rounded-[3px]" />,
   api_key: <Key className="size-5" />,
@@ -51,6 +52,12 @@ export function ProviderSelectStep({ onSelect, onSkip }: ProviderSelectStepProps
       name: t("onboarding.providerSelect.claudeProMax"),
       description: t("onboarding.providerSelect.claudeProMaxDesc"),
       icon: PROVIDER_ICONS.claude,
+    },
+    {
+      id: 'claude_cli',
+      name: 'Claude Code CLI',
+      description: 'Use a Claude Code-compatible executable such as claude-internal.',
+      icon: PROVIDER_ICONS.claude_cli,
     },
     {
       id: 'chatgpt',

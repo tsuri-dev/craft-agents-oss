@@ -90,6 +90,8 @@ interface UseOnboardingReturn {
   reset: () => void
 }
 
+const DEFAULT_CLAUDE_CLI_MODELS = ['Sonnet', 'Opus', 'Haiku', 'Default']
+
 // Base slug for each setup method (used as template key in ipc.ts)
 export const BASE_SLUG_FOR_METHOD: Record<ApiSetupMethod, string> = {
   anthropic_api_key: 'anthropic-api',
@@ -97,6 +99,7 @@ export const BASE_SLUG_FOR_METHOD: Record<ApiSetupMethod, string> = {
   pi_chatgpt_oauth: 'chatgpt-plus',
   pi_copilot_oauth: 'github-copilot',
   pi_api_key: 'pi-api-key',
+  claude_cli: 'claude-cli',
 }
 
 /**
@@ -148,6 +151,7 @@ export function apiSetupMethodToConnectionSetup(
     awsRegion?: string
     bedrockAuthMethod?: 'iam_credentials' | 'environment'
     oauthIdentity?: ClaudeOAuthIdentityDto
+    claudeCodeExecutablePath?: string
   },
   editingSlug: string | null,
   existingSlugs: Set<string>,
@@ -189,6 +193,13 @@ export function apiSetupMethodToConnectionSetup(
         iamCredentials: options.iamCredentials,
         awsRegion: options.awsRegion,
         bedrockAuthMethod: options.bedrockAuthMethod,
+      }
+    case 'claude_cli':
+      return {
+        slug,
+        defaultModel: options.connectionDefaultModel || 'Default',
+        models: options.models?.length ? options.models : DEFAULT_CLAUDE_CLI_MODELS,
+        claudeCodeExecutablePath: options.claudeCodeExecutablePath,
       }
   }
 }
@@ -255,6 +266,7 @@ export function useOnboarding({
       awsRegion?: string
       bedrockAuthMethod?: 'iam_credentials' | 'environment'
       oauthIdentity?: ClaudeOAuthIdentityDto
+      claudeCodeExecutablePath?: string
     },
     methodOverride?: ApiSetupMethod,
     connectionSlugOverride?: string,
@@ -281,6 +293,7 @@ export function useOnboarding({
         awsRegion: options?.awsRegion,
         bedrockAuthMethod: options?.bedrockAuthMethod,
         oauthIdentity: options?.oauthIdentity,
+        claudeCodeExecutablePath: options?.claudeCodeExecutablePath,
       }, connectionSlugOverride ?? editingSlug, existingSlugs)
       // Use new unified API
       const result = await window.electronAPI.setupLlmConnection(
@@ -385,8 +398,41 @@ export function useOnboarding({
     setState(s => ({ ...s, credentialStatus: 'validating', errorMessage: undefined }))
 
     const isPiApiKeyFlow = state.apiSetupMethod === 'pi_api_key'
+    const isClaudeCliFlow = state.apiSetupMethod === 'claude_cli'
 
     try {
+      if (isClaudeCliFlow) {
+        const executablePath = data.claudeCodeExecutablePath?.trim()
+        if (!executablePath) {
+          setState(s => ({
+            ...s,
+            credentialStatus: 'error',
+            errorMessage: 'Please enter the Claude executable path',
+          }))
+          return
+        }
+
+        const connectionSlug = apiSetupMethodToConnectionSetup('claude_cli', {}, editingSlug, existingSlugs).slug
+        const saved = await handleSaveConfig(undefined, {
+          connectionDefaultModel: data.connectionDefaultModel || 'Default',
+          models: data.models?.length ? data.models : DEFAULT_CLAUDE_CLI_MODELS,
+          claudeCodeExecutablePath: executablePath,
+        }, 'claude_cli', connectionSlug, !!editingSlug)
+
+        if (!saved) {
+          setState(s => ({ ...s, credentialStatus: 'error' }))
+          return
+        }
+
+        const testResult = await window.electronAPI.testLlmConnection(connectionSlug)
+        if (testResult.success) {
+          setState(s => ({ ...s, credentialStatus: 'success', step: 'complete' }))
+        } else {
+          setState(s => ({ ...s, credentialStatus: 'error', errorMessage: testResult.error || 'Connection test failed' }))
+        }
+        return
+      }
+
       // Bedrock (Pi+amazon-bedrock) — skip API key validation and connection test
       if (data.bedrockAuthMethod) {
         const saved = await handleSaveConfig(undefined, {
@@ -637,6 +683,7 @@ export function useOnboarding({
   const handleSelectProvider = useCallback((choice: ProviderChoice) => {
     const CHOICE_TO_METHOD: Record<Exclude<ProviderChoice, 'local'>, ApiSetupMethod> = {
       claude: 'claude_oauth',
+      claude_cli: 'claude_cli',
       chatgpt: 'pi_chatgpt_oauth',
       copilot: 'pi_copilot_oauth',
       api_key: 'pi_api_key',

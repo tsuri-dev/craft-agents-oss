@@ -13,6 +13,9 @@ import { getWorkspaceOrThrow, buildBackendHostRuntimeContext } from '@craft-agen
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
+
+const DEFAULT_CLAUDE_CLI_MODELS = ['Sonnet', 'Opus', 'Haiku', 'Default']
 import { CLIENT_OPEN_EXTERNAL } from '@craft-agent/server-core/transport'
 
 // Local OAuth state
@@ -101,6 +104,27 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       }
       if (setup.modelSelectionMode !== undefined) {
         updates.modelSelectionMode = setup.modelSelectionMode
+      }
+
+      if (setup.claudeCodeExecutablePath !== undefined) {
+        const executablePath = setup.claudeCodeExecutablePath?.trim() || undefined
+        if (!executablePath) {
+          return { success: false, error: 'Claude executable path is required.' }
+        }
+        if (!existsSync(executablePath)) {
+          return { success: false, error: `Claude executable not found: ${executablePath}` }
+        }
+        updates.providerType = 'anthropic'
+        updates.authType = 'external_cli'
+        updates.name = connection.name || 'Claude Code CLI'
+        updates.claudeCodeExecutablePath = executablePath
+        updates.baseUrl = undefined
+        updates.customEndpoint = undefined
+        updates.piAuthProvider = undefined
+        const cliModels = setup.models?.length ? setup.models : DEFAULT_CLAUDE_CLI_MODELS
+        updates.models = cliModels
+        updates.defaultModel = setup.defaultModel?.trim() || cliModels[0]
+        updates.modelSelectionMode = undefined
       }
 
       const customEndpoint = hasConfiguredBaseUrl ? setup.customEndpoint : undefined

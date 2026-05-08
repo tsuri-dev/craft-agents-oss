@@ -35,6 +35,7 @@ function toLegacyBillingType(
     case 'iam_credentials':
     case 'service_account_file':
     case 'environment':
+    case 'external_cli':
     case 'none':
       return 'api_key'
   }

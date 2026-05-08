@@ -31,6 +31,9 @@ import {
   Tag,
   Send,
   Layers,
+  Plus,
+  Check,
+  BarChart3,
 } from 'lucide-react'
 import { useMenuComponents } from '@/components/ui/menu-context'
 import { getStateColor, getStateIcon, type SessionStatusId } from '@/config/session-status-config'
@@ -42,7 +45,9 @@ import type { SessionMeta } from '@/atoms/sessions'
 import { getSessionStatus, hasUnreadMeta, hasMessagesMeta } from '@/utils/session'
 import { MessagingSessionMenuItem } from '@/components/messaging/MessagingSessionMenuItem'
 import { useSessionMenuActions } from '@/hooks/useSessionMenuActions'
-import { getSessionGroupValues, removeSessionGroupLabel } from '@/utils/session-group-filter'
+import { getSessionGroupValues } from '@/utils/session-group-filter'
+import type { SessionGroupFilterOption } from '@/utils/session-group-filter'
+import { formatPercent, formatTokenCount, formatUsd, getCacheReadRatio } from '@/utils/session-usage'
 
 export interface SessionMenuProps {
   /** Session data — display state is derived from this */
@@ -53,6 +58,12 @@ export interface SessionMenuProps {
   labels?: LabelConfig[]
   /** Callback when labels are toggled (receives full updated labels array) */
   onLabelsChange?: (labels: string[]) => void
+  /** Existing session groups available in the workspace */
+  groupOptions?: SessionGroupFilterOption[]
+  /** Callback to create a new group and add this session */
+  onCreateGroup?: () => void
+  /** Callback to toggle this session in an existing group */
+  onToggleGroup?: (groupName: string) => void
   /** Whether multiple workspaces exist (enables "Send to Workspace" item) */
   hasRemoteWorkspaces?: boolean
   /** Callbacks */
@@ -77,6 +88,9 @@ export function SessionMenu({
   sessionStatuses,
   labels = [],
   onLabelsChange,
+  groupOptions = [],
+  onCreateGroup,
+  onToggleGroup,
   onRename,
   onFlag,
   onUnflag,
@@ -194,26 +208,105 @@ export function SessionMenu({
         </Sub>
       )}
 
-      {sessionGroups.length > 0 && onLabelsChange && (
+      {(onCreateGroup || onToggleGroup) && (
         <Sub>
           <SubTrigger className="pr-2">
             <Layers className="h-3.5 w-3.5" />
             <span className="flex-1">Groups</span>
-            <span className="text-[10px] text-muted-foreground tabular-nums -mr-2.5">
-              {sessionGroups.length}
-            </span>
+            {sessionGroups.length > 0 && (
+              <span className="text-[10px] text-muted-foreground tabular-nums -mr-2.5">
+                {sessionGroups.length}
+              </span>
+            )}
           </SubTrigger>
           <SubContent>
-            {sessionGroups.map(group => (
-              <MenuItem key={group} onClick={() => onLabelsChange(removeSessionGroupLabel(sessionLabels, group))}>
-                <Layers className="h-3.5 w-3.5" />
-                <span className="flex-1 truncate">{group}</span>
-                <span className="text-[10px] text-muted-foreground">Remove</span>
+            {onCreateGroup && (
+              <MenuItem onClick={onCreateGroup}>
+                <Plus className="h-3.5 w-3.5" />
+                <span className="flex-1">New Group…</span>
               </MenuItem>
-            ))}
+            )}
+            {groupOptions.length > 0 ? (
+              <>
+                {onCreateGroup && <Separator />}
+                {groupOptions.map(group => {
+                  const isApplied = sessionGroups.includes(group.value)
+                  return (
+                    <MenuItem key={group.id} onClick={() => onToggleGroup?.(group.value)}>
+                      <Layers className="h-3.5 w-3.5" />
+                      <span className="flex-1 truncate">{group.label}</span>
+                      <span className="text-[10px] tabular-nums text-muted-foreground">{group.count}</span>
+                      <span className="w-3.5 ml-2">
+                        {isApplied && <Check className="h-3.5 w-3.5 text-foreground" />}
+                      </span>
+                    </MenuItem>
+                  )
+                })}
+              </>
+            ) : (
+              <MenuItem disabled>
+                <span className="flex-1 text-muted-foreground">No groups</span>
+              </MenuItem>
+            )}
           </SubContent>
         </Sub>
       )}
+
+      <Sub>
+        <SubTrigger className="pr-2">
+          <BarChart3 className="h-3.5 w-3.5" />
+          <span className="flex-1">Usage</span>
+          {item.tokenUsage?.totalTokens ? (
+            <span className="text-[10px] text-muted-foreground tabular-nums -mr-2.5">
+              {formatTokenCount(item.tokenUsage.totalTokens)}
+            </span>
+          ) : null}
+        </SubTrigger>
+        <SubContent>
+          {(() => {
+            const usage = item.tokenUsage
+            const cacheRatio = getCacheReadRatio(
+              usage?.inputTokens ?? 0,
+              usage?.cacheReadTokens ?? 0,
+              usage?.cacheCreationTokens ?? 0,
+            )
+            return (
+              <>
+                <MenuItem disabled>
+                  <span className="flex-1">Total tokens</span>
+                  <span className="text-muted-foreground tabular-nums">{formatTokenCount(usage?.totalTokens)}</span>
+                </MenuItem>
+                <MenuItem disabled>
+                  <span className="flex-1">Input</span>
+                  <span className="text-muted-foreground tabular-nums">{formatTokenCount(usage?.inputTokens)}</span>
+                </MenuItem>
+                <MenuItem disabled>
+                  <span className="flex-1">Output</span>
+                  <span className="text-muted-foreground tabular-nums">{formatTokenCount(usage?.outputTokens)}</span>
+                </MenuItem>
+                <Separator />
+                <MenuItem disabled>
+                  <span className="flex-1">Cache read</span>
+                  <span className="text-muted-foreground tabular-nums">{formatTokenCount(usage?.cacheReadTokens)}</span>
+                </MenuItem>
+                <MenuItem disabled>
+                  <span className="flex-1">Cache creation</span>
+                  <span className="text-muted-foreground tabular-nums">{formatTokenCount(usage?.cacheCreationTokens)}</span>
+                </MenuItem>
+                <MenuItem disabled>
+                  <span className="flex-1">Cache read ratio</span>
+                  <span className="text-muted-foreground tabular-nums">{formatPercent(cacheRatio)}</span>
+                </MenuItem>
+                <Separator />
+                <MenuItem disabled>
+                  <span className="flex-1">Cost</span>
+                  <span className="text-muted-foreground tabular-nums">{formatUsd(usage?.costUsd)}</span>
+                </MenuItem>
+              </>
+            )
+          })()}
+        </SubContent>
+      </Sub>
 
       {/* Flag/Unflag */}
       {!isFlagged ? (
