@@ -44,6 +44,7 @@ import {
   sessionHasGroup,
   type SessionGroupFilterOption,
 } from "@/utils/session-group-filter"
+import { buildSessionProjectFilterOptions, type SessionProjectFilterOption } from "@/utils/session-project-filter"
 
 export interface SessionListRow {
   item: SessionMeta
@@ -88,6 +89,8 @@ interface SessionListProps {
   labels?: LabelConfig[]
   /** Callback when session labels are toggled (for labels submenu in SessionMenu) */
   onLabelsChange?: (sessionId: string, labels: string[]) => void
+  /** Existing workspace projects for the Project label shortcut */
+  projectOptions?: SessionProjectFilterOption[]
   /** Existing workspace groups for the Groups submenu */
   groupOptions?: SessionGroupFilterOption[]
   /** How to group sessions: 'date' (default), 'status', 'unread', or 'group' */
@@ -148,6 +151,7 @@ export function SessionList({
   evaluateViews,
   labels = [],
   onLabelsChange,
+  projectOptions,
   groupOptions,
   groupingMode = 'date',
   workspaceId,
@@ -177,6 +181,11 @@ export function SessionList({
 
   // Pre-flatten label tree once for efficient ID lookups in each SessionItem
   const flatLabels = useMemo(() => flattenLabels(labels), [labels])
+
+  const resolvedProjectOptions = useMemo(
+    () => projectOptions ?? buildSessionProjectFilterOptions(items),
+    [projectOptions, items]
+  )
 
   const resolvedGroupOptions = useMemo(
     () => groupOptions ?? buildSessionGroupFilterOptions(items),
@@ -727,6 +736,7 @@ export function SessionList({
     onMarkUnread,
     onDelete: handleDeleteWithToast,
     onLabelsChange,
+    projectOptions: resolvedProjectOptions,
     groupOptions: resolvedGroupOptions,
     onCreateGroupForSession: onLabelsChange ? handleCreateGroupForSession : undefined,
     onToggleGroupForSession: onLabelsChange ? handleToggleGroupForSession : undefined,
@@ -750,7 +760,7 @@ export function SessionList({
     onFlag, handleFlagWithToast, onUnflag, handleUnflagWithToast,
     onArchive, handleArchiveWithToast, onUnarchive, handleUnarchiveWithToast,
     onMarkUnread, handleDeleteWithToast, onLabelsChange,
-    resolvedGroupOptions, handleCreateGroupForSession, handleToggleGroupForSession,
+    resolvedProjectOptions, resolvedGroupOptions, handleCreateGroupForSession, handleToggleGroupForSession,
     handleSelectSessionById, handleOpenInNewWindow, setSendToWorkspace, handleFocusZone, handleKeyDown,
     sessionStatuses, flatLabels, labels, resolvedSearchQuery,
     focusedSessionId, selectionStore.state.selected, isMultiSelectActive,

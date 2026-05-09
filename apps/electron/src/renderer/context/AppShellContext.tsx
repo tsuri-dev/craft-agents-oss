@@ -61,6 +61,8 @@ export interface AppShellContextType {
   activeSessionWorkingDirectory?: string
   /** All label configs (tree) for label menu and badge display */
   labels?: import('@craft-agent/shared/labels').LabelConfig[]
+  /** Existing workspace project values for the Project label shortcut */
+  projectOptions?: import('../utils/session-project-filter').SessionProjectFilterOption[]
   /** Callback when session labels change */
   onSessionLabelsChange?: (sessionId: string, labels: string[]) => void
   /** Enabled permission modes for Shift+Tab cycling */
