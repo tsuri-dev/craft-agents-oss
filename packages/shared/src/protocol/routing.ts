@@ -18,6 +18,19 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   // remote — local connectivity management (reaches out to remote server from local app)
   RPC_CHANNELS.remote.TEST_CONNECTION,
 
+  // ssh — local private-key based SSH host management for desktop app sessions
+  RPC_CHANNELS.ssh.LIST_KEYS,
+  RPC_CHANNELS.ssh.CREATE_KEY,
+  RPC_CHANNELS.ssh.UPDATE_KEY,
+  RPC_CHANNELS.ssh.DELETE_KEY,
+  RPC_CHANNELS.ssh.VALIDATE_KEY,
+  RPC_CHANNELS.ssh.LIST_PROFILES,
+  RPC_CHANNELS.ssh.CREATE_PROFILE,
+  RPC_CHANNELS.ssh.UPDATE_PROFILE,
+  RPC_CHANNELS.ssh.DELETE_PROFILE,
+  RPC_CHANNELS.ssh.TEST_PROFILE,
+  RPC_CHANNELS.ssh.OPEN_PROFILE_SESSION,
+
   // workspaces — local workspace CRUD (workspace list is local config)
   RPC_CHANNELS.workspaces.GET,
   RPC_CHANNELS.workspaces.CREATE,

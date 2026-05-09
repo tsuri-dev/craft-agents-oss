@@ -72,6 +72,7 @@ export interface ISessionManager {
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): void
   setSessionThinkingLevel(sessionId: string, level: ThinkingLevel): void
   updateWorkingDirectory(sessionId: string, path: string): void
+  updateSessionRemoteTarget?(sessionId: string, target: import('@craft-agent/shared/protocol').SessionRemoteTarget): Promise<void>
   setSessionSources(sessionId: string, sourceSlugs: string[]): Promise<void>
   setSessionLabels(sessionId: string, labels: string[]): void
   setSessionConnection(sessionId: string, connectionSlug: string): Promise<void>

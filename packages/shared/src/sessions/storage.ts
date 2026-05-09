@@ -179,6 +179,7 @@ export async function createSession(
   options?: {
     name?: string;
     workingDirectory?: string;
+    remoteTarget?: SessionConfig['remoteTarget'];
     permissionMode?: SessionConfig['permissionMode'];
     enabledSourceSlugs?: string[];
     model?: string;
@@ -209,6 +210,7 @@ export async function createSession(
     createdAt: now,
     lastUsedAt: now,
     workingDirectory: options?.workingDirectory,
+    remoteTarget: options?.remoteTarget,
     sdkCwd,
     permissionMode: options?.permissionMode,
     enabledSourceSlugs: options?.enabledSourceSlugs,

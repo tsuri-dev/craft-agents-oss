@@ -43,6 +43,20 @@ export type BuiltInStatusId = 'todo' | 'in-progress' | 'needs-review' | 'done' |
  * Electron-specific Session type (includes runtime state).
  * Extends core Session with messages array and processing state.
  */
+export interface SessionRemoteTarget {
+  type: 'ssh'
+  profileId: string
+  profileName: string
+  host: string
+  port: number
+  username: string
+  privateKeyId: string
+  privateKeyPath?: string
+  remoteWorkingDirectory: string
+  keepAlive?: boolean
+  keepAliveMinutes?: number
+}
+
 export interface Session {
   id: string
   workspaceId: string
@@ -69,6 +83,7 @@ export interface Session {
   hasUnread?: boolean
   enabledSourceSlugs?: string[]
   workingDirectory?: string
+  remoteTarget?: SessionRemoteTarget
   sessionFolderPath?: string
   sharedUrl?: string
   sharedId?: string
@@ -171,6 +186,7 @@ export interface CreateSessionOptions {
    * - Absolute path string: Use this specific path
    */
   workingDirectory?: string | 'user_default' | 'none'
+  remoteTarget?: SessionRemoteTarget
   model?: string
   llmConnection?: string
   systemPromptPreset?: 'default' | 'mini' | string
@@ -186,6 +202,83 @@ export interface CreateSessionOptions {
   branchFromMessageId?: string
   /** Parent session ID used together with branchFromMessageId. */
   branchFromSessionId?: string
+}
+
+export interface SshPrivateKeyRecord {
+  id: string
+  name: string
+  privateKeyPath: string
+  publicKey?: string
+  fingerprint?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface CreateSshPrivateKeyInput {
+  name: string
+  privateKeyPath: string
+}
+
+export interface UpdateSshPrivateKeyInput {
+  name?: string
+  privateKeyPath?: string
+}
+
+export interface SshConnectionProfile {
+  id: string
+  name: string
+  host: string
+  port: number
+  username: string
+  privateKeyId: string
+  remoteWorkingDirectory: string
+  keepAlive?: boolean
+  keepAliveMinutes?: number
+  boundSessionId?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface CreateSshConnectionProfileInput {
+  name: string
+  host: string
+  port?: number
+  username: string
+  privateKeyId: string
+  remoteWorkingDirectory: string
+  keepAlive?: boolean
+  keepAliveMinutes?: number
+}
+
+export interface UpdateSshConnectionProfileInput {
+  name?: string
+  host?: string
+  port?: number
+  username?: string
+  privateKeyId?: string
+  remoteWorkingDirectory?: string
+  keepAlive?: boolean
+  keepAliveMinutes?: number
+  boundSessionId?: string | null
+}
+
+export interface SshKeyValidationResult {
+  ok: boolean
+  publicKey?: string
+  fingerprint?: string
+  error?: string
+}
+
+export interface SshProfileTestResult {
+  ok: boolean
+  cwd?: string
+  error?: string
+}
+
+export interface OpenSshProfileSessionResult {
+  profile: SshConnectionProfile
+  session: Session
+  created: boolean
 }
 
 export interface RemoteSessionTransferPayload {

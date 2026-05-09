@@ -33,9 +33,9 @@ export const SESSION_PERSISTENT_FIELDS = [
   // Read tracking
   'lastReadMessageId', 'hasUnread',
   // Config
-  'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory',
+  'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory', 'remoteTarget',
   // Model/Connection
-  'model', 'llmConnection', 'connectionLocked', 'thinkingLevel',
+  'model', 'llmConnection', 'connectionLocked', 'thinkingLevel', 'modelSwitchFromSdkSessionId',
   // Sharing
   'sharedUrl', 'sharedId',
   // Plan execution
@@ -87,6 +87,20 @@ export interface SessionTokenUsage {
   contextWindow?: number;
 }
 
+export interface SessionRemoteTarget {
+  type: 'ssh';
+  profileId: string;
+  profileName: string;
+  host: string;
+  port: number;
+  username: string;
+  privateKeyId: string;
+  privateKeyPath?: string;
+  remoteWorkingDirectory: string;
+  keepAlive?: boolean;
+  keepAliveMinutes?: number;
+}
+
 /**
  * Stored message format (simplified for persistence)
  * Re-exported from @craft-agent/core for convenience
@@ -133,6 +147,8 @@ export interface SessionConfig {
   enabledSourceSlugs?: string[];
   /** Working directory for this session (used by agent for bash commands and context) */
   workingDirectory?: string;
+  /** Remote execution target metadata for SSH-backed sessions. */
+  remoteTarget?: SessionRemoteTarget;
   /** SDK cwd for session storage - set once at creation, never changes. Ensures SDK can find session transcripts regardless of workingDirectory changes. */
   sdkCwd?: string;
   /** Shared viewer URL (if shared via viewer) */
@@ -147,6 +163,8 @@ export interface SessionConfig {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
+  /** SDK session to fork from on next turn after an in-session model switch. */
+  modelSwitchFromSdkSessionId?: string;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
    * When set, indicates a plan needs to be executed after compaction completes.
@@ -251,6 +269,8 @@ export interface SessionHeader {
   enabledSourceSlugs?: string[];
   /** Working directory for this session (used by agent for bash commands and context) */
   workingDirectory?: string;
+  /** Remote execution target metadata for SSH-backed sessions. */
+  remoteTarget?: SessionRemoteTarget;
   /** SDK cwd for session storage - set once at creation, never changes */
   sdkCwd?: string;
   /** Shared viewer URL (if shared via viewer) */
@@ -265,6 +285,8 @@ export interface SessionHeader {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
+  /** SDK session to fork from on next turn after an in-session model switch. */
+  modelSwitchFromSdkSessionId?: string;
   /**
    * Pending plan execution state - tracks "Accept & Compact" flow.
    * When set, indicates a plan needs to be executed after compaction completes.
@@ -340,6 +362,8 @@ export interface SessionMetadata {
   sharedId?: string;
   /** Working directory for this session */
   workingDirectory?: string;
+  /** Remote execution target metadata for SSH-backed sessions. */
+  remoteTarget?: SessionRemoteTarget;
   /** SDK cwd for session storage - set once at creation, never changes */
   sdkCwd?: string;
   /** Role/type of the last message (for badge display without loading messages) */
@@ -352,6 +376,8 @@ export interface SessionMetadata {
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
+  /** SDK session to fork from on next turn after an in-session model switch. */
+  modelSwitchFromSdkSessionId?: string;
   /** ID of last message user has read - for unread detection */
   lastReadMessageId?: string;
   /** ID of the last final (non-intermediate) assistant message - for unread detection */

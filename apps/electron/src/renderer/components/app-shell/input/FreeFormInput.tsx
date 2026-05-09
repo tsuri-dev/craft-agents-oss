@@ -106,6 +106,12 @@ function formatFollowUpChipText(text: string, fallback: string, maxLength = 50):
     : normalized
 }
 
+function getConnectionModelContextWindow(modelId: string, models: Array<ModelDefinition | string>): number | undefined {
+  const model = models.find(item => typeof item === 'string' ? item === modelId : item.id === modelId)
+  if (!model || typeof model === 'string') return undefined
+  return model.contextWindow
+}
+
 
 /** Platform-specific modifier key for keyboard shortcuts */
 const cmdKey = isMac ? '⌘' : 'Ctrl'
@@ -2381,30 +2387,41 @@ export function FreeFormInput({
           </DropdownMenu>
           )}
 
-          {/* 5.5 Context Usage Warning Badge - shows when approaching auto-compaction threshold */}
+          {/* 5.5 Context Usage Badge - shows token usage for all models; Claude can compact */}
           {(() => {
+            const inputTokens = contextStatus?.inputTokens ?? 0
+            if (inputTokens <= 0) return null
+
             // Calculate usage percentage based on compaction threshold (~77.5% of context window),
             // not the full context window - this gives users meaningful warnings before compaction kicks in.
             // SDK triggers compaction at ~155k tokens for a 200k context window.
-            // Falls back to known per-model context window when SDK hasn't reported usage yet.
-            const effectiveContextWindow = contextStatus?.contextWindow || getModelContextWindow(currentModel)
+            // Falls back to known per-model context window, including dynamic models from the active connection.
+            const effectiveContextWindow = contextStatus?.contextWindow
+              || getConnectionModelContextWindow(currentModel, availableModels)
+              || getModelContextWindow(currentModel)
             const compactionThreshold = effectiveContextWindow
               ? Math.round(effectiveContextWindow * 0.775)
               : null
-            const usagePercent = contextStatus?.inputTokens && compactionThreshold
-              ? Math.min(99, Math.round((contextStatus.inputTokens / compactionThreshold) * 100))
+            const usagePercent = compactionThreshold
+              ? Math.min(99, Math.round((inputTokens / compactionThreshold) * 100))
               : null
-            // Show badge when >= 80% of compaction threshold AND not currently compacting
-            // Hide for Codex and Copilot models which don't support context compaction
+            const supportsCompact = effectiveConnectionDetails?.providerType === 'anthropic'
             const showWarning = usagePercent !== null && usagePercent >= 80 && !contextStatus?.isCompacting
-
-            if (!showWarning) return null
+            const badgeLabel = usagePercent !== null ? `${usagePercent}%` : formatTokenCount(inputTokens)
 
             const handleCompactClick = () => {
-              if (!isProcessing) {
+              if (supportsCompact && !isProcessing) {
                 onSubmit('/compact', [])
               }
             }
+
+            const tooltip = usagePercent !== null
+              ? supportsCompact
+                ? isProcessing
+                  ? `${usagePercent}% context used — wait for current operation`
+                  : `${usagePercent}% context used — click to compact`
+                : `${usagePercent}% context used (${formatTokenCount(inputTokens)} tokens)`
+              : `${formatTokenCount(inputTokens)} context tokens used`
 
             return (
               <Tooltip>
@@ -2412,22 +2429,28 @@ export function FreeFormInput({
                   <button
                     type="button"
                     onClick={handleCompactClick}
-                    disabled={isProcessing}
-                    className="inline-flex items-center h-6 px-2 text-[12px] font-medium bg-info/10 rounded-[6px] shadow-tinted select-none cursor-pointer hover:bg-info/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isProcessing || !supportsCompact}
+                    className={cn(
+                      "inline-flex items-center h-6 px-2 text-[12px] font-medium rounded-[6px] shadow-tinted select-none transition-colors disabled:opacity-100",
+                      showWarning
+                        ? "bg-warning/10 hover:bg-warning/20"
+                        : "bg-info/10 hover:bg-info/20",
+                      supportsCompact && !isProcessing
+                        ? "cursor-pointer"
+                        : "cursor-default",
+                    )}
                     style={{
-                      '--shadow-color': 'var(--info-rgb)',
-                      color: 'color-mix(in oklab, var(--info) 30%, var(--foreground))',
+                      '--shadow-color': showWarning ? 'var(--warning-rgb)' : 'var(--info-rgb)',
+                      color: showWarning
+                        ? 'color-mix(in oklab, var(--warning) 42%, var(--foreground))'
+                        : 'color-mix(in oklab, var(--info) 30%, var(--foreground))',
                     } as React.CSSProperties}
                   >
-                    {usagePercent}%
+                    {contextStatus?.isCompacting && <Spinner className="mr-1 h-3 w-3" />}
+                    {badgeLabel}
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="top">
-                  {isProcessing
-                    ? `${usagePercent}% context used — wait for current operation`
-                    : `${usagePercent}% context used — click to compact`
-                  }
-                </TooltipContent>
+                <TooltipContent side="top">{tooltip}</TooltipContent>
               </Tooltip>
             )
           })()}

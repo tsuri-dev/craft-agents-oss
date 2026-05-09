@@ -28,6 +28,7 @@ export interface SessionMeta {
   isFlagged?: boolean
   lastReadMessageId?: string
   workingDirectory?: string
+  remoteTarget?: Session['remoteTarget']
   enabledSourceSlugs?: string[]
   /** Shared viewer URL (if shared via viewer) */
   sharedUrl?: string
