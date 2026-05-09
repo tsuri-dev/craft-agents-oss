@@ -60,6 +60,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     enabledSources,
     skills,
     labels,
+    projectOptions,
     onSessionLabelsChange,
     enabledModes,
     sessionStatuses,
@@ -611,6 +612,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       item={sessionMeta}
       sessionStatuses={sessionStatuses ?? []}
       labels={labels ?? []}
+      projectOptions={projectOptions ?? []}
       onLabelsChange={handleLabelsChange}
       onRename={handleRename}
       onFlag={handleFlag}
@@ -664,6 +666,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     isAsyncOperationOngoing,
     sessionStatuses,
     labels,
+    projectOptions,
     handleLabelsChange,
     handleRename,
     handleFlag,

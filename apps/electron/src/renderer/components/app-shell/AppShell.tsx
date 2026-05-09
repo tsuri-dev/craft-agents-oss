@@ -1889,6 +1889,7 @@ function AppShellContent({
     skills,
     activeSessionWorkingDirectory,
     labels: displayLabelConfigs,
+    projectOptions: projectFilterOptions,
     onSessionLabelsChange: handleSessionLabelsChange,
     enabledModes,
     sessionStatuses: effectiveSessionStatuses,
@@ -1915,7 +1916,7 @@ function AppShellContent({
     automationTestResults,
     getAutomationHistory,
     onReplayAutomation: handleReplayAutomation,
-  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, sessionBoardViewMode, sessionBoardGroupBy, filteredSessionMetas, hiddenBoardStatusIds, handleHideBoardStatus, handleShowBoardStatus, handleSessionSourcesChange, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
+  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, projectFilterOptions, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, sessionBoardViewMode, sessionBoardGroupBy, filteredSessionMetas, hiddenBoardStatusIds, handleHideBoardStatus, handleShowBoardStatus, handleSessionSourcesChange, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
 
   // Persist expanded folders to localStorage (workspace-scoped)
   React.useEffect(() => {
@@ -4222,6 +4223,7 @@ function AppShellContent({
                   evaluateViews={evaluateViews}
                   labels={displayLabelConfigs}
                   onLabelsChange={handleSessionLabelsChange}
+                  projectOptions={projectFilterOptions}
                   groupOptions={groupFilterOptions}
                   groupingMode={chatGroupingMode}
                   workspaceId={activeWorkspaceId ?? undefined}

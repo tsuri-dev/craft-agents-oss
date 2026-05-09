@@ -38,7 +38,7 @@ import {
 import { useMenuComponents } from '@/components/ui/menu-context'
 import { getStateColor, getStateIcon, type SessionStatusId } from '@/config/session-status-config'
 import type { SessionStatus } from '@/config/session-status-config'
-import type { LabelConfig } from '@craft-agent/shared/labels'
+import { extractLabelId, formatLabelEntry, type LabelConfig } from '@craft-agent/shared/labels'
 import { LabelMenuItems, StatusMenuItems, ShareMenuItems } from './SessionMenuParts'
 import { getFileManagerName } from '@/lib/platform'
 import type { SessionMeta } from '@/atoms/sessions'
@@ -47,6 +47,7 @@ import { MessagingSessionMenuItem } from '@/components/messaging/MessagingSessio
 import { useSessionMenuActions } from '@/hooks/useSessionMenuActions'
 import { getSessionGroupValues } from '@/utils/session-group-filter'
 import type { SessionGroupFilterOption } from '@/utils/session-group-filter'
+import { getSessionProjectValue, PROJECT_LABEL_ID, type SessionProjectFilterOption } from '@/utils/session-project-filter'
 import { formatPercent, formatTokenCount, formatUsd, getCacheReadRatio } from '@/utils/session-usage'
 
 export interface SessionMenuProps {
@@ -58,6 +59,8 @@ export interface SessionMenuProps {
   labels?: LabelConfig[]
   /** Callback when labels are toggled (receives full updated labels array) */
   onLabelsChange?: (labels: string[]) => void
+  /** Existing workspace projects available for the Project label shortcut */
+  projectOptions?: SessionProjectFilterOption[]
   /** Existing session groups available in the workspace */
   groupOptions?: SessionGroupFilterOption[]
   /** Callback to create a new group and add this session */
@@ -88,6 +91,7 @@ export function SessionMenu({
   sessionStatuses,
   labels = [],
   onLabelsChange,
+  projectOptions = [],
   groupOptions = [],
   onCreateGroup,
   onToggleGroup,
@@ -119,7 +123,20 @@ export function SessionMenu({
     () => getSessionGroupValues(item),
     [item]
   )
+  const activeProjectValue = React.useMemo(
+    () => getSessionProjectValue(item),
+    [item]
+  )
 
+  const handleProjectSelect = React.useCallback((projectValue: string | null) => {
+    if (!onLabelsChange) return
+    const nextLabels = sessionLabels.filter(entry => extractLabelId(entry) !== PROJECT_LABEL_ID)
+    const trimmed = projectValue?.trim()
+    if (trimmed) {
+      nextLabels.push(formatLabelEntry(PROJECT_LABEL_ID, trimmed))
+    }
+    onLabelsChange(nextLabels)
+  }, [sessionLabels, onLabelsChange])
   // Get menu components from context (works with both DropdownMenu and ContextMenu)
   const { MenuItem, Separator, Sub, SubTrigger, SubContent } = useMenuComponents()
 
@@ -202,6 +219,9 @@ export function SessionMenu({
               labels={labels}
               appliedLabelIds={actions.appliedLabelIds}
               onToggle={actions.toggleLabel}
+              projectOptions={projectOptions}
+              activeProjectValue={activeProjectValue}
+              onProjectSelect={handleProjectSelect}
               menu={{ MenuItem, Separator, Sub, SubTrigger, SubContent }}
             />
           </SubContent>
