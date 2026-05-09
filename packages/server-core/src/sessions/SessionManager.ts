@@ -821,6 +821,8 @@ interface ManagedSession {
   labels?: string[]
   // Working directory for this session (used by agent for bash commands)
   workingDirectory?: string
+  // Remote execution target metadata for SSH-backed sessions
+  remoteTarget?: import('@craft-agent/shared/protocol').SessionRemoteTarget
   // SDK cwd for session storage - set once at creation, never changes.
   // Ensures SDK can find session transcripts regardless of workingDirectory changes.
   sdkCwd?: string
@@ -836,6 +838,8 @@ interface ManagedSession {
   connectionLocked?: boolean
   // Thinking level for this session ('off', 'think', 'max')
   thinkingLevel?: ThinkingLevel
+  // SDK session to fork from on next turn after an in-session model switch
+  modelSwitchFromSdkSessionId?: string
   // System prompt preset for mini agents ('default' | 'mini')
   systemPromptPreset?: 'default' | 'mini' | string
   // Role/type of the last message (for badge display without loading messages)
@@ -2799,6 +2803,7 @@ export class SessionManager implements ISessionManager {
       name: options?.name,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
+      remoteTarget: options?.remoteTarget,
       hidden: options?.hidden,
       sessionStatus: options?.sessionStatus,
       labels: options?.labels,
@@ -2883,6 +2888,7 @@ export class SessionManager implements ISessionManager {
     const managed = createManagedSession(storedSession, workspace, {
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
+      remoteTarget: options?.remoteTarget,
       model: resolvedModel,
       llmConnection: options?.llmConnection,
       thinkingLevel: defaultThinkingLevel,
@@ -3294,17 +3300,22 @@ export class SessionManager implements ISessionManager {
         createdAt: managed.lastMessageAt,
         lastUsedAt: managed.lastMessageAt,
         workingDirectory: managed.workingDirectory,
+        remoteTarget: managed.remoteTarget,
         sdkCwd: managed.sdkCwd,
         model: managed.model,
         llmConnection: managed.llmConnection,
         permissionMode: managed.permissionMode,
         previousPermissionMode: managed.previousPermissionMode,
+        modelSwitchFromSdkSessionId: managed.modelSwitchFromSdkSessionId,
       }
 
       const onSdkSessionIdUpdate = (sdkSessionId: string) => {
         managed.sdkSessionId = sdkSessionId
         // Retire branch-only fork metadata now that child session is established
-        if (managed.branchFromSdkSessionId) {
+        if (managed.modelSwitchFromSdkSessionId) {
+          sessionLog.info(`Model switch fork established for ${managed.id}: child=${sdkSessionId}, retiring source SDK session (source=${managed.modelSwitchFromSdkSessionId})`)
+          managed.modelSwitchFromSdkSessionId = undefined
+        } else if (managed.branchFromSdkSessionId) {
           sessionLog.info(`Branch fork established for ${managed.id}: child=${sdkSessionId}, retiring parent fork metadata (parent=${managed.branchFromSdkSessionId})`)
           managed.branchFromSdkSessionId = undefined
           managed.branchFromSdkCwd = undefined
@@ -5180,6 +5191,28 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Update SSH remote target metadata for an existing session.
+   * If an agent runtime already exists, recreate it on the next message so the
+   * prompt/context picks up changed ControlMaster/ControlPersist settings.
+   */
+  async updateSessionRemoteTarget(sessionId: string, target: import('@craft-agent/shared/protocol').SessionRemoteTarget): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) return
+
+    const previous = JSON.stringify(managed.remoteTarget ?? null)
+    const next = JSON.stringify(target)
+    if (previous === next) return
+
+    managed.remoteTarget = target
+    this.persistSession(managed)
+    await sessionPersistenceQueue.flush(sessionId)
+
+    if (managed.agent) {
+      await this.disposeManagedAgentRuntime(managed, 'ssh remote target update')
+    }
+  }
+
+  /**
    * Update the model for a session
    * Pass null to clear the session-specific model (will use global config)
    * @param connection - Optional LLM connection slug (only applied if not already locked)
@@ -5188,13 +5221,28 @@ export class SessionManager implements ISessionManager {
     sessionLog.info(`[updateSessionModel] sessionId=${sessionId}, model=${model}, connection=${connection}`)
     const managed = this.sessions.get(sessionId)
     if (managed) {
+      const previousModel = managed.model
       managed.model = model ?? undefined
       // Also update connection if provided and not already locked
       if (connection && !managed.connectionLocked) {
         managed.llmConnection = connection
       }
+
+      // Claude Code resume can keep using the original SDK session model. When
+      // the model changes inside an established session, fork the existing SDK
+      // session on the next turn so history is preserved but the new model is
+      // actually applied.
+      const modelChanged = previousModel !== managed.model
+      if (modelChanged && managed.sdkSessionId) {
+        managed.modelSwitchFromSdkSessionId = managed.sdkSessionId
+        sessionLog.info(`[updateSessionModel] Queued SDK fork for model switch: session=${sessionId}, sourceSdkSession=${managed.sdkSessionId}, ${previousModel ?? '(default)'} → ${managed.model ?? '(global config)'}`)
+      }
+
       // Persist to disk (include connection if it was updated)
-      const updates: { model?: string; llmConnection?: string } = { model: model ?? undefined }
+      const updates: { model?: string; llmConnection?: string; modelSwitchFromSdkSessionId?: string } = {
+        model: model ?? undefined,
+        modelSwitchFromSdkSessionId: managed.modelSwitchFromSdkSessionId,
+      }
       if (connection && !managed.connectionLocked) {
         updates.llmConnection = connection
       }

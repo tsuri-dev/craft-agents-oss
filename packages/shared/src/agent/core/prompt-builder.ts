@@ -23,6 +23,10 @@ import type {
   RecoveryMessage,
 } from './types.ts';
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
 /**
  * PromptBuilder provides utilities for building prompts and context blocks.
  *
@@ -98,6 +102,11 @@ export class PromptBuilder {
       parts.push(workingDirContext);
     }
 
+    const remoteTargetContext = this.getRemoteTargetContext();
+    if (remoteTargetContext) {
+      parts.push(remoteTargetContext);
+    }
+
     return parts;
   }
 
@@ -133,6 +142,37 @@ export class PromptBuilder {
       isSessionRoot,
       this.config.session?.sdkCwd
     );
+  }
+
+  getRemoteTargetContext(): string | null {
+    const target = this.config.session?.remoteTarget;
+    if (!target || target.type !== 'ssh') return null;
+
+    const keyArg = target.privateKeyPath ? `-i ${shellQuote(target.privateKeyPath)} ` : '';
+    const remote = `${target.username}@${target.host}`;
+    const cdPrefix = `cd ${shellQuote(target.remoteWorkingDirectory)} &&`;
+    const keepAliveEnabled = target.keepAlive !== false;
+    const keepAliveMinutes = target.keepAliveMinutes ?? 30;
+    const keepAliveArgs = keepAliveEnabled
+      ? ` -o ControlMaster=auto -o ControlPersist=${keepAliveMinutes}m -o ControlPath=/tmp/craft-agent-ssh-%C -o ServerAliveInterval=30 -o ServerAliveCountMax=3`
+      : '';
+
+    return `<remote_execution_target type="ssh">
+This session is bound to an SSH remote machine.
+- Profile: ${target.profileName}
+- Host: ${remote}
+- Port: ${target.port}
+- Remote working directory: ${target.remoteWorkingDirectory}
+- Private key path: ${target.privateKeyPath ?? '(configured key path unavailable)'}
+- SSH connection reuse: ${keepAliveEnabled ? `enabled, keep control socket for ${keepAliveMinutes} minutes` : 'disabled'}
+
+When using shell commands for project work, run them on the remote machine under the remote working directory. You MUST include the SSH options below on every ssh command for this session so OpenSSH multiplexing is actually enabled:
+ssh ${keyArg}-p ${target.port} -o BatchMode=yes -o IdentitiesOnly=yes${keepAliveArgs} ${shellQuote(remote)} ${shellQuote(`${cdPrefix} <command>`)}
+
+If you verify the effective ssh configuration, include the same options in the verification command; checking plain ssh -G <host> does not reflect this session's per-command overrides.
+
+Do not operate on the local session folder as if it were the remote project. Keep remote operations scoped to the remote working directory unless the user explicitly asks otherwise.
+</remote_execution_target>`;
   }
 
   // ============================================================

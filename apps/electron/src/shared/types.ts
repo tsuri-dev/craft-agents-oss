@@ -213,6 +213,15 @@ import type {
   ImportRemoteSessionTransferResult,
   UsageStats,
   UsageStatsRange,
+  SshPrivateKeyRecord,
+  CreateSshPrivateKeyInput,
+  UpdateSshPrivateKeyInput,
+  SshConnectionProfile,
+  CreateSshConnectionProfileInput,
+  UpdateSshConnectionProfileInput,
+  SshKeyValidationResult,
+  SshProfileTestResult,
+  OpenSshProfileSessionResult,
 } from '@craft-agent/shared/protocol'
 
 export interface ElectronAPI {
@@ -281,6 +290,19 @@ export interface ElectronAPI {
     remoteWorkspaceName?: string // auto-set when exactly one workspace
     serverVersion?: string       // server app version from handshake
   }>
+
+  // SSH remote development profiles
+  listSshKeys(workspaceId: string): Promise<SshPrivateKeyRecord[]>
+  createSshKey(workspaceId: string, input: CreateSshPrivateKeyInput): Promise<SshPrivateKeyRecord>
+  updateSshKey(workspaceId: string, keyId: string, patch: UpdateSshPrivateKeyInput): Promise<SshPrivateKeyRecord>
+  deleteSshKey(workspaceId: string, keyId: string): Promise<void>
+  validateSshKey(workspaceId: string, keyIdOrInput: string | CreateSshPrivateKeyInput): Promise<SshKeyValidationResult>
+  listSshProfiles(workspaceId: string): Promise<SshConnectionProfile[]>
+  createSshProfile(workspaceId: string, input: CreateSshConnectionProfileInput): Promise<SshConnectionProfile>
+  updateSshProfile(workspaceId: string, profileId: string, patch: UpdateSshConnectionProfileInput): Promise<SshConnectionProfile>
+  deleteSshProfile(workspaceId: string, profileId: string): Promise<void>
+  testSshProfile(workspaceId: string, profileIdOrInput: string | CreateSshConnectionProfileInput): Promise<SshProfileTestResult>
+  openSshProfileSession(workspaceId: string, profileId: string): Promise<OpenSshProfileSessionResult>
 
   // Window management
   getWindowWorkspace(): Promise<string | null>

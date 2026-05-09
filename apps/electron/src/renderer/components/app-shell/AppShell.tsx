@@ -36,6 +36,9 @@ import {
   List,
   Rocket,
   BarChart3,
+  Server,
+  KeyRound,
+  Copy,
 } from "lucide-react"
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
 import { SourceAvatar } from "@/components/ui/source-avatar"
@@ -77,6 +80,7 @@ import { SessionList, type ChatGroupingMode } from "./SessionList"
 import { StoryListPanel } from "./StoryListPanel"
 import { StoryCreateDialog } from "./StoryCreateDialog"
 import { UsageStatsDialog } from "./UsageStatsDialog"
+import { SshKeyDialog, SshProfileDialog } from "./SshDialogs"
 import { MainContentPanel } from "./MainContentPanel"
 import { PanelStackContainer } from "./PanelStackContainer"
 import { CompactSessionListFilter } from "./CompactSessionListFilter"
@@ -111,7 +115,7 @@ import {
 } from "@/utils/session-group-filter"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
-import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
+import { extractSessionMeta, sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import { sourcesAtom } from "@/atoms/sources"
 import { skillsAtom } from "@/atoms/skills"
 import { panelStackAtom, panelCountAtom, focusedPanelIdAtom, focusedSessionIdAtom, focusNextPanelAtom, focusPrevPanelAtom, parseSessionIdFromRoute } from "@/atoms/panel-stack"
@@ -140,7 +144,7 @@ import {
   isStoriesNavigation,
   type SessionFilter,
 } from "@/contexts/NavigationContext"
-import type { SettingsSubpage } from "../../../shared/types"
+import type { SettingsSubpage, SshConnectionProfile, SshPrivateKeyRecord } from "../../../shared/types"
 import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
@@ -1480,6 +1484,98 @@ function AppShellContent({
     return () => { cancelled = true }
   }, [usageWorkspaceId, workspaceSessionMetas])
 
+  const [sshKeys, setSshKeys] = useState<SshPrivateKeyRecord[]>([])
+  const [sshProfiles, setSshProfiles] = useState<SshConnectionProfile[]>([])
+  const [sshKeyDialogOpen, setSshKeyDialogOpen] = useState(false)
+  const [sshProfileDialogOpen, setSshProfileDialogOpen] = useState(false)
+  const [editingSshProfile, setEditingSshProfile] = useState<SshConnectionProfile | null>(null)
+
+  const reloadSshData = useCallback(async () => {
+    if (!activeWorkspaceId || !window.electronAPI.isChannelAvailable(RPC_CHANNELS.ssh.LIST_KEYS)) {
+      setSshKeys([])
+      setSshProfiles([])
+      return
+    }
+    const [keys, profiles] = await Promise.all([
+      window.electronAPI.listSshKeys(activeWorkspaceId),
+      window.electronAPI.listSshProfiles(activeWorkspaceId),
+    ])
+    setSshKeys(keys)
+    setSshProfiles(profiles)
+  }, [activeWorkspaceId])
+
+  useEffect(() => {
+    void reloadSshData().catch(error => {
+      console.error('[AppShell] Failed to load SSH profiles:', error)
+    })
+  }, [reloadSshData])
+
+  const openSshProfileDialog = useCallback((profile?: SshConnectionProfile) => {
+    setEditingSshProfile(profile ?? null)
+    setSshProfileDialogOpen(true)
+  }, [])
+
+  const handleOpenSshProfile = useCallback(async (profile: SshConnectionProfile) => {
+    if (!activeWorkspaceId) return
+    try {
+      const result = await window.electronAPI.openSshProfileSession(activeWorkspaceId, profile.id)
+      setSessionMetaMap(prev => {
+        const next = new Map(prev)
+        next.set(result.session.id, extractSessionMeta(result.session))
+        return next
+      })
+      setSshProfiles(current => current.map(item => item.id === result.profile.id ? result.profile : item))
+      navigate(routes.view.allSessions(result.session.id))
+      if (result.created) toast.success(`Created SSH session for ${profile.name}`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to open SSH session')
+    }
+  }, [activeWorkspaceId, setSessionMetaMap])
+
+  const handleTestSshProfile = useCallback(async (profile: SshConnectionProfile) => {
+    if (!activeWorkspaceId) return
+    try {
+      const result = await window.electronAPI.testSshProfile(activeWorkspaceId, profile.id)
+      if (result.ok) toast.success(`SSH connection OK${result.cwd ? `: ${result.cwd}` : ''}`)
+      else toast.error(result.error || 'SSH connection failed')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'SSH connection failed')
+    }
+  }, [activeWorkspaceId])
+
+  const handleDeleteSshProfile = useCallback(async (profile: SshConnectionProfile) => {
+    if (!activeWorkspaceId) return
+    try {
+      await window.electronAPI.deleteSshProfile(activeWorkspaceId, profile.id)
+      toast.success('SSH host removed')
+      await reloadSshData()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to remove SSH host')
+    }
+  }, [activeWorkspaceId, reloadSshData])
+
+  const handleForkSshProfile = useCallback(async (profile: SshConnectionProfile) => {
+    if (!activeWorkspaceId) return
+    try {
+      const forked = await window.electronAPI.createSshProfile(activeWorkspaceId, {
+        name: `${profile.name} Copy`,
+        host: profile.host,
+        port: profile.port,
+        username: profile.username,
+        privateKeyId: profile.privateKeyId,
+        remoteWorkingDirectory: profile.remoteWorkingDirectory,
+        keepAlive: profile.keepAlive ?? true,
+        keepAliveMinutes: profile.keepAliveMinutes ?? 30,
+      })
+      await reloadSshData()
+      setEditingSshProfile(forked)
+      setSshProfileDialogOpen(true)
+      toast.success('SSH host forked')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to fork SSH host')
+    }
+  }, [activeWorkspaceId, reloadSshData])
+
   const renameSessionGroup = useCallback((groupName: string) => {
     const rawName = window.prompt(`Rename group “${groupName}” to:`, groupName)
     if (rawName === null) return
@@ -2721,6 +2817,63 @@ function AppShellContent({
                       variant: usageDialogOpen ? "default" as const : "ghost" as const,
                       onClick: () => setUsageDialogOpen(true),
                     },
+                    {
+                      id: "nav:ssh",
+                      title: "SSH",
+                      label: sshProfiles.length > 0 ? String(sshProfiles.length) : undefined,
+                      icon: Server,
+                      variant: sshProfileDialogOpen || sshKeyDialogOpen ? "default" as const : "ghost" as const,
+                      onClick: () => toggleExpanded('nav:ssh'),
+                      expandable: true,
+                      expanded: isExpanded('nav:ssh'),
+                      onToggle: () => toggleExpanded('nav:ssh'),
+                      items: [
+                        {
+                          id: "nav:ssh:keys",
+                          title: "Private Keys",
+                          label: sshKeys.length > 0 ? String(sshKeys.length) : undefined,
+                          icon: KeyRound,
+                          variant: sshKeyDialogOpen ? "default" as const : "ghost" as const,
+                          onClick: () => setSshKeyDialogOpen(true),
+                        },
+                        {
+                          id: "nav:ssh:add",
+                          title: "Add SSH Host",
+                          icon: Plus,
+                          variant: "ghost" as const,
+                          onClick: () => openSshProfileDialog(),
+                        },
+                        ...(sshProfiles.length > 0 ? [{ id: 'separator:ssh-profiles', type: 'separator' as const }] : []),
+                        ...sshProfiles.map(profile => ({
+                          id: `nav:ssh:${profile.id}`,
+                          title: profile.name,
+                          label: profile.boundSessionId ? undefined : 'new',
+                          icon: Server,
+                          variant: (session.selected === profile.boundSessionId ? "default" : "ghost") as "default" | "ghost",
+                          onClick: () => { void handleOpenSshProfile(profile) },
+                          afterTitle: (
+                            <span className="flex items-center gap-0.5" onClick={event => event.stopPropagation()}>
+                              <button className="rounded p-0.5 text-muted-foreground hover:text-foreground" title="Test SSH" onClick={() => { void handleTestSshProfile(profile) }}>
+                                <RotateCw className="h-3 w-3" />
+                              </button>
+                              <button className="rounded p-0.5 text-muted-foreground hover:text-foreground" title="Edit SSH host" onClick={() => openSshProfileDialog(profile)}>
+                                <Settings className="h-3 w-3" />
+                              </button>
+                              <button className="rounded p-0.5 text-muted-foreground hover:text-foreground" title="Fork SSH host" onClick={() => { void handleForkSshProfile(profile) }}>
+                                <Copy className="h-3 w-3" />
+                              </button>
+                              <button className="rounded p-0.5 text-muted-foreground hover:text-destructive" title="Delete SSH host" onClick={() => {
+                                if (window.confirm(`Delete SSH host “${profile.name}”? This will not delete its bound session.`)) {
+                                  void handleDeleteSshProfile(profile)
+                                }
+                              }}>
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </span>
+                          ),
+                        })),
+                      ],
+                    },
                     // Labels: navigable header (shows all labeled sessions) + hierarchical tree (drag-and-drop reorder + re-parent)
                     {
                       id: "nav:labels",
@@ -3956,6 +4109,24 @@ function AppShellContent({
               open={usageDialogOpen}
               onOpenChange={setUsageDialogOpen}
               workspaceId={usageWorkspaceId}
+            />
+            <SshKeyDialog
+              open={sshKeyDialogOpen}
+              onOpenChange={setSshKeyDialogOpen}
+              workspaceId={activeWorkspaceId}
+              keys={sshKeys}
+              onChanged={reloadSshData}
+            />
+            <SshProfileDialog
+              open={sshProfileDialogOpen}
+              onOpenChange={(open) => {
+                setSshProfileDialogOpen(open)
+                if (!open) setEditingSshProfile(null)
+              }}
+              workspaceId={activeWorkspaceId}
+              keys={sshKeys}
+              profile={editingSshProfile}
+              onChanged={reloadSshData}
             />
             {/* Content: SessionList, SourcesListPanel, or SettingsNavigator based on navigation state */}
             {isStoriesNavigation(navState) && (

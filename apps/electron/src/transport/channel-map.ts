@@ -53,6 +53,19 @@ export const CHANNEL_MAP = {
   updateWorkspaceRemoteServer: invoke(RPC_CHANNELS.workspaces.UPDATE_REMOTE),
   testRemoteConnection: invoke(RPC_CHANNELS.remote.TEST_CONNECTION),
 
+  // SSH remote development profiles
+  listSshKeys: invoke(RPC_CHANNELS.ssh.LIST_KEYS),
+  createSshKey: invoke(RPC_CHANNELS.ssh.CREATE_KEY),
+  updateSshKey: invoke(RPC_CHANNELS.ssh.UPDATE_KEY),
+  deleteSshKey: invoke(RPC_CHANNELS.ssh.DELETE_KEY),
+  validateSshKey: invoke(RPC_CHANNELS.ssh.VALIDATE_KEY),
+  listSshProfiles: invoke(RPC_CHANNELS.ssh.LIST_PROFILES),
+  createSshProfile: invoke(RPC_CHANNELS.ssh.CREATE_PROFILE),
+  updateSshProfile: invoke(RPC_CHANNELS.ssh.UPDATE_PROFILE),
+  deleteSshProfile: invoke(RPC_CHANNELS.ssh.DELETE_PROFILE),
+  testSshProfile: invoke(RPC_CHANNELS.ssh.TEST_PROFILE),
+  openSshProfileSession: invoke(RPC_CHANNELS.ssh.OPEN_PROFILE_SESSION),
+
   // Server-level workspace operations (REMOTE_ELIGIBLE)
   getServerWorkspaces: invoke(RPC_CHANNELS.server.GET_WORKSPACES),
   createServerWorkspace: invoke(RPC_CHANNELS.server.CREATE_WORKSPACE),

@@ -7,6 +7,19 @@ export const RPC_CHANNELS = {
   remote: {
     TEST_CONNECTION: 'remote:testConnection',
   },
+  ssh: {
+    LIST_KEYS: 'ssh:listKeys',
+    CREATE_KEY: 'ssh:createKey',
+    UPDATE_KEY: 'ssh:updateKey',
+    DELETE_KEY: 'ssh:deleteKey',
+    VALIDATE_KEY: 'ssh:validateKey',
+    LIST_PROFILES: 'ssh:listProfiles',
+    CREATE_PROFILE: 'ssh:createProfile',
+    UPDATE_PROFILE: 'ssh:updateProfile',
+    DELETE_PROFILE: 'ssh:deleteProfile',
+    TEST_PROFILE: 'ssh:testProfile',
+    OPEN_PROFILE_SESSION: 'ssh:openProfileSession',
+  },
   server: {
     GET_WORKSPACES: 'server:getWorkspaces',
     CREATE_WORKSPACE: 'server:createWorkspace',

@@ -474,6 +474,7 @@ export class ClaudeAgent extends BaseAgent {
   // in the invalid_request error message.
   private lastTurnHadAttachments: boolean = false;
   private branchFromSdkSessionId: string | null = null;
+  private modelSwitchFromSdkSessionId: string | null = null;
   private branchFromSdkCwd: string | null = null;
   private branchFromSdkTurnId: string | null = null;
   private isHeadless: boolean = false;
@@ -609,6 +610,14 @@ export class ClaudeAgent extends BaseAgent {
     if (config.session?.sdkSessionId) {
       this.sessionId = config.session.sdkSessionId;
     }
+    // Initialize pending model-switch fork params. Claude Code resume can keep
+    // using the old SDK session model, so after changing model mid-session we
+    // fork the previous SDK session on the next turn.
+    if (config.session?.modelSwitchFromSdkSessionId) {
+      this.modelSwitchFromSdkSessionId = config.session.modelSwitchFromSdkSessionId;
+      this.sessionId = null;
+    }
+
     // Initialize branch params for SDK-level fork (resume parent + forkSession)
     if (config.session?.branchFromSdkSessionId) {
       this.branchFromSdkSessionId = config.session.branchFromSdkSessionId;
@@ -1340,17 +1349,22 @@ export class ClaudeAgent extends BaseAgent {
         // Continue from previous session if we have one (enables conversation history & auto compaction)
         // Skip resume on retry (after session expiry) to start fresh
         // For branched sessions: fork the parent session so the agent has full conversation context
-        ...(!_isRetry && this.sessionId
-          ? { resume: this.sessionId }
-          : !_isRetry && this.branchFromSdkSessionId
-            ? {
-                resume: this.branchFromSdkSessionId,
-                forkSession: true,
-                // Trim the forked conversation at the branch point so the model
-                // only sees messages up to where the user branched, not the full parent.
-                ...(this.branchFromSdkTurnId ? { resumeSessionAt: this.branchFromSdkTurnId } : {}),
-              }
-            : {}),
+        ...(!_isRetry && this.modelSwitchFromSdkSessionId
+          ? {
+              resume: this.modelSwitchFromSdkSessionId,
+              forkSession: true,
+            }
+          : !_isRetry && this.sessionId
+            ? { resume: this.sessionId }
+            : !_isRetry && this.branchFromSdkSessionId
+              ? {
+                  resume: this.branchFromSdkSessionId,
+                  forkSession: true,
+                  // Trim the forked conversation at the branch point so the model
+                  // only sees messages up to where the user branched, not the full parent.
+                  ...(this.branchFromSdkTurnId ? { resumeSessionAt: this.branchFromSdkTurnId } : {}),
+                }
+              : {}),
         mcpServers,
         // NOTE: This callback is NOT called by the SDK because we set `permissionMode: 'bypassPermissions'` above.
         // All permission logic is handled via the PreToolUse hook instead (see hooks.PreToolUse above).
@@ -1373,7 +1387,7 @@ export class ClaudeAgent extends BaseAgent {
 
       // Track whether we're trying to resume a session (for error handling)
       // Also covers branch fork attempts where sessionId is null but branchFromSdkSessionId is set
-      const wasResuming = !_isRetry && (!!this.sessionId || !!this.branchFromSdkSessionId);
+      const wasResuming = !_isRetry && (!!this.sessionId || !!this.branchFromSdkSessionId || !!this.modelSwitchFromSdkSessionId);
       // Track whether this turn attempted branch-point cutoff via resumeSessionAt.
       // Needed for targeted fallback when the parent message UUID no longer exists server-side.
       const attemptedBranchCutoff = !_isRetry && !!this.branchFromSdkSessionId && !!this.branchFromSdkTurnId;
@@ -1381,6 +1395,9 @@ export class ClaudeAgent extends BaseAgent {
       // Log resume attempt for debugging session failures
       if (wasResuming) {
         debug(`[ClaudeAgent] Attempting to resume SDK session: ${this.sessionId}`);
+        if (this.modelSwitchFromSdkSessionId) {
+          debug(`[ClaudeAgent] Model switch fork: sourceSdkSessionId=${this.modelSwitchFromSdkSessionId}, model=${model}, childSdkCwd=${this.config.session?.sdkCwd}`);
+        }
         if (this.branchFromSdkSessionId) {
           debug(`[ClaudeAgent] Branch fork: parentSdkSessionId=${this.branchFromSdkSessionId}, branchFromSdkCwd=${this.branchFromSdkCwd}, resumeSessionAt=${this.branchFromSdkTurnId}, childSdkCwd=${this.config.session?.sdkCwd}`);
         }
@@ -1483,6 +1500,10 @@ This is a branched conversation. All prior messages in this conversation are par
             this.sessionId = message.session_id;
             // Notify caller of new SDK session ID (for immediate persistence)
             this.config.onSdkSessionIdUpdate?.(message.session_id);
+            if (this.modelSwitchFromSdkSessionId) {
+              debug(`[ClaudeAgent] Model switch fork established, retiring in-memory source SDK session metadata`);
+              this.modelSwitchFromSdkSessionId = null;
+            }
             // Retire in-memory branch fork metadata (persistence handled by callback)
             if (this.branchFromSdkSessionId) {
               debug(`[ClaudeAgent] Branch fork established, retiring in-memory fork metadata`);
@@ -2553,7 +2574,13 @@ This is a branched conversation. All prior messages in this conversation are par
   }
 
   setModel(model: string): void {
+    const previous = this.getModel();
     super.setModel(model);
+    if (previous !== model && this.sessionId) {
+      this.modelSwitchFromSdkSessionId = this.sessionId;
+      this.sessionId = null;
+      this.debug(`[ClaudeAgent] Queued model-switch fork: ${previous} → ${model}`);
+    }
   }
 
   // ============================================================
