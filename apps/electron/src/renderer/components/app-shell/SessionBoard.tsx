@@ -255,6 +255,7 @@ export function SessionBoard({
             selectedSessionId={selectedSessionId}
             onSelectSession={onSelectSession}
             onSessionStatusChange={onSessionStatusChange}
+            showCardStatus={groupBy !== "status"}
           />
         ))}
 

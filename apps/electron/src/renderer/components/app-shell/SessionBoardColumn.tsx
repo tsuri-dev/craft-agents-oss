@@ -24,6 +24,7 @@ export function SessionBoardColumn({
   selectedSessionId,
   onSelectSession,
   onSessionStatusChange,
+  showCardStatus = true,
 }: {
   group: SessionBoardGroup
   sessions: SessionMeta[]
@@ -34,6 +35,7 @@ export function SessionBoardColumn({
   selectedSessionId?: string | null
   onSelectSession?: (sessionId: string) => void
   onSessionStatusChange?: (sessionId: string, statusId: string) => void
+  showCardStatus?: boolean
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: group.id })
 
@@ -92,6 +94,7 @@ export function SessionBoardColumn({
               onSelectSession={onSelectSession}
               statuses={statuses}
               onSessionStatusChange={onSessionStatusChange}
+              showStatus={showCardStatus}
             />
           ))}
         </SortableContext>

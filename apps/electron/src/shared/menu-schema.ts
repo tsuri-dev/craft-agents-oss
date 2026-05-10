@@ -373,6 +373,7 @@ const SETTINGS_ICONS: Record<SettingsSubpage, string> = {
   appearance: 'Palette',
   input: 'Keyboard',
   workspace: 'Building2',
+  usage: 'BarChart3',
   permissions: 'ShieldCheck',
   labels: 'Tag',
   messaging: 'MessageSquare',
