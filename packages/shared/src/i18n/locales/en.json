@@ -1433,5 +1433,7 @@
   "workspace.selectWorkspaceDesc": "Choose a workspace on this server, or create a new one.",
   "workspace.selectWorkspacePlaceholder": "Select a workspace...",
   "workspace.serverAuthToken": "Server authentication token",
-  "workspace.underDefaultFolder": "under .craft-agent folder"
+  "workspace.underDefaultFolder": "under .craft-agent folder",
+  "settings.usage.title": "Usage",
+  "settings.usage.description": "Token usage and cost"
 }

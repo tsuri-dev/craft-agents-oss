@@ -10,6 +10,7 @@ export { default as AiSettingsPage, meta as AiSettingsMeta } from './AiSettingsP
 export { default as AppearanceSettingsPage, meta as AppearanceMeta } from './AppearanceSettingsPage'
 export { default as InputSettingsPage, meta as InputMeta } from './InputSettingsPage'
 export { default as WorkspaceSettingsPage, meta as WorkspaceSettingsMeta } from './WorkspaceSettingsPage'
+export { default as UsageSettingsPage, meta as UsageMeta } from './UsageSettingsPage'
 export { default as PermissionsSettingsPage, meta as PermissionsMeta } from './PermissionsSettingsPage'
 export { default as LabelsSettingsPage, meta as LabelsMeta } from './LabelsSettingsPage'
 export { default as ShortcutsPage, meta as ShortcutsMeta } from './ShortcutsPage'

@@ -1433,5 +1433,7 @@
   "workspace.selectWorkspaceDesc": "选择此服务器上的 Workspace 或创建新的。",
   "workspace.selectWorkspacePlaceholder": "选择 Workspace...",
   "workspace.serverAuthToken": "服务器认证令牌",
-  "workspace.underDefaultFolder": ".craft-agent 文件夹下"
+  "workspace.underDefaultFolder": ".craft-agent 文件夹下",
+  "settings.usage.title": "用量",
+  "settings.usage.description": "Token 用量和成本"
 }

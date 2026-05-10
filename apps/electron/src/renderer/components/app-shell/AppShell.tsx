@@ -35,7 +35,6 @@ import {
   Columns3,
   List,
   Rocket,
-  BarChart3,
   Server,
   KeyRound,
   Copy,
@@ -79,7 +78,6 @@ import {
 import { SessionList, type ChatGroupingMode } from "./SessionList"
 import { StoryListPanel } from "./StoryListPanel"
 import { StoryCreateDialog } from "./StoryCreateDialog"
-import { UsageStatsDialog } from "./UsageStatsDialog"
 import { SshKeyDialog, SshProfileDialog } from "./SshDialogs"
 import { MainContentPanel } from "./MainContentPanel"
 import { PanelStackContainer } from "./PanelStackContainer"
@@ -101,6 +99,7 @@ import {
   buildSessionProjectFilterOptions,
   filterSessionProjectOptions,
   filterSessionsByProjectFilter,
+  NO_PROJECT_FILTER_ID,
   type SessionProjectFilterOption,
 } from "@/utils/session-project-filter"
 import {
@@ -170,7 +169,6 @@ import {
 import { hasOpenOverlay } from "@/lib/overlay-detection"
 import { clearSourceIconCaches } from "@/lib/icon-cache"
 import { dispatchFocusInputEvent } from "./input/focus-input-events"
-import { formatTokenCount } from "@/utils/session-usage"
 import { RPC_CHANNELS } from "@craft-agent/shared/protocol"
 
 /**
@@ -1460,30 +1458,6 @@ function AppShellContent({
     [activeSessionMetas],
   )
 
-  const [usageDialogOpen, setUsageDialogOpen] = useState(false)
-  const [usageTodayTokens, setUsageTodayTokens] = useState<number | null>(null)
-  const usageWorkspaceId = activeWorkspace?.remoteServer?.remoteWorkspaceId ?? activeWorkspaceId
-
-  useEffect(() => {
-    if (!usageWorkspaceId || !window.electronAPI.isChannelAvailable(RPC_CHANNELS.sessions.GET_USAGE_STATS)) {
-      setUsageTodayTokens(null)
-      return
-    }
-    const start = new Date()
-    start.setHours(0, 0, 0, 0)
-    const end = new Date(start)
-    end.setDate(start.getDate() + 1)
-    let cancelled = false
-    window.electronAPI.getUsageStats(usageWorkspaceId, { kind: 'day', start: start.getTime(), end: end.getTime() })
-      .then(stats => {
-        if (!cancelled) setUsageTodayTokens(stats.totals.totalTokens)
-      })
-      .catch(() => {
-        if (!cancelled) setUsageTodayTokens(null)
-      })
-    return () => { cancelled = true }
-  }, [usageWorkspaceId, workspaceSessionMetas])
-
   const [sshKeys, setSshKeys] = useState<SshPrivateKeyRecord[]>([])
   const [sshProfiles, setSshProfiles] = useState<SshConnectionProfile[]>([])
   const [sshKeyDialogOpen, setSshKeyDialogOpen] = useState(false)
@@ -1966,6 +1940,35 @@ function AppShellContent({
     navigate(routes.view.allSessions())
   }, [])
 
+  const setAllSessionsProjectFilter = useCallback((projectIds: string[]) => {
+    navigate(routes.view.allSessions())
+    setViewFiltersMap(prev => {
+      const existing = prev.allSessions ?? { statuses: {}, labels: {}, projects: {}, groups: {} }
+      const projects = Object.fromEntries(projectIds.map(id => [id, 'include' as FilterMode]))
+      return {
+        ...prev,
+        allSessions: {
+          ...existing,
+          statuses: {},
+          labels: {},
+          projects,
+          groups: {},
+        },
+      }
+    })
+  }, [])
+
+  const handleProjectsClick = useCallback(() => {
+    const projectIds = projectFilterOptions
+      .filter(project => project.id !== NO_PROJECT_FILTER_ID)
+      .map(project => project.id)
+    setAllSessionsProjectFilter(projectIds)
+  }, [projectFilterOptions, setAllSessionsProjectFilter])
+
+  const handleProjectClick = useCallback((projectId: string) => {
+    setAllSessionsProjectFilter([projectId])
+  }, [setAllSessionsProjectFilter])
+
   const handleFlaggedClick = useCallback(() => {
     navigate(routes.view.flagged())
   }, [])
@@ -2242,10 +2245,11 @@ function AppShellContent({
     for (const state of effectiveSessionStatuses) {
       result.push({ id: `nav:state:${state.id}`, type: 'nav', action: () => handleSessionStatusClick(state.id) })
     }
-    result.push({ id: 'nav:flagged', type: 'nav', action: handleFlaggedClick })
-    result.push({ id: 'nav:archived', type: 'nav', action: handleArchivedClick })
-
-    // 2. Labels section header + regular label tree for keyboard nav
+    // Projects and Labels live under All Sessions, with Projects first.
+    result.push({ id: 'nav:projects', type: 'nav', action: handleProjectsClick })
+    for (const project of projectFilterOptions) {
+      result.push({ id: `nav:project:${project.id}`, type: 'nav', action: () => handleProjectClick(project.id) })
+    }
     result.push({ id: 'nav:labels', type: 'nav', action: () => handleLabelClick('__all__') })
     // Flatten regular label tree for keyboard navigation (depth-first)
     const flattenTree = (nodes: LabelTreeNode[]) => {
@@ -2257,6 +2261,8 @@ function AppShellContent({
       }
     }
     flattenTree(labelTree)
+    result.push({ id: 'nav:flagged', type: 'nav', action: handleFlaggedClick })
+    result.push({ id: 'nav:archived', type: 'nav', action: handleArchivedClick })
 
     // 3. Sources, Skills, Settings
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
@@ -2266,7 +2272,7 @@ function AppShellContent({
     result.push({ id: 'nav:whats-new', type: 'nav', action: handleWhatsNewClick })
 
     return result
-  }, [handleAllSessionsClick, handleFlaggedClick, handleArchivedClick, handleSessionStatusClick, effectiveSessionStatuses, handleLabelClick, labelTree, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick, handleWhatsNewClick])
+  }, [handleAllSessionsClick, handleSessionStatusClick, effectiveSessionStatuses, handleProjectsClick, projectFilterOptions, handleProjectClick, handleLabelClick, labelTree, handleFlaggedClick, handleArchivedClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick, handleWhatsNewClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -2384,6 +2390,20 @@ function AppShellContent({
     return counts
   }, [stories])
 
+  const hasSessionSecondaryFilters = listFilter.size > 0 || labelFilter.size > 0 || projectFilter.size > 0 || groupFilter.size > 0
+
+  const activeStandaloneProjectId = React.useMemo(() => {
+    if (sessionFilter?.kind !== 'allSessions') return null
+    if (listFilter.size > 0 || labelFilter.size > 0 || groupFilter.size > 0 || projectFilter.size !== 1) return null
+    const [[projectId, mode]] = Array.from(projectFilter)
+    return mode === 'include' ? projectId : null
+  }, [sessionFilter, listFilter, labelFilter, groupFilter, projectFilter])
+
+  const activeStandaloneProject = React.useMemo(
+    () => activeStandaloneProjectId ? projectFilterOptions.find(option => option.id === activeStandaloneProjectId) ?? null : null,
+    [activeStandaloneProjectId, projectFilterOptions],
+  )
+
   // Get title based on navigation state
   const listTitle = React.useMemo(() => {
     // Sources navigator
@@ -2429,10 +2449,14 @@ function AppShellContent({
         return sessionFilter.labelId === '__all__' ? t("sidebar.labels") : getLabelDisplayName(labelConfigs, sessionFilter.labelId)
       case 'view':
         return sessionFilter.viewId === '__all__' ? t("sidebar.views") : viewConfigs.find(v => v.id === sessionFilter.viewId)?.name || t("sidebar.views")
+      case 'allSessions':
+        if (activeStandaloneProject) return activeStandaloneProject.label
+        if (projectFilter.size > 1 && listFilter.size === 0 && labelFilter.size === 0 && groupFilter.size === 0) return t("sidebar.projects")
+        return t("sidebar.allSessions")
       default:
         return t("sidebar.allSessions")
     }
-  }, [navState, t, sessionFilter, automationFilter, labelConfigs, viewConfigs, effectiveSessionStatuses, storyFilter])
+  }, [navState, t, sessionFilter, automationFilter, labelConfigs, viewConfigs, effectiveSessionStatuses, storyFilter, activeStandaloneProject, projectFilter, listFilter, labelFilter, groupFilter])
 
   const handleSessionBoardModeChange = useCallback((mode: 'list' | 'board') => {
     setSessionBoardViewMode(mode)
@@ -2476,6 +2500,11 @@ function AppShellContent({
             />
           </DropdownMenuTrigger>
           <StyledDropdownMenuContent align="end" light minWidth="min-w-[170px]">
+            <StyledDropdownMenuItem onClick={() => setChatGroupingMode('project')}>
+              <FolderOpen className="h-3.5 w-3.5" />
+              <span className="flex-1">Project</span>
+              {chatGroupingMode === 'project' && <Check className="h-3 w-3 text-muted-foreground" />}
+            </StyledDropdownMenuItem>
             <StyledDropdownMenuItem onClick={() => setChatGroupingMode('date')}>
               <Calendar className="h-3.5 w-3.5" />
               <span className="flex-1">Date</span>
@@ -2509,6 +2538,11 @@ function AppShellContent({
             />
           </DropdownMenuTrigger>
           <StyledDropdownMenuContent align="end" light minWidth="min-w-[150px]">
+            <StyledDropdownMenuItem onClick={() => setSessionBoardGroupBy('project')}>
+              <FolderOpen className="h-3.5 w-3.5" />
+              <span className="flex-1">Project</span>
+              {sessionBoardGroupBy === 'project' && <Check className="h-3 w-3 text-muted-foreground" />}
+            </StyledDropdownMenuItem>
             <StyledDropdownMenuItem onClick={() => setSessionBoardGroupBy('status')}>
               <Inbox className="h-3.5 w-3.5" />
               <span className="flex-1">Status</span>
@@ -2518,11 +2552,6 @@ function AppShellContent({
               <Tag className="h-3.5 w-3.5" />
               <span className="flex-1">Label</span>
               {sessionBoardGroupBy === 'label' && <Check className="h-3 w-3 text-muted-foreground" />}
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => setSessionBoardGroupBy('project')}>
-              <FolderOpen className="h-3.5 w-3.5" />
-              <span className="flex-1">Project</span>
-              {sessionBoardGroupBy === 'project' && <Check className="h-3 w-3 text-muted-foreground" />}
             </StyledDropdownMenuItem>
             <StyledDropdownMenuSeparator />
             <StyledDropdownMenuItem onClick={() => setSessionBoardGroupBy('recent')}>
@@ -2597,6 +2626,18 @@ function AppShellContent({
   // Build recursive sidebar items from the shared display-sorted label tree.
   // Each node renders with condensed height (compact: true) since many labels expected.
   // Clicking any label navigates to its filter view; the chevron toggles expand/collapse.
+  const buildProjectSidebarItems = useCallback((): any[] => {
+    return projectFilterOptions.map(project => ({
+      id: `nav:project:${project.id}`,
+      title: project.label,
+      label: project.count > 0 ? String(project.count) : undefined,
+      icon: FolderOpen,
+      variant: (activeStandaloneProjectId === project.id ? "default" : "ghost") as "default" | "ghost",
+      compact: true,
+      onClick: () => handleProjectClick(project.id),
+    }))
+  }, [projectFilterOptions, activeStandaloneProjectId, handleProjectClick])
+
   const buildLabelSidebarItems = useCallback((nodes: LabelTreeNode[]): any[] => {
     return nodes.map(node => {
       const hasChildren = node.children.length > 0
@@ -2746,7 +2787,7 @@ function AppShellContent({
                       title: t("sidebar.allSessions"),
                       label: String(workspaceSessionMetas.length),
                       icon: Inbox,
-                      variant: sessionFilter?.kind === 'allSessions' ? "default" : "ghost",
+                      variant: sessionFilter?.kind === 'allSessions' && !hasSessionSecondaryFilters ? "default" : "ghost",
                       onClick: handleAllSessionsClick,
                       expandable: true,
                       expanded: isExpanded('nav:allSessions'),
@@ -2789,7 +2830,40 @@ function AppShellContent({
                           },
                         })),
                         // Separator: SortableStatusList splits here — items after become non-sortable trailingItems
-                        { id: 'separator:states-flagged', type: 'separator' as const },
+                        { id: 'separator:states-secondary', type: 'separator' as const },
+                        // Projects and Labels live under All Sessions, with Projects first.
+                        {
+                          id: "nav:projects",
+                          title: t("sidebar.projects"),
+                          label: projectFilterOptions.filter(project => project.id !== NO_PROJECT_FILTER_ID).length > 0
+                            ? String(projectFilterOptions.filter(project => project.id !== NO_PROJECT_FILTER_ID).length)
+                            : undefined,
+                          icon: FolderOpen,
+                          variant: (sessionFilter?.kind === 'allSessions' && projectFilter.size > 1 && listFilter.size === 0 && labelFilter.size === 0 && groupFilter.size === 0 ? "default" : "ghost") as "default" | "ghost",
+                          onClick: handleProjectsClick,
+                          expandable: true,
+                          expanded: isExpanded('nav:projects'),
+                          onToggle: () => toggleExpanded('nav:projects'),
+                          items: buildProjectSidebarItems(),
+                        },
+                        {
+                          id: "nav:labels",
+                          title: t("sidebar.labels"),
+                          icon: Tag,
+                          // Only highlighted when "Labels" itself is selected (not sub-labels)
+                          variant: (sessionFilter?.kind === 'label' && sessionFilter.labelId === '__all__') ? "default" as const : "ghost" as const,
+                          // Clicking navigates to "all labeled sessions" view
+                          onClick: () => handleLabelClick('__all__'),
+                          expandable: true,
+                          expanded: isExpanded('nav:labels'),
+                          onToggle: () => toggleExpanded('nav:labels'),
+                          contextMenu: {
+                            type: 'labels' as const,
+                            onConfigureLabels: openConfigureLabels,
+                            onAddLabel: handleAddLabel,
+                          },
+                          items: buildLabelSidebarItems(labelTree),
+                        },
                         // Flagged (trailing, non-sortable)
                         {
                           id: "nav:flagged",
@@ -2809,14 +2883,6 @@ function AppShellContent({
                           onClick: handleArchivedClick,
                         },
                       ],
-                    },
-                    {
-                      id: "nav:usage",
-                      title: "Usage",
-                      label: usageTodayTokens != null ? formatTokenCount(usageTodayTokens) : undefined,
-                      icon: BarChart3,
-                      variant: usageDialogOpen ? "default" as const : "ghost" as const,
-                      onClick: () => setUsageDialogOpen(true),
                     },
                     {
                       id: "nav:ssh",
@@ -2874,25 +2940,6 @@ function AppShellContent({
                           ),
                         })),
                       ],
-                    },
-                    // Labels: navigable header (shows all labeled sessions) + hierarchical tree (drag-and-drop reorder + re-parent)
-                    {
-                      id: "nav:labels",
-                      title: t("sidebar.labels"),
-                      icon: Tag,
-                      // Only highlighted when "Labels" itself is selected (not sub-labels)
-                      variant: (sessionFilter?.kind === 'label' && sessionFilter.labelId === '__all__') ? "default" as const : "ghost" as const,
-                      // Clicking navigates to "all labeled sessions" view
-                      onClick: () => handleLabelClick('__all__'),
-                      expandable: true,
-                      expanded: isExpanded('nav:labels'),
-                      onToggle: () => toggleExpanded('nav:labels'),
-                      contextMenu: {
-                        type: 'labels' as const,
-                        onConfigureLabels: openConfigureLabels,
-                        onAddLabel: handleAddLabel,
-                      },
-                      items: buildLabelSidebarItems(labelTree),
                     },
                     // --- Separator ---
                     { id: "separator:chats-sources", type: "separator" },
@@ -3172,8 +3219,8 @@ function AppShellContent({
                                   return
                                 }
                                 e.stopPropagation()
-                                const { states: ms, labels: ml, projects: mp, groups: mg } = filterDropdownResults
-                                const total = ms.length + ml.length + mp.length + mg.length
+                                const { projects: mp, states: ms, labels: ml, groups: mg } = filterDropdownResults
+                                const total = mp.length + ms.length + ml.length + mg.length
                                 if (total === 0) return
                                 switch (e.key) {
                                   case 'ArrowDown':
@@ -3188,31 +3235,9 @@ function AppShellContent({
                                     e.preventDefault()
                                     const mode: FilterMode = e.altKey ? 'exclude' : 'include'
                                     const idx = filterDropdownSelectedIdx
-                                    if (idx < ms.length) {
-                                      // Toggle a status filter
-                                      const state = ms[idx]
-                                      if (state.id !== pinnedFilters.pinnedStatusId) {
-                                        setListFilter(prev => {
-                                          const next = new Map(prev)
-                                          if (next.has(state.id)) next.delete(state.id)
-                                          else next.set(state.id, mode)
-                                          return next
-                                        })
-                                      }
-                                    } else if (idx < ms.length + ml.length) {
-                                      // Toggle a label filter
-                                      const item = ml[idx - ms.length]
-                                      if (item && item.id !== pinnedFilters.pinnedLabelId) {
-                                        setLabelFilter(prev => {
-                                          const next = new Map(prev)
-                                          if (next.has(item.id)) next.delete(item.id)
-                                          else next.set(item.id, mode)
-                                          return next
-                                        })
-                                      }
-                                    } else if (idx < ms.length + ml.length + mp.length) {
+                                    if (idx < mp.length) {
                                       // Toggle a project filter
-                                      const item = mp[idx - ms.length - ml.length]
+                                      const item = mp[idx]
                                       if (item) {
                                         setProjectFilter(prev => {
                                           const next = new Map(prev)
@@ -3221,9 +3246,31 @@ function AppShellContent({
                                           return next
                                         })
                                       }
+                                    } else if (idx < mp.length + ms.length) {
+                                      // Toggle a status filter
+                                      const state = ms[idx - mp.length]
+                                      if (state.id !== pinnedFilters.pinnedStatusId) {
+                                        setListFilter(prev => {
+                                          const next = new Map(prev)
+                                          if (next.has(state.id)) next.delete(state.id)
+                                          else next.set(state.id, mode)
+                                          return next
+                                        })
+                                      }
+                                    } else if (idx < mp.length + ms.length + ml.length) {
+                                      // Toggle a label filter
+                                      const item = ml[idx - mp.length - ms.length]
+                                      if (item && item.id !== pinnedFilters.pinnedLabelId) {
+                                        setLabelFilter(prev => {
+                                          const next = new Map(prev)
+                                          if (next.has(item.id)) next.delete(item.id)
+                                          else next.set(item.id, mode)
+                                          return next
+                                        })
+                                      }
                                     } else {
                                       // Toggle a group filter
-                                      const item = mg[idx - ms.length - ml.length - mp.length]
+                                      const item = mg[idx - mp.length - ms.length - ml.length]
                                       if (item) {
                                         setGroupFilter(prev => {
                                           const next = new Map(prev)
@@ -3237,7 +3284,7 @@ function AppShellContent({
                                   }
                                 }
                               }}
-                              placeholder="Search statuses, labels, projects, groups"
+                              placeholder="Search projects, statuses, labels, groups"
                               className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
                               autoFocus
                             />
@@ -3294,6 +3341,37 @@ function AppShellContent({
                                     </StyledDropdownMenuItem>
                                   )
                                 })()}
+                                {/* User-added: selected projects with mode pill (include/exclude) */}
+                                {Array.from(projectFilter).map(([projectId, mode]) => {
+                                  const project = projectFilterOptions.find(option => option.id === projectId)
+                                  if (!project) return null
+                                  return (
+                                    <DropdownMenuSub key={`sel-project-${projectId}`}>
+                                      <StyledDropdownMenuSubTrigger onClick={(e) => { e.preventDefault(); setProjectFilter(prev => { const next = new Map(prev); next.delete(projectId); return next }) }}>
+                                        <FilterMenuRow
+                                          icon={<FolderOpen className="h-3.5 w-3.5" />}
+                                          label={project.label}
+                                          accessory={<FilterModeBadge mode={mode} />}
+                                        />
+                                      </StyledDropdownMenuSubTrigger>
+                                      <StyledDropdownMenuSubContent minWidth="min-w-[140px]">
+                                        <FilterModeSubMenuItems
+                                          mode={mode}
+                                          onChangeMode={(newMode) => setProjectFilter(prev => {
+                                            const next = new Map(prev)
+                                            next.set(projectId, newMode)
+                                            return next
+                                          })}
+                                          onRemove={() => setProjectFilter(prev => {
+                                            const next = new Map(prev)
+                                            next.delete(projectId)
+                                            return next
+                                          })}
+                                        />
+                                      </StyledDropdownMenuSubContent>
+                                    </DropdownMenuSub>
+                                  )
+                                })}
                                 {/* User-added: selected statuses with mode pill (include/exclude) */}
                                 {effectiveSessionStatuses.filter(s => listFilter.has(s.id)).map(state => {
                                   const applyColor = state.iconColorable
@@ -3358,37 +3436,6 @@ function AppShellContent({
                                     </DropdownMenuSub>
                                   )
                                 })}
-                                {/* User-added: selected projects with mode pill (include/exclude) */}
-                                {Array.from(projectFilter).map(([projectId, mode]) => {
-                                  const project = projectFilterOptions.find(option => option.id === projectId)
-                                  if (!project) return null
-                                  return (
-                                    <DropdownMenuSub key={`sel-project-${projectId}`}>
-                                      <StyledDropdownMenuSubTrigger onClick={(e) => { e.preventDefault(); setProjectFilter(prev => { const next = new Map(prev); next.delete(projectId); return next }) }}>
-                                        <FilterMenuRow
-                                          icon={<FolderOpen className="h-3.5 w-3.5" />}
-                                          label={project.label}
-                                          accessory={<FilterModeBadge mode={mode} />}
-                                        />
-                                      </StyledDropdownMenuSubTrigger>
-                                      <StyledDropdownMenuSubContent minWidth="min-w-[140px]">
-                                        <FilterModeSubMenuItems
-                                          mode={mode}
-                                          onChangeMode={(newMode) => setProjectFilter(prev => {
-                                            const next = new Map(prev)
-                                            next.set(projectId, newMode)
-                                            return next
-                                          })}
-                                          onRemove={() => setProjectFilter(prev => {
-                                            const next = new Map(prev)
-                                            next.delete(projectId)
-                                            return next
-                                          })}
-                                        />
-                                      </StyledDropdownMenuSubContent>
-                                    </DropdownMenuSub>
-                                  )
-                                })}
                                 {/* User-added: selected groups with mode pill (include/exclude) */}
                                 {Array.from(groupFilter).map(([groupId, mode]) => {
                                   const group = groupFilterOptions.find(option => option.id === groupId)
@@ -3423,6 +3470,78 @@ function AppShellContent({
                                 <StyledDropdownMenuSeparator />
                               </>
                             )}
+
+                            {/* Projects submenu - derived from valued labels like project::Craft Agents */}
+                            <DropdownMenuSub>
+                              <StyledDropdownMenuSubTrigger>
+                                <FolderOpen className="h-3.5 w-3.5" />
+                                <span className="flex-1">{t("sidebar.projects")}</span>
+                              </StyledDropdownMenuSubTrigger>
+                              <StyledDropdownMenuSubContent minWidth="min-w-[220px]">
+                                {projectFilterOptions.length === 0 ? (
+                                  <StyledDropdownMenuItem disabled>
+                                    <span className="text-muted-foreground">{t("sidebar.noProjects")}</span>
+                                  </StyledDropdownMenuItem>
+                                ) : (
+                                  projectFilterOptions.map(project => {
+                                    const currentMode = projectFilter.get(project.id)
+                                    const isActive = !!currentMode
+                                    const label = project.label
+
+                                    if (isActive) {
+                                      return (
+                                        <DropdownMenuSub key={project.id}>
+                                          <StyledDropdownMenuSubTrigger onClick={(e) => { e.preventDefault(); setProjectFilter(prev => { const next = new Map(prev); next.delete(project.id); return next }) }}>
+                                            <FilterMenuRow
+                                              icon={<FolderOpen className="h-3.5 w-3.5" />}
+                                              label={label}
+                                              accessory={<FilterModeBadge mode={currentMode} />}
+                                            />
+                                          </StyledDropdownMenuSubTrigger>
+                                          <StyledDropdownMenuSubContent minWidth="min-w-[140px]">
+                                            <FilterModeSubMenuItems
+                                              mode={currentMode}
+                                              onChangeMode={(newMode) => setProjectFilter(prev => {
+                                                const next = new Map(prev)
+                                                next.set(project.id, newMode)
+                                                return next
+                                              })}
+                                              onRemove={() => setProjectFilter(prev => {
+                                                const next = new Map(prev)
+                                                next.delete(project.id)
+                                                return next
+                                              })}
+                                            />
+                                          </StyledDropdownMenuSubContent>
+                                        </DropdownMenuSub>
+                                      )
+                                    }
+
+                                    return (
+                                      <AltExcludeTooltip key={project.id} show={filterAltHeld}>
+                                        <StyledDropdownMenuItem
+                                          onClick={(e) => {
+                                            e.preventDefault()
+                                            setProjectFilter(prev => {
+                                              const next = new Map(prev)
+                                              if (next.has(project.id)) next.delete(project.id)
+                                              else next.set(project.id, e.altKey ? 'exclude' : 'include')
+                                              return next
+                                            })
+                                          }}
+                                        >
+                                          <FilterMenuRow
+                                            icon={<FolderOpen className="h-3.5 w-3.5" />}
+                                            label={label}
+                                            accessory={<span className="text-[10px] tabular-nums text-muted-foreground">{project.count}</span>}
+                                          />
+                                        </StyledDropdownMenuItem>
+                                      </AltExcludeTooltip>
+                                    )
+                                  })
+                                )}
+                              </StyledDropdownMenuSubContent>
+                            </DropdownMenuSub>
 
                             {/* Statuses submenu - hierarchical with toggle selection */}
                             <DropdownMenuSub>
@@ -3516,78 +3635,6 @@ function AppShellContent({
                                     pinnedLabelId={pinnedFilters.pinnedLabelId}
                                     altHeld={filterAltHeld}
                                   />
-                                )}
-                              </StyledDropdownMenuSubContent>
-                            </DropdownMenuSub>
-
-                            {/* Projects submenu - derived from valued labels like project::Craft Agents */}
-                            <DropdownMenuSub>
-                              <StyledDropdownMenuSubTrigger>
-                                <FolderOpen className="h-3.5 w-3.5" />
-                                <span className="flex-1">{t("sidebar.projects")}</span>
-                              </StyledDropdownMenuSubTrigger>
-                              <StyledDropdownMenuSubContent minWidth="min-w-[220px]">
-                                {projectFilterOptions.length === 0 ? (
-                                  <StyledDropdownMenuItem disabled>
-                                    <span className="text-muted-foreground">{t("sidebar.noProjects")}</span>
-                                  </StyledDropdownMenuItem>
-                                ) : (
-                                  projectFilterOptions.map(project => {
-                                    const currentMode = projectFilter.get(project.id)
-                                    const isActive = !!currentMode
-                                    const label = project.label
-
-                                    if (isActive) {
-                                      return (
-                                        <DropdownMenuSub key={project.id}>
-                                          <StyledDropdownMenuSubTrigger onClick={(e) => { e.preventDefault(); setProjectFilter(prev => { const next = new Map(prev); next.delete(project.id); return next }) }}>
-                                            <FilterMenuRow
-                                              icon={<FolderOpen className="h-3.5 w-3.5" />}
-                                              label={label}
-                                              accessory={<FilterModeBadge mode={currentMode} />}
-                                            />
-                                          </StyledDropdownMenuSubTrigger>
-                                          <StyledDropdownMenuSubContent minWidth="min-w-[140px]">
-                                            <FilterModeSubMenuItems
-                                              mode={currentMode}
-                                              onChangeMode={(newMode) => setProjectFilter(prev => {
-                                                const next = new Map(prev)
-                                                next.set(project.id, newMode)
-                                                return next
-                                              })}
-                                              onRemove={() => setProjectFilter(prev => {
-                                                const next = new Map(prev)
-                                                next.delete(project.id)
-                                                return next
-                                              })}
-                                            />
-                                          </StyledDropdownMenuSubContent>
-                                        </DropdownMenuSub>
-                                      )
-                                    }
-
-                                    return (
-                                      <AltExcludeTooltip key={project.id} show={filterAltHeld}>
-                                        <StyledDropdownMenuItem
-                                          onClick={(e) => {
-                                            e.preventDefault()
-                                            setProjectFilter(prev => {
-                                              const next = new Map(prev)
-                                              if (next.has(project.id)) next.delete(project.id)
-                                              else next.set(project.id, e.altKey ? 'exclude' : 'include')
-                                              return next
-                                            })
-                                          }}
-                                        >
-                                          <FilterMenuRow
-                                            icon={<FolderOpen className="h-3.5 w-3.5" />}
-                                            label={label}
-                                            accessory={<span className="text-[10px] tabular-nums text-muted-foreground">{project.count}</span>}
-                                          />
-                                        </StyledDropdownMenuItem>
-                                      </AltExcludeTooltip>
-                                    )
-                                  })
                                 )}
                               </StyledDropdownMenuSubContent>
                             </DropdownMenuSub>
@@ -3703,6 +3750,11 @@ function AppShellContent({
                                     <span className="flex-1">{t("sidebar.group")}</span>
                                   </StyledDropdownMenuSubTrigger>
                                   <StyledDropdownMenuSubContent minWidth="min-w-[140px]">
+                                    <StyledDropdownMenuItem onClick={() => setChatGroupingMode('project')}>
+                                      <FolderOpen className="h-3.5 w-3.5" />
+                                      <span className="flex-1">Group by Project</span>
+                                      {chatGroupingMode === 'project' && <Check className="h-3 w-3 text-muted-foreground" />}
+                                    </StyledDropdownMenuItem>
                                     <StyledDropdownMenuItem onClick={() => setChatGroupingMode('date')}>
                                       <Calendar className="h-3.5 w-3.5" />
                                       <span className="flex-1">{t("sidebar.groupByDate")}</span>
@@ -3750,6 +3802,83 @@ function AppShellContent({
                               </div>
                             ) : (
                               <div ref={filterDropdownListRef} className="max-h-[240px] overflow-y-auto py-1">
+                                {/* Matched projects — flat list by project label value */}
+                                {filterDropdownResults.projects.length > 0 && (
+                                  <>
+                                    <div className="px-3 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wider">
+                                      Projects
+                                    </div>
+                                    {filterDropdownResults.projects.map((project, index) => {
+                                      const flatIndex = index
+                                      const currentMode = projectFilter.get(project.id)
+                                      const isHighlighted = flatIndex === filterDropdownSelectedIdx
+                                      const isActive = !!currentMode
+                                      const label = project.label
+
+                                      if (isActive) {
+                                        return (
+                                          <DropdownMenuSub key={`flat-project-${project.id}`}>
+                                            <StyledDropdownMenuSubTrigger
+                                              data-filter-selected={isHighlighted}
+                                              onMouseEnter={() => setFilterDropdownSelectedIdx(flatIndex)}
+                                              className={cn("mx-1", isHighlighted && "bg-foreground/5")}
+                                              onClick={(e) => { e.preventDefault(); setProjectFilter(prev => { const next = new Map(prev); next.delete(project.id); return next }) }}
+                                            >
+                                              <FilterMenuRow
+                                                icon={<FolderOpen className="h-3.5 w-3.5" />}
+                                                label={label}
+                                                accessory={<FilterModeBadge mode={currentMode} />}
+                                              />
+                                            </StyledDropdownMenuSubTrigger>
+                                            <StyledDropdownMenuSubContent minWidth="min-w-[140px]">
+                                              <FilterModeSubMenuItems
+                                                mode={currentMode}
+                                                onChangeMode={(newMode) => setProjectFilter(prev => {
+                                                  const next = new Map(prev)
+                                                  next.set(project.id, newMode)
+                                                  return next
+                                                })}
+                                                onRemove={() => setProjectFilter(prev => {
+                                                  const next = new Map(prev)
+                                                  next.delete(project.id)
+                                                  return next
+                                                })}
+                                              />
+                                            </StyledDropdownMenuSubContent>
+                                          </DropdownMenuSub>
+                                        )
+                                      }
+
+                                      return (
+                                        <AltExcludeTooltip key={`flat-project-${project.id}`} show={filterAltHeld}>
+                                          <div
+                                            data-filter-selected={isHighlighted}
+                                            onMouseEnter={() => setFilterDropdownSelectedIdx(flatIndex)}
+                                            onClick={(e) => {
+                                              e.preventDefault()
+                                              setProjectFilter(prev => {
+                                                const next = new Map(prev)
+                                                if (next.has(project.id)) next.delete(project.id)
+                                                else next.set(project.id, e.altKey ? 'exclude' : 'include')
+                                                return next
+                                              })
+                                            }}
+                                            className={cn(
+                                              "flex cursor-pointer select-none items-center gap-2 rounded-[4px] mx-1 px-2 py-1.5 text-sm [&_svg:not([class*='size-'])]:size-4 [&_svg]:shrink-0",
+                                              isHighlighted && "bg-foreground/5",
+                                            )}
+                                          >
+                                            <FilterMenuRow
+                                              icon={<FolderOpen className="h-3.5 w-3.5" />}
+                                              label={label}
+                                              accessory={<span className="text-[10px] tabular-nums text-muted-foreground">{project.count}</span>}
+                                            />
+                                          </div>
+                                        </AltExcludeTooltip>
+                                      )
+                                    })}
+                                  </>
+                                )}
                                 {/* Matched statuses */}
                                 {filterDropdownResults.states.length > 0 && (
                                   <>
@@ -3760,7 +3889,8 @@ function AppShellContent({
                                       const applyColor = state.iconColorable
                                       const isPinned = state.id === pinnedFilters.pinnedStatusId
                                       const currentMode = listFilter.get(state.id)
-                                      const isHighlighted = index === filterDropdownSelectedIdx
+                                      const flatIndex = filterDropdownResults.projects.length + index
+                                      const isHighlighted = flatIndex === filterDropdownSelectedIdx
                                       const isActive = !!currentMode && !isPinned
                                       // Active status → DropdownMenuSub with mode options
                                       if (isActive) {
@@ -3768,7 +3898,7 @@ function AppShellContent({
                                           <DropdownMenuSub key={`flat-status-${state.id}`}>
                                             <StyledDropdownMenuSubTrigger
                                               data-filter-selected={isHighlighted}
-                                              onMouseEnter={() => setFilterDropdownSelectedIdx(index)}
+                                              onMouseEnter={() => setFilterDropdownSelectedIdx(flatIndex)}
                                               className={cn("mx-1", isHighlighted && "bg-foreground/5")}
                                               onClick={(e) => { e.preventDefault(); setListFilter(prev => { const next = new Map(prev); next.delete(state.id); return next }) }}
                                             >
@@ -3803,7 +3933,7 @@ function AppShellContent({
                                         <AltExcludeTooltip key={`flat-status-${state.id}`} show={filterAltHeld && !isPinned}>
                                           <div
                                             data-filter-selected={isHighlighted}
-                                            onMouseEnter={() => setFilterDropdownSelectedIdx(index)}
+                                            onMouseEnter={() => setFilterDropdownSelectedIdx(flatIndex)}
                                             onClick={(e) => {
                                               if (isPinned) return
                                               e.preventDefault()
@@ -3835,7 +3965,7 @@ function AppShellContent({
                                   </>
                                 )}
                                 {/* Separator between sections */}
-                                {filterDropdownResults.states.length > 0 && filterDropdownResults.labels.length > 0 && (
+                                {(filterDropdownResults.projects.length > 0 || filterDropdownResults.states.length > 0) && filterDropdownResults.labels.length > 0 && (
                                   <div className="my-1 mx-2 border-t border-border/40" />
                                 )}
                                 {/* Matched labels — flat list with parent breadcrumbs */}
@@ -3846,7 +3976,7 @@ function AppShellContent({
                                     </div>
                                     {filterDropdownResults.labels.map((item, index) => {
                                       // Offset by state count for unified index
-                                      const flatIndex = filterDropdownResults.states.length + index
+                                      const flatIndex = filterDropdownResults.projects.length + filterDropdownResults.states.length + index
                                       const isPinned = item.id === pinnedFilters.pinnedLabelId
                                       const currentMode = labelFilter.get(item.id)
                                       const isHighlighted = flatIndex === filterDropdownSelectedIdx
@@ -3922,89 +4052,9 @@ function AppShellContent({
                                     })}
                                   </>
                                 )}
-                                {(filterDropdownResults.states.length > 0 || filterDropdownResults.labels.length > 0) && filterDropdownResults.projects.length > 0 && (
-                                  <div className="my-1 mx-2 border-t border-border/40" />
-                                )}
-                                {/* Matched projects — flat list by project label value */}
-                                {filterDropdownResults.projects.length > 0 && (
-                                  <>
-                                    <div className="px-3 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wider">
-                                      Projects
-                                    </div>
-                                    {filterDropdownResults.projects.map((project, index) => {
-                                      const flatIndex = filterDropdownResults.states.length + filterDropdownResults.labels.length + index
-                                      const currentMode = projectFilter.get(project.id)
-                                      const isHighlighted = flatIndex === filterDropdownSelectedIdx
-                                      const isActive = !!currentMode
-                                      const label = project.label
-
-                                      if (isActive) {
-                                        return (
-                                          <DropdownMenuSub key={`flat-project-${project.id}`}>
-                                            <StyledDropdownMenuSubTrigger
-                                              data-filter-selected={isHighlighted}
-                                              onMouseEnter={() => setFilterDropdownSelectedIdx(flatIndex)}
-                                              className={cn("mx-1", isHighlighted && "bg-foreground/5")}
-                                              onClick={(e) => { e.preventDefault(); setProjectFilter(prev => { const next = new Map(prev); next.delete(project.id); return next }) }}
-                                            >
-                                              <FilterMenuRow
-                                                icon={<FolderOpen className="h-3.5 w-3.5" />}
-                                                label={label}
-                                                accessory={<FilterModeBadge mode={currentMode} />}
-                                              />
-                                            </StyledDropdownMenuSubTrigger>
-                                            <StyledDropdownMenuSubContent minWidth="min-w-[140px]">
-                                              <FilterModeSubMenuItems
-                                                mode={currentMode}
-                                                onChangeMode={(newMode) => setProjectFilter(prev => {
-                                                  const next = new Map(prev)
-                                                  next.set(project.id, newMode)
-                                                  return next
-                                                })}
-                                                onRemove={() => setProjectFilter(prev => {
-                                                  const next = new Map(prev)
-                                                  next.delete(project.id)
-                                                  return next
-                                                })}
-                                              />
-                                            </StyledDropdownMenuSubContent>
-                                          </DropdownMenuSub>
-                                        )
-                                      }
-
-                                      return (
-                                        <AltExcludeTooltip key={`flat-project-${project.id}`} show={filterAltHeld}>
-                                          <div
-                                            data-filter-selected={isHighlighted}
-                                            onMouseEnter={() => setFilterDropdownSelectedIdx(flatIndex)}
-                                            onClick={(e) => {
-                                              e.preventDefault()
-                                              setProjectFilter(prev => {
-                                                const next = new Map(prev)
-                                                if (next.has(project.id)) next.delete(project.id)
-                                                else next.set(project.id, e.altKey ? 'exclude' : 'include')
-                                                return next
-                                              })
-                                            }}
-                                            className={cn(
-                                              "flex cursor-pointer select-none items-center gap-2 rounded-[4px] mx-1 px-2 py-1.5 text-sm [&_svg:not([class*='size-'])]:size-4 [&_svg]:shrink-0",
-                                              isHighlighted && "bg-foreground/5",
-                                            )}
-                                          >
-                                            <FilterMenuRow
-                                              icon={<FolderOpen className="h-3.5 w-3.5" />}
-                                              label={label}
-                                              accessory={<span className="text-[10px] tabular-nums text-muted-foreground">{project.count}</span>}
-                                            />
-                                          </div>
-                                        </AltExcludeTooltip>
-                                      )
-                                    })}
-                                  </>
-                                )}
                                 {filterDropdownResults.groups.length > 0 && (
                                   <>
-                                    {(filterDropdownResults.states.length > 0 || filterDropdownResults.labels.length > 0 || filterDropdownResults.projects.length > 0) && (
+                                    {(filterDropdownResults.projects.length > 0 || filterDropdownResults.states.length > 0 || filterDropdownResults.labels.length > 0) && (
                                       <div className="my-1 mx-2 border-t border-border/40" />
                                     )}
                                     <div className="px-3 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wider">
@@ -4106,11 +4156,6 @@ function AppShellContent({
                 defaultStatus={defaultNewStoryStatus}
               />
             )}
-            <UsageStatsDialog
-              open={usageDialogOpen}
-              onOpenChange={setUsageDialogOpen}
-              workspaceId={usageWorkspaceId}
-            />
             <SshKeyDialog
               open={sshKeyDialogOpen}
               onOpenChange={setSshKeyDialogOpen}

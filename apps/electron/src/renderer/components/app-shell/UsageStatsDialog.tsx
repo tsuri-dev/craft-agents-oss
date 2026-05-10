@@ -30,6 +30,12 @@ interface UsageStatsDialogProps {
   workspaceId?: string | null
 }
 
+interface UsageStatsContentProps {
+  workspaceId?: string | null
+  active?: boolean
+  sessionsMaxHeight?: string
+}
+
 type RangeMode = 'day' | 'week' | 'all'
 
 function MetricCard({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
@@ -127,7 +133,7 @@ function buildStatsFromEntries(stats: UsageStats | null, entries: SessionUsageEn
   }
 }
 
-export function UsageStatsDialog({ open, onOpenChange, workspaceId }: UsageStatsDialogProps) {
+export function UsageStatsContent({ workspaceId, active = true, sessionsMaxHeight = 'max-h-[260px]' }: UsageStatsContentProps) {
   const { llmConnections } = useAppShellContext()
   const today = React.useMemo(() => new Date(), [])
   const [mode, setMode] = React.useState<RangeMode>('day')
@@ -160,9 +166,9 @@ export function UsageStatsDialog({ open, onOpenChange, workspaceId }: UsageStats
   }, [dateValue, mode, weekValue, workspaceId])
 
   React.useEffect(() => {
-    if (!open) return
+    if (!active) return
     void loadStats()
-  }, [open, loadStats])
+  }, [active, loadStats])
 
   const connectionOptions = React.useMemo<ConnectionUsageOption[]>(() => {
     const usageByConnection = new Map<string, { totalTokens: number; requests: number }>()
@@ -228,19 +234,7 @@ export function UsageStatsDialog({ open, onOpenChange, workspaceId }: UsageStats
   }, [allConnectionSlugs])
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(calc(100vw-2rem),900px)] sm:max-w-[900px]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <BarChart3 className="h-4 w-4" />
-            Usage
-          </DialogTitle>
-          <DialogDescription>
-            Token usage by day, week, and all time. Older sessions may be estimated from session totals.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
+    <div className="space-y-4">
           <div className="flex max-w-full flex-wrap items-center gap-2 overflow-hidden">
             {(['day', 'week', 'all'] as RangeMode[]).map(item => (
               <button
@@ -337,7 +331,7 @@ export function UsageStatsDialog({ open, onOpenChange, workspaceId }: UsageStats
               </div>
               <div className="text-[11px] text-muted-foreground">{filteredStats.bySession.length}</div>
             </div>
-            <div className="max-h-[260px] overflow-y-auto">
+            <div className={cn(sessionsMaxHeight, "overflow-y-auto")}>
               {loading ? (
                 <div className="px-3 py-8 text-center text-sm text-muted-foreground">Loading…</div>
               ) : stats && filteredStats.bySession.length > 0 ? (
@@ -360,7 +354,24 @@ export function UsageStatsDialog({ open, onOpenChange, workspaceId }: UsageStats
               )}
             </div>
           </div>
-        </div>
+    </div>
+  )
+}
+
+export function UsageStatsDialog({ open, onOpenChange, workspaceId }: UsageStatsDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[min(calc(100vw-2rem),900px)] sm:max-w-[900px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4" />
+            Usage
+          </DialogTitle>
+          <DialogDescription>
+            Token usage by day, week, and all time. Older sessions may be estimated from session totals.
+          </DialogDescription>
+        </DialogHeader>
+        <UsageStatsContent workspaceId={workspaceId} active={open} />
       </DialogContent>
     </Dialog>
   )

@@ -39,7 +39,7 @@ import { useMenuComponents } from '@/components/ui/menu-context'
 import { getStateColor, getStateIcon, type SessionStatusId } from '@/config/session-status-config'
 import type { SessionStatus } from '@/config/session-status-config'
 import { extractLabelId, formatLabelEntry, type LabelConfig } from '@craft-agent/shared/labels'
-import { LabelMenuItems, StatusMenuItems, ShareMenuItems } from './SessionMenuParts'
+import { LabelMenuItems, ProjectMenuItems, StatusMenuItems, ShareMenuItems } from './SessionMenuParts'
 import { getFileManagerName } from '@/lib/platform'
 import type { SessionMeta } from '@/atoms/sessions'
 import { getSessionStatus, hasUnreadMeta, hasMessagesMeta } from '@/utils/session'
@@ -49,6 +49,19 @@ import { getSessionGroupValues } from '@/utils/session-group-filter'
 import type { SessionGroupFilterOption } from '@/utils/session-group-filter'
 import { getSessionProjectValue, PROJECT_LABEL_ID, type SessionProjectFilterOption } from '@/utils/session-project-filter'
 import { formatPercent, formatTokenCount, formatUsd, getCacheReadRatio } from '@/utils/session-usage'
+
+function omitProjectLabel(labels: LabelConfig[]): LabelConfig[] {
+  const result: LabelConfig[] = []
+  for (const label of labels) {
+    if (label.id === PROJECT_LABEL_ID) continue
+    if (label.children?.length) {
+      result.push({ ...label, children: omitProjectLabel(label.children) })
+    } else {
+      result.push(label)
+    }
+  }
+  return result
+}
 
 export interface SessionMenuProps {
   /** Session data — display state is derived from this */
@@ -115,6 +128,11 @@ export function SessionMenu({
   const sharedUrl = item.sharedUrl
   const currentSessionStatus = getSessionStatus(item)
   const sessionLabels = item.labels ?? []
+  const menuLabels = React.useMemo(() => omitProjectLabel(labels), [labels])
+  const nonProjectLabelCount = React.useMemo(
+    () => sessionLabels.filter(entry => extractLabelId(entry) !== PROJECT_LABEL_ID).length,
+    [sessionLabels],
+  )
   const _hasMessages = hasMessagesMeta(item)
   const _hasUnread = hasUnreadMeta(item)
 
@@ -202,26 +220,46 @@ export function SessionMenu({
         </SubContent>
       </Sub>
 
+      {/* Project is a first-class organization axis, backed by the valued project:: label. */}
+      {onLabelsChange && (
+        <Sub>
+          <SubTrigger className="pr-2">
+            <FolderOpen className="h-3.5 w-3.5" />
+            <span className="flex-1">Move to Project</span>
+            {activeProjectValue && (
+              <span className="ml-3 max-w-[120px] truncate text-[10px] text-foreground/50">
+                {activeProjectValue}
+              </span>
+            )}
+          </SubTrigger>
+          <SubContent>
+            <ProjectMenuItems
+              projectOptions={projectOptions}
+              activeProjectValue={activeProjectValue}
+              onProjectSelect={handleProjectSelect}
+              menu={{ MenuItem, Separator }}
+            />
+          </SubContent>
+        </Sub>
+      )}
+
       {/* Labels submenu - hierarchical label tree with nested sub-menus and toggle checkmarks */}
-      {labels.length > 0 && (
+      {menuLabels.length > 0 && (
         <Sub>
           <SubTrigger className="pr-2">
             <Tag className="h-3.5 w-3.5" />
             <span className="flex-1">{t("sessionMenu.labels")}</span>
-            {sessionLabels.length > 0 && (
+            {nonProjectLabelCount > 0 && (
               <span className="text-[10px] text-muted-foreground tabular-nums -mr-2.5">
-                {sessionLabels.length}
+                {nonProjectLabelCount}
               </span>
             )}
           </SubTrigger>
           <SubContent>
             <LabelMenuItems
-              labels={labels}
+              labels={menuLabels}
               appliedLabelIds={actions.appliedLabelIds}
               onToggle={actions.toggleLabel}
-              projectOptions={projectOptions}
-              activeProjectValue={activeProjectValue}
-              onProjectSelect={handleProjectSelect}
               menu={{ MenuItem, Separator, Sub, SubTrigger, SubContent }}
             />
           </SubContent>

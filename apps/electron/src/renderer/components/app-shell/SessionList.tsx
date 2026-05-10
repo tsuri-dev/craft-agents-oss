@@ -44,14 +44,14 @@ import {
   sessionHasGroup,
   type SessionGroupFilterOption,
 } from "@/utils/session-group-filter"
-import { buildSessionProjectFilterOptions, type SessionProjectFilterOption } from "@/utils/session-project-filter"
+import { buildSessionProjectFilterOptions, getSessionProjectValue, type SessionProjectFilterOption } from "@/utils/session-project-filter"
 
 export interface SessionListRow {
   item: SessionMeta
 }
 
 /** Grouping mode for chat list */
-export type ChatGroupingMode = 'date' | 'status' | 'unread' | 'group'
+export type ChatGroupingMode = 'date' | 'status' | 'unread' | 'group' | 'project'
 
 interface SessionListProps {
   items: SessionMeta[]
@@ -93,7 +93,7 @@ interface SessionListProps {
   projectOptions?: SessionProjectFilterOption[]
   /** Existing workspace groups for the Groups submenu */
   groupOptions?: SessionGroupFilterOption[]
-  /** How to group sessions: 'date' (default), 'status', 'unread', or 'group' */
+  /** How to group sessions: 'date' (default), 'status', 'unread', 'project', or 'group' */
   groupingMode?: ChatGroupingMode
   /** Workspace ID for content search (optional - if not provided, content search is disabled) */
   workspaceId?: string
@@ -395,6 +395,55 @@ export function SessionList({
             label: group.label,
             items: group.rows,
             collapsible: true,
+            labelStyle: 'plain',
+            ...(collapsedMeta ? { collapsedCount: collapsedMeta.count } : {}),
+          }
+        })
+
+      if (orderedGroups.length === 1) {
+        orderedGroups[0].collapsible = false
+      }
+
+      return {
+        rows: orderedGroups.flatMap(g => g.items),
+        groups: orderedGroups,
+      }
+    }
+
+    if (groupingMode === 'project') {
+      const groupsByKey = new Map<string, { rows: SessionListRow[], label: string, sortLabel: string }>()
+      const upsertProject = (key: string, label: string, sortLabel: string) => {
+        if (!groupsByKey.has(key)) groupsByKey.set(key, { rows: [], label, sortLabel })
+        return groupsByKey.get(key)!
+      }
+
+      for (const row of rows) {
+        const project = getSessionProjectValue(row.item)
+        const label = project || 'No Project'
+        const key = project ? `project-${encodeURIComponent(project)}` : 'project-__no_project__'
+        upsertProject(key, label, project || '\uffff').rows.push(row)
+      }
+
+      for (const meta of collapsedGroupsMeta) {
+        if (!groupsByKey.has(meta.key)) {
+          const rawName = meta.key === 'project-__no_project__'
+            ? ''
+            : decodeURIComponent(meta.key.replace('project-', ''))
+          upsertProject(meta.key, rawName || 'No Project', rawName || '\uffff')
+        }
+      }
+
+      const orderedGroups: EntityListGroup<SessionListRow>[] = Array.from(groupsByKey.entries())
+        .sort(([, a], [, b]) => a.sortLabel.localeCompare(b.sortLabel, undefined, { sensitivity: 'base' }))
+        .map(([key, group]) => {
+          group.rows.sort((a, b) => (b.item.lastMessageAt || 0) - (a.item.lastMessageAt || 0))
+          const collapsedMeta = collapsedGroupsMeta.find(m => m.key === key)
+          return {
+            key,
+            label: group.label,
+            items: group.rows,
+            collapsible: true,
+            labelStyle: 'plain',
             ...(collapsedMeta ? { collapsedCount: collapsedMeta.count } : {}),
           }
         })
@@ -527,6 +576,12 @@ export function SessionList({
       const allKeys = new Set(items.map(item => {
         const [firstGroup] = getSessionGroupValues(item)
         return firstGroup ? `group-${encodeURIComponent(firstGroup)}` : 'group-__ungrouped__'
+      }))
+      setCollapsedGroups(allKeys)
+    } else if (groupingMode === 'project') {
+      const allKeys = new Set(items.map(item => {
+        const project = getSessionProjectValue(item)
+        return project ? `project-${encodeURIComponent(project)}` : 'project-__no_project__'
       }))
       setCollapsedGroups(allKeys)
     } else {

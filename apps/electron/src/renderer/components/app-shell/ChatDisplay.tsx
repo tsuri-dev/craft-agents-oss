@@ -512,6 +512,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
   const scrollViewportRef = React.useRef<HTMLDivElement>(null)
   const prevSessionIdRef = React.useRef<string | null>(null)
+  const openedSessionBottomScrollRef = React.useRef<string | null>(null)
   // Reverse pagination: show last N turns initially, load more on scroll up
   const TURNS_PER_PAGE = 20
   const [visibleTurnCount, setVisibleTurnCount] = React.useState(TURNS_PER_PAGE)
@@ -1191,6 +1192,27 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     viewport.addEventListener('scroll', handleScroll)
     return () => viewport.removeEventListener('scroll', handleScroll)
   }, [handleScroll])
+
+  // Always land at the latest message when opening an existing session.
+  // ScrollOnMount can fire before lazy-loaded messages have been committed, so this
+  // runs once per opened session after loading/content is available.
+  React.useLayoutEffect(() => {
+    const currentSessionId = session?.id ?? null
+    if (!currentSessionId || messagesLoading || isSearchActive) return
+    if (openedSessionBottomScrollRef.current === currentSessionId) return
+
+    openedSessionBottomScrollRef.current = currentSessionId
+    isStickToBottomRef.current = true
+    skipSmoothScrollUntilRef.current = Date.now() + 500
+
+    const scrollToBottom = () => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' })
+    }
+
+    scrollToBottom()
+    requestAnimationFrame(scrollToBottom)
+    window.setTimeout(scrollToBottom, 80)
+  }, [session?.id, messagesLoading, messageCount, isSearchActive])
 
   // Auto-scroll using ResizeObserver for streaming content
   // Initial scroll is handled by ScrollOnMount (useLayoutEffect, before paint)

@@ -433,14 +433,67 @@ function SortableStatusList({ items, onReorder, getItemProps, focusedItemId, tra
               <div className="h-px bg-foreground/5" />
             </div>
             <div className="grid gap-0.5">
-              {trailingItems.map(item => (
-                <div key={item.id} className="group/section">
+              {trailingItems.map(item => {
+                const buttonElement = (
                   <SidebarButton
                     link={item}
                     itemProps={getItemProps?.(item.id)}
                   />
-                </div>
-              ))}
+                )
+                const expandedContent = item.expandable && item.items && item.expanded
+                  ? renderExpandedContent(item, getItemProps, focusedItemId, true)
+                  : null
+
+                return (
+                  <div key={item.id} className="group/section">
+                    {item.contextMenu ? (
+                      <ContextMenu modal={true}>
+                        <ContextMenuTrigger asChild>
+                          {buttonElement}
+                        </ContextMenuTrigger>
+                        <StyledContextMenuContent>
+                          <ContextMenuProvider>
+                            <SidebarMenu
+                              type={item.contextMenu.type}
+                              statusId={item.contextMenu.statusId}
+                              labelId={item.contextMenu.labelId}
+                              onConfigureStatuses={item.contextMenu.onConfigureStatuses}
+                              onMarkAllRead={item.contextMenu.onMarkAllRead}
+                              onConfigureLabels={item.contextMenu.onConfigureLabels}
+                              onAddLabel={item.contextMenu.onAddLabel}
+                              onDeleteLabel={item.contextMenu.onDeleteLabel}
+                              onAddSource={item.contextMenu.onAddSource}
+                              onAddSkill={item.contextMenu.onAddSkill}
+                              onAddAutomation={item.contextMenu.onAddAutomation}
+                              sourceType={item.contextMenu.sourceType}
+                              onConfigureViews={item.contextMenu.onConfigureViews}
+                              viewId={item.contextMenu.viewId}
+                              onDeleteView={item.contextMenu.onDeleteView}
+                            />
+                          </ContextMenuProvider>
+                        </StyledContextMenuContent>
+                      </ContextMenu>
+                    ) : (
+                      buttonElement
+                    )}
+                    {item.expandable && item.items && (
+                      <AnimatePresence initial={false}>
+                        {item.expanded && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0, marginTop: 0, marginBottom: 0 }}
+                            animate={{ height: 'auto', opacity: 1, marginTop: 2, marginBottom: 4 }}
+                            exit={{ height: 0, opacity: 0, marginTop: 0, marginBottom: 0 }}
+                            transition={{ duration: 0.2, ease: 'easeInOut' }}
+                            className="overflow-hidden"
+                          >
+                            {expandedContent}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </>
         )}

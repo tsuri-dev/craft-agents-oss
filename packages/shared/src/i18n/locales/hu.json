@@ -1433,5 +1433,7 @@
   "workspace.selectWorkspaceDesc": "Válassz egy munkaterületet ezen a szerveren, vagy hozz létre újat.",
   "workspace.selectWorkspacePlaceholder": "Válassz munkaterületet...",
   "workspace.serverAuthToken": "Szerver hitelesítési token",
-  "workspace.underDefaultFolder": "a .craft-agent mappában"
+  "workspace.underDefaultFolder": "a .craft-agent mappában",
+  "settings.usage.title": "Usage",
+  "settings.usage.description": "Token usage and cost"
 }

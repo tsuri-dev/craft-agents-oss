@@ -1,21 +1,19 @@
+import { useState } from "react"
+import { useTranslation } from "react-i18next"
 import { formatDistanceToNowStrict } from "date-fns"
-import { Flag, GripVertical, Inbox } from "lucide-react"
+import { Flag, GripVertical } from "lucide-react"
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { cn } from "@/lib/utils"
 import type { SessionMeta } from "@/atoms/sessions"
-import { getSessionPreviewText, getSessionTitle, hasUnreadMeta } from "@/utils/session"
+import { getSessionPreviewText, getSessionTitle, hasUnreadMeta, getSessionStatus } from "@/utils/session"
 import { useOptionalSessionListContext } from "@/context/SessionListContext"
 import { SessionBadges } from "./SessionBadges"
 import type { LabelConfig } from "@craft-agent/shared/labels"
-import type { SessionStatus } from "@/config/session-status-config"
-import { getStatusIconStyle } from "@/config/session-status-config"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import type { SessionStatus, SessionStatusId } from "@/config/session-status-config"
+import { getStateIcon, getStateIconStyle } from "@/config/session-status-config"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { SessionStatusMenu } from "@/components/ui/session-status-menu"
 
 function SessionBoardCardContent({
   item,
@@ -24,6 +22,7 @@ function SessionBoardCardContent({
   selectedSessionId,
   statuses,
   onSessionStatusChange,
+  showStatus = true,
   isOverlay = false,
 }: {
   item: SessionMeta
@@ -32,15 +31,28 @@ function SessionBoardCardContent({
   selectedSessionId?: string | null
   statuses?: SessionStatus[]
   onSessionStatusChange?: (sessionId: string, statusId: string) => void
+  showStatus?: boolean
   isOverlay?: boolean
 }) {
   const ctx = useOptionalSessionListContext()
+  const { t } = useTranslation()
+  const [statusOpen, setStatusOpen] = useState(false)
   const title = getSessionTitle(item)
   const preview = getSessionPreviewText(item)
   const selected = (selectedSessionId ?? ctx?.selectedSessionId) === item.id
   const hasUnread = hasUnreadMeta(item)
   const flatLabels = labels ?? ctx?.flatLabels ?? []
   const hasLabels = !!(item.labels && item.labels.length > 0 && flatLabels.length > 0)
+  const statusId = getSessionStatus(item)
+  const activeStatus = statuses?.find(status => status.id === statusId)
+  const statusLabel = activeStatus
+    ? t(`status.${activeStatus.id}`, activeStatus.label)
+    : statusId
+  const statusIcon = getStateIcon(statusId, statuses ?? [])
+  const handleStatusSelect = (nextStatusId: SessionStatusId) => {
+    setStatusOpen(false)
+    onSessionStatusChange?.(item.id, nextStatusId)
+  }
 
   return (
     <div
@@ -83,41 +95,48 @@ function SessionBoardCardContent({
           </div>
         )}
 
-        {!isOverlay && statuses && statuses.length > 0 && onSessionStatusChange && (
+        {showStatus && !isOverlay && statuses && statuses.length > 0 && onSessionStatusChange && (
           <div className="mt-2 flex justify-end">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+            <Popover modal={true} open={statusOpen} onOpenChange={setStatusOpen}>
+              <PopoverTrigger asChild>
                 <button
                   type="button"
                   aria-label="Change session status"
-                  className="flex h-6 items-center gap-1 rounded-[6px] px-1.5 text-[10px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground active:scale-95"
+                  className="flex h-6 min-w-0 items-center gap-1.5 rounded-[6px] px-1.5 text-[10px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground active:scale-95"
+                  style={getStateIconStyle(statusId, statuses)}
                   onClick={(event) => event.stopPropagation()}
                   onPointerDown={(event) => event.stopPropagation()}
+                  onContextMenu={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                  }}
                 >
-                  <Inbox className="h-3 w-3" />
-                  Status
+                  <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center [&>svg]:h-3.5 [&>svg]:w-3.5 [&>img]:h-3.5 [&>img]:w-3.5 [&>span]:text-xs">
+                    {statusIcon}
+                  </span>
+                  <span className="truncate">{statusLabel}</span>
                 </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {statuses.map((status) => (
-                  <DropdownMenuItem
-                    key={status.id}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      onSessionStatusChange(item.id, status.id)
-                    }}
-                  >
-                    <span
-                      className="flex h-4 w-4 items-center justify-center [&>svg]:h-3.5 [&>svg]:w-3.5"
-                      style={getStatusIconStyle(status)}
-                    >
-                      {status.icon}
-                    </span>
-                    <span>{status.label}</span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </PopoverTrigger>
+              <PopoverContent
+                className="w-auto border-0 bg-transparent p-0 shadow-none"
+                align="end"
+                side="bottom"
+                sideOffset={4}
+                onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                }}
+              >
+                <SessionStatusMenu
+                  activeState={statusId}
+                  onSelect={handleStatusSelect}
+                  states={statuses}
+                  isArchived={item.isArchived}
+                />
+              </PopoverContent>
+            </Popover>
           </div>
         )}
       </div>
@@ -133,6 +152,7 @@ export function SessionBoardCard({
   onSelectSession,
   statuses,
   onSessionStatusChange,
+  showStatus,
 }: {
   item: SessionMeta
   labels?: LabelConfig[]
@@ -141,6 +161,7 @@ export function SessionBoardCard({
   onSelectSession?: (sessionId: string) => void
   statuses?: SessionStatus[]
   onSessionStatusChange?: (sessionId: string, statusId: string) => void
+  showStatus?: boolean
 }) {
   const ctx = useOptionalSessionListContext()
   const {
@@ -181,6 +202,7 @@ export function SessionBoardCard({
         selectedSessionId={selectedSessionId}
         statuses={statuses}
         onSessionStatusChange={onSessionStatusChange}
+        showStatus={showStatus}
       />
     </div>
   )
