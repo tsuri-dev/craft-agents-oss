@@ -68,7 +68,6 @@ import {
   isSettingsNavigation,
   isSkillsNavigation,
   isAutomationsNavigation,
-  isStoriesNavigation,
   isPluginsNavigation,
   DEFAULT_NAVIGATION_STATE,
 } from '../../shared/types'
@@ -92,7 +91,7 @@ export type { Route }
 
 // Re-export navigation state types for consumers
 export type { NavigationState, SessionFilter }
-export { isSessionsNavigation, isSourcesNavigation, isSettingsNavigation, isSkillsNavigation, isAutomationsNavigation, isStoriesNavigation, isPluginsNavigation }
+export { isSessionsNavigation, isSourcesNavigation, isSettingsNavigation, isSkillsNavigation, isAutomationsNavigation, isPluginsNavigation }
 
 // =============================================================================
 // Context

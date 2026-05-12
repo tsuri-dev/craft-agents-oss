@@ -23,7 +23,6 @@ import { toast } from 'sonner'
 import { Panel } from './Panel'
 import { MultiSelectPanel } from './MultiSelectPanel'
 import { SessionBoard } from './SessionBoard'
-import { StoryBoard } from './StoryBoard'
 import { RequirementBoard, RequirementDetailPage } from './RequirementBoard'
 import { PluginIntroPage, PluginsHub } from './PluginsHub'
 import { useAppShellContext } from '@/context/AppShellContext'
@@ -37,7 +36,6 @@ import {
   isSettingsNavigation,
   isSkillsNavigation,
   isAutomationsNavigation,
-  isStoriesNavigation,
   isPluginsNavigation,
 } from '@/contexts/NavigationContext'
 import { useSessionSelection, useIsMultiSelectActive, useSelectedIds, useSelectionCount } from '@/hooks/useSession'
@@ -473,14 +471,6 @@ export function MainContentPanel({
         <div className="flex items-center justify-center h-full text-muted-foreground">
           <p className="text-sm">{t("automations.noAutomationsConfigured")}</p>
         </div>
-      </Panel>
-    )
-  }
-
-  if (isStoriesNavigation(navState)) {
-    return wrapWithStoplight(
-      <Panel variant="grow" className={className}>
-        <StoryBoard labels={flatLabels} />
       </Panel>
     )
   }

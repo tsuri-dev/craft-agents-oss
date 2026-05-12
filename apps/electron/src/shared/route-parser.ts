@@ -35,7 +35,7 @@ export interface ParsedRoute {
 // Compound Route Types (new format)
 // =============================================================================
 
-export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'automations' | 'stories' | 'plugins' | 'settings'
+export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'automations' | 'plugins' | 'settings'
 
 export interface ParsedCompoundRoute {
   /** The navigator type */
@@ -62,7 +62,7 @@ export interface ParsedCompoundRoute {
  * Known prefixes that indicate a compound route
  */
 const COMPOUND_ROUTE_PREFIXES = [
-  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'automations', 'stories', 'plugins', 'settings'
+  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'automations', 'plugins', 'settings'
 ]
 
 /**
@@ -198,14 +198,6 @@ export function parseCompoundRoute(route: string): ParsedCompoundRoute | null {
     return null
   }
 
-  // Story board navigator
-  if (first === 'stories') {
-    if (segments.length === 1) {
-      return { navigator: 'stories', details: null }
-    }
-
-    return null
-  }
 
   // Plugins navigator
   if (first === 'plugins') {
@@ -313,9 +305,6 @@ export function buildCompoundRoute(parsed: ParsedCompoundRoute): string {
     return `${base}/automation/${parsed.details.id}`
   }
 
-  if (parsed.navigator === 'stories') {
-    return 'stories'
-  }
 
   if (parsed.navigator === 'plugins') {
     if (!parsed.details) return 'plugins'
@@ -449,10 +438,6 @@ function convertCompoundToViewRoute(compound: ParsedCompoundRoute): ParsedRoute 
     return { type: 'view', name: 'automation-info', id: compound.details.id, params: {} }
   }
 
-  // Stories
-  if (compound.navigator === 'stories') {
-    return { type: 'view', name: 'stories', params: {} }
-  }
 
   // Sessions
   if (compound.sessionFilter) {
@@ -589,10 +574,6 @@ function convertCompoundToNavigationState(compound: ParsedCompoundRoute): Naviga
     }
   }
 
-  // Stories
-  if (compound.navigator === 'stories') {
-    return { navigator: 'stories' }
-  }
 
   // Plugins
   if (compound.navigator === 'plugins') {
@@ -684,8 +665,6 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
         }
       }
       return { navigator: 'automations', details: null }
-    case 'stories':
-      return { navigator: 'stories' }
     case 'plugins':
       return { navigator: 'plugins', details: null }
     case 'session':
@@ -796,12 +775,6 @@ function navigationStateToCompoundRoute(state: NavigationState): ParsedCompoundR
     }
   }
 
-  if (state.navigator === 'stories') {
-    return {
-      navigator: 'stories',
-      details: null,
-    }
-  }
 
   if (state.navigator === 'plugins') {
     return {
