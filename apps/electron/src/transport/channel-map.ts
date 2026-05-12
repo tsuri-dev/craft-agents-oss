@@ -218,6 +218,15 @@ export const CHANNEL_MAP = {
   unwatchSessionFiles: invoke(RPC_CHANNELS.sessions.UNWATCH_FILES),
   onSessionFilesChanged: listener(RPC_CHANNELS.sessions.FILES_CHANGED),
 
+  // Requirement plugins
+  listRequirementPlugins: invoke(RPC_CHANNELS.requirementPlugins.LIST),
+  listRequirementItems: invoke(RPC_CHANNELS.requirements.LIST_ITEMS),
+  getRequirementItemDetail: invoke(RPC_CHANNELS.requirements.GET_ITEM_DETAIL),
+  createRequirementGroupFromItem: invoke(RPC_CHANNELS.requirements.CREATE_GROUP_FROM_ITEM),
+  bindRequirementItemToGroup: invoke(RPC_CHANNELS.requirements.BIND_ITEM_TO_GROUP),
+  unlinkRequirementItemFromGroup: invoke(RPC_CHANNELS.requirements.UNLINK_ITEM_FROM_GROUP),
+  createRequirementSessionForItem: invoke(RPC_CHANNELS.requirements.CREATE_SESSION_FOR_ITEM),
+
   // Sources
   getSources: invoke(RPC_CHANNELS.sources.GET),
   createSource: invoke(RPC_CHANNELS.sources.CREATE),

@@ -35,6 +35,7 @@ import {
   Columns3,
   List,
   Rocket,
+  Workflow,
   Server,
   KeyRound,
   Copy,
@@ -141,6 +142,7 @@ import {
   isSkillsNavigation,
   isAutomationsNavigation,
   isStoriesNavigation,
+  isPluginsNavigation,
   type SessionFilter,
 } from "@/contexts/NavigationContext"
 import type { SettingsSubpage, SshConnectionProfile, SshPrivateKeyRecord } from "../../../shared/types"
@@ -1716,6 +1718,12 @@ function AppShellContent({
     return counts
   }, [automations])
 
+  const tapdPluginInstalled = useMemo(() => {
+    return sources.some(source => source.config.slug === 'tapd-mcp-http' && source.config.enabled !== false)
+  }, [sources])
+
+  const showNavigatorPanel = !isPluginsNavigation(navState)
+
   // Filter session metadata based on sidebar mode and chat filter
   const filteredSessionMetas = useMemo(() => {
     // When in sources mode, return empty (no sessions to show)
@@ -1930,6 +1938,26 @@ function AppShellContent({
     storage.set(storage.KEYS.viewFilters, viewFiltersMap, activeWorkspaceId)
   }, [viewFiltersMap, activeWorkspaceId])
 
+  React.useEffect(() => {
+    if (!tapdPluginInstalled) return
+    const handleOpenSessionGroup = (event: Event) => {
+      const groupName = (event as CustomEvent<{ groupName?: string }>).detail?.groupName?.trim()
+      if (!groupName) return
+      setViewFiltersMap(prev => {
+        const existing = prev.allSessions ?? { statuses: {}, labels: {}, projects: {}, groups: {} }
+        return {
+          ...prev,
+          allSessions: {
+            ...existing,
+            groups: { [groupName]: 'include' as const },
+          },
+        }
+      })
+    }
+    window.addEventListener('craft:open-session-group', handleOpenSessionGroup)
+    return () => window.removeEventListener('craft:open-session-group', handleOpenSessionGroup)
+  }, [tapdPluginInstalled])
+
   // Persist sidebar section collapsed states (workspace-scoped)
   React.useEffect(() => {
     if (!activeWorkspaceId) return
@@ -2037,6 +2065,10 @@ function AppShellContent({
 
   const handleStoriesClick = useCallback(() => {
     navigate(routes.view.stories())
+  }, [])
+
+  const handlePluginsClick = useCallback(() => {
+    navigate(routes.view.plugins())
   }, [])
 
   // Handler for settings view. With no arg → bare `settings` route (navigator-only
@@ -2264,15 +2296,19 @@ function AppShellContent({
     result.push({ id: 'nav:flagged', type: 'nav', action: handleFlaggedClick })
     result.push({ id: 'nav:archived', type: 'nav', action: handleArchivedClick })
 
-    // 3. Sources, Skills, Settings
+    // 3. Sources, Skills, Plugins, Settings
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
+    result.push({ id: 'nav:plugins', type: 'nav', action: handlePluginsClick })
+    if (tapdPluginInstalled) {
+      result.push({ id: 'nav:plugins:tapd', type: 'nav', action: () => navigate(routes.view.plugins('tapd', 'board')) })
+    }
     result.push({ id: 'nav:settings', type: 'nav', action: () => handleSettingsClick() })
     result.push({ id: 'nav:whats-new', type: 'nav', action: handleWhatsNewClick })
 
     return result
-  }, [handleAllSessionsClick, handleSessionStatusClick, effectiveSessionStatuses, handleProjectsClick, projectFilterOptions, handleProjectClick, handleLabelClick, labelTree, handleFlaggedClick, handleArchivedClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick, handleWhatsNewClick])
+  }, [handleAllSessionsClick, handleSessionStatusClick, effectiveSessionStatuses, handleProjectsClick, projectFilterOptions, handleProjectClick, handleLabelClick, labelTree, handleFlaggedClick, handleArchivedClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handlePluginsClick, tapdPluginInstalled, handleSettingsClick, handleWhatsNewClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -2434,6 +2470,8 @@ function AppShellContent({
       if (storyFilter === 'all') return "All Stories"
       return storyStatusById.get(storyFilter)?.label ?? "All Stories"
     }
+
+    if (isPluginsNavigation(navState)) return navState.details?.pluginId === 'tapd' ? 'TAPD' : 'Plugins'
 
     // Sessions navigator - use sessionFilter
     if (!sessionFilter) return t("sidebar.allSessions")
@@ -3064,6 +3102,27 @@ function AppShellContent({
                       icon: Rocket,
                       variant: isStoriesNavigation(navState) ? "default" : "ghost",
                       onClick: handleStoriesClick,
+                    },
+                    {
+                      id: "nav:plugins",
+                      title: "Plugins",
+                      label: tapdPluginInstalled ? "1" : undefined,
+                      icon: Workflow,
+                      variant: isPluginsNavigation(navState) && !navState.details ? "default" : "ghost",
+                      onClick: handlePluginsClick,
+                      expandable: true,
+                      expanded: isExpanded('nav:plugins') || isPluginsNavigation(navState),
+                      onToggle: () => toggleExpanded('nav:plugins'),
+                      items: (tapdPluginInstalled || (isPluginsNavigation(navState) && navState.details?.pluginId === 'tapd')) ? [
+                        {
+                          id: "nav:plugins:tapd",
+                          title: "TAPD",
+                          icon: Workflow,
+                          variant: isPluginsNavigation(navState) && navState.details?.pluginId === 'tapd' && (navState.details.page === 'board' || navState.details.page === 'requirement') ? "default" : "ghost",
+                          compact: true,
+                          onClick: () => navigate(routes.view.plugins('tapd', 'board')),
+                        },
+                      ] : [],
                     },
                     // --- Separator ---
                     { id: "separator:skills-settings", type: "separator" },
@@ -4289,7 +4348,9 @@ function AppShellContent({
             )}
             </div>
           }
-          navigatorWidth={isAutoCompact ? sessionListWidth : (effectiveSidebarAndNavigatorHidden ? 0 : sessionListWidth)}
+          navigatorWidth={showNavigatorPanel
+            ? (isAutoCompact ? sessionListWidth : (effectiveSidebarAndNavigatorHidden ? 0 : sessionListWidth))
+            : 0}
           isSidebarAndNavigatorHidden={effectiveSidebarAndNavigatorHidden}
           isRightSidebarVisible={false}
           isCompact={isAutoCompact}
@@ -4329,8 +4390,8 @@ function AppShellContent({
         </div>
         )}
 
-        {/* Session List Resize Handle (absolute, hidden in focused mode) */}
-        {!effectiveSidebarAndNavigatorHidden && (
+        {/* Navigator Resize Handle (absolute, hidden when the current view has no navigator panel) */}
+        {!effectiveSidebarAndNavigatorHidden && showNavigatorPanel && (
         <div
           ref={sessionListHandleRef}
           onMouseDown={(e) => { e.preventDefault(); setIsResizing('session-list') }}

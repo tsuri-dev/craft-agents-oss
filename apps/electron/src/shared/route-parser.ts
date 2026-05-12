@@ -35,7 +35,7 @@ export interface ParsedRoute {
 // Compound Route Types (new format)
 // =============================================================================
 
-export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'automations' | 'stories' | 'settings'
+export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'automations' | 'stories' | 'plugins' | 'settings'
 
 export interface ParsedCompoundRoute {
   /** The navigator type */
@@ -50,6 +50,7 @@ export interface ParsedCompoundRoute {
   details: {
     type: string
     id: string
+    sourceItemId?: string
   } | null
 }
 
@@ -61,7 +62,7 @@ export interface ParsedCompoundRoute {
  * Known prefixes that indicate a compound route
  */
 const COMPOUND_ROUTE_PREFIXES = [
-  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'automations', 'stories', 'settings'
+  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'automations', 'stories', 'plugins', 'settings'
 ]
 
 /**
@@ -206,6 +207,20 @@ export function parseCompoundRoute(route: string): ParsedCompoundRoute | null {
     return null
   }
 
+  // Plugins navigator
+  if (first === 'plugins') {
+    if (segments.length === 1) return { navigator: 'plugins', details: null }
+    if (segments[1] === 'plugin' && segments[2]) {
+      const pluginId = decodeURIComponent(segments[2])
+      if (segments.length === 3) return { navigator: 'plugins', details: { type: 'plugin', id: pluginId } }
+      if (segments[3] === 'board') return { navigator: 'plugins', details: { type: 'plugin-board', id: pluginId } }
+      if (segments[3] === 'requirement' && segments[4]) {
+        return { navigator: 'plugins', details: { type: 'plugin-requirement', id: pluginId, sourceItemId: decodeURIComponent(segments[4]) } }
+      }
+    }
+    return null
+  }
+
   // Sessions navigator (allSessions, flagged, state)
   let sessionFilter: SessionFilter
   let detailsStartIndex: number
@@ -300,6 +315,15 @@ export function buildCompoundRoute(parsed: ParsedCompoundRoute): string {
 
   if (parsed.navigator === 'stories') {
     return 'stories'
+  }
+
+  if (parsed.navigator === 'plugins') {
+    if (!parsed.details) return 'plugins'
+    if (parsed.details.type === 'plugin-requirement' && parsed.details.sourceItemId) {
+      return `plugins/plugin/${encodeURIComponent(parsed.details.id)}/requirement/${encodeURIComponent(parsed.details.sourceItemId)}`
+    }
+    const suffix = parsed.details.type === 'plugin-board' ? '/board' : ''
+    return `plugins/plugin/${encodeURIComponent(parsed.details.id)}${suffix}`
   }
 
   // Sessions navigator
@@ -570,6 +594,19 @@ function convertCompoundToNavigationState(compound: ParsedCompoundRoute): Naviga
     return { navigator: 'stories' }
   }
 
+  // Plugins
+  if (compound.navigator === 'plugins') {
+    return {
+      navigator: 'plugins',
+      details: compound.details ? {
+        type: 'plugin',
+        pluginId: compound.details.id,
+        page: compound.details.type === 'plugin-board' ? 'board' : compound.details.type === 'plugin-requirement' ? 'requirement' : 'intro',
+        ...(compound.details.type === 'plugin-requirement' && compound.details.sourceItemId ? { sourceItemId: compound.details.sourceItemId } : {}),
+      } : null,
+    }
+  }
+
   // Sessions
   const filter = compound.sessionFilter || { kind: 'allSessions' as const }
   if (compound.details) {
@@ -649,6 +686,8 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
       return { navigator: 'automations', details: null }
     case 'stories':
       return { navigator: 'stories' }
+    case 'plugins':
+      return { navigator: 'plugins', details: null }
     case 'session':
       if (parsed.id) {
         // Reconstruct filter from params
@@ -761,6 +800,17 @@ function navigationStateToCompoundRoute(state: NavigationState): ParsedCompoundR
     return {
       navigator: 'stories',
       details: null,
+    }
+  }
+
+  if (state.navigator === 'plugins') {
+    return {
+      navigator: 'plugins',
+      details: state.details ? {
+        type: state.details.page === 'board' ? 'plugin-board' : state.details.page === 'requirement' ? 'plugin-requirement' : 'plugin',
+        id: state.details.pluginId,
+        ...(state.details.page === 'requirement' && state.details.sourceItemId ? { sourceItemId: state.details.sourceItemId } : {}),
+      } : null,
     }
   }
 

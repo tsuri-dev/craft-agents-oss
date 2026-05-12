@@ -24,6 +24,8 @@ import { Panel } from './Panel'
 import { MultiSelectPanel } from './MultiSelectPanel'
 import { SessionBoard } from './SessionBoard'
 import { StoryBoard } from './StoryBoard'
+import { RequirementBoard, RequirementDetailPage } from './RequirementBoard'
+import { PluginIntroPage, PluginsHub } from './PluginsHub'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { sessionMetaMapAtom, type SessionMeta } from '@/atoms/sessions'
 import { StoplightProvider } from '@/context/StoplightContext'
@@ -36,6 +38,7 @@ import {
   isSkillsNavigation,
   isAutomationsNavigation,
   isStoriesNavigation,
+  isPluginsNavigation,
 } from '@/contexts/NavigationContext'
 import { useSessionSelection, useIsMultiSelectActive, useSelectedIds, useSelectionCount } from '@/hooks/useSession'
 import { sourceSelection, skillSelection, automationSelection } from '@/hooks/useEntitySelection'
@@ -478,6 +481,20 @@ export function MainContentPanel({
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
         <StoryBoard labels={flatLabels} />
+      </Panel>
+    )
+  }
+
+  if (isPluginsNavigation(navState)) {
+    return wrapWithStoplight(
+      <Panel variant="grow" className={className}>
+        {navState.details?.pluginId === 'tapd'
+          ? (navState.details.page === 'requirement' && navState.details.sourceItemId
+            ? <RequirementDetailPage sourceItemId={navState.details.sourceItemId} />
+            : navState.details.page === 'board'
+              ? <RequirementBoard />
+              : <PluginIntroPage />)
+          : <PluginsHub />}
       </Panel>
     )
   }

@@ -243,6 +243,17 @@ export const RPC_CHANNELS = {
     DELETE: 'drafts:delete',
     GET_ALL: 'drafts:getAll',
   },
+  requirementPlugins: {
+    LIST: 'requirementPlugins:list',
+  },
+  requirements: {
+    LIST_ITEMS: 'requirements:listItems',
+    GET_ITEM_DETAIL: 'requirements:getItemDetail',
+    CREATE_GROUP_FROM_ITEM: 'requirements:createGroupFromItem',
+    BIND_ITEM_TO_GROUP: 'requirements:bindItemToGroup',
+    UNLINK_ITEM_FROM_GROUP: 'requirements:unlinkItemFromGroup',
+    CREATE_SESSION_FOR_ITEM: 'requirements:createSessionForItem',
+  },
   sources: {
     GET: 'sources:get',
     CREATE: 'sources:create',
