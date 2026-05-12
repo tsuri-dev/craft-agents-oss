@@ -893,14 +893,6 @@ export interface AutomationsNavigationState {
 }
 
 /**
- * Story board navigation state
- */
-export interface StoriesNavigationState {
-  navigator: 'stories'
-  rightSidebar?: RightSidebarPanel
-}
-
-/**
  * Plugins navigation state
  */
 export interface PluginsNavigationState {
@@ -923,7 +915,6 @@ export type NavigationState =
   | SettingsNavigationState
   | SkillsNavigationState
   | AutomationsNavigationState
-  | StoriesNavigationState
   | PluginsNavigationState
 
 export const isSessionsNavigation = (
@@ -945,10 +936,6 @@ export const isSkillsNavigation = (
 export const isAutomationsNavigation = (
   state: NavigationState
 ): state is AutomationsNavigationState => state.navigator === 'automations'
-
-export const isStoriesNavigation = (
-  state: NavigationState
-): state is StoriesNavigationState => state.navigator === 'stories'
 
 export const isPluginsNavigation = (
   state: NavigationState
@@ -978,9 +965,6 @@ export const getNavigationStateKey = (state: NavigationState): string => {
       return `automations/automation/${state.details.automationId}`
     }
     return 'automations'
-  }
-  if (state.navigator === 'stories') {
-    return 'stories'
   }
   if (state.navigator === 'plugins') {
     if (!state.details) return 'plugins'
@@ -1037,9 +1021,6 @@ export const parseNavigationStateKey = (key: string): NavigationState | null => 
     }
     return { navigator: 'automations', details: null }
   }
-
-  // Handle stories
-  if (key === 'stories') return { navigator: 'stories' }
 
   // Handle plugins
   if (key === 'plugins') return { navigator: 'plugins', details: null }

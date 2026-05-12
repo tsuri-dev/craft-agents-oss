@@ -1,7 +1,7 @@
 import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
 import { useRef, useState, useEffect, useCallback, useMemo } from "react"
-import { useAtom, useAtomValue, useStore } from "jotai"
+import { useAtomValue, useStore } from "jotai"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Archive,
@@ -34,7 +34,6 @@ import {
   MailOpen,
   Columns3,
   List,
-  Rocket,
   Workflow,
   Server,
   KeyRound,
@@ -77,8 +76,6 @@ import {
   springTransition as collapsibleSpring,
 } from "@/components/ui/collapsible"
 import { SessionList, type ChatGroupingMode } from "./SessionList"
-import { StoryListPanel } from "./StoryListPanel"
-import { StoryCreateDialog } from "./StoryCreateDialog"
 import { SshKeyDialog, SshProfileDialog } from "./SshDialogs"
 import { MainContentPanel } from "./MainContentPanel"
 import { PanelStackContainer } from "./PanelStackContainer"
@@ -87,7 +84,6 @@ import type { ChatDisplayHandle } from "./ChatDisplay"
 import { LeftSidebar } from "./LeftSidebar"
 import { useSession } from "@/hooks/useSession"
 import { ensureSessionMessagesLoadedAtom } from "@/atoms/sessions"
-import { storiesAtom, storyFilterAtom, storyStatusById, STORY_STATUSES, type StoryStatusId } from "@/atoms/stories"
 import { AppShellProvider, type AppShellContextType } from "@/context/AppShellContext"
 import { EscapeInterruptProvider, useEscapeInterrupt } from "@/context/EscapeInterruptContext"
 import { useTheme } from "@/context/ThemeContext"
@@ -141,7 +137,6 @@ import {
   isSettingsNavigation,
   isSkillsNavigation,
   isAutomationsNavigation,
-  isStoriesNavigation,
   isPluginsNavigation,
   type SessionFilter,
 } from "@/contexts/NavigationContext"
@@ -1966,6 +1961,10 @@ function AppShellContent({
 
   const handleAllSessionsClick = useCallback(() => {
     navigate(routes.view.allSessions())
+    setViewFiltersMap(prev => ({
+      ...prev,
+      allSessions: { statuses: {}, labels: {}, projects: {}, groups: {}, groupingMode: 'date' },
+    }))
   }, [])
 
   const setAllSessionsProjectFilter = useCallback((projectIds: string[]) => {
@@ -2063,9 +2062,6 @@ function AppShellContent({
     navigate(routes.view.automationsAgentic())
   }, [])
 
-  const handleStoriesClick = useCallback(() => {
-    navigate(routes.view.stories())
-  }, [])
 
   const handlePluginsClick = useCallback(() => {
     navigate(routes.view.plugins())
@@ -2296,11 +2292,11 @@ function AppShellContent({
     result.push({ id: 'nav:flagged', type: 'nav', action: handleFlaggedClick })
     result.push({ id: 'nav:archived', type: 'nav', action: handleArchivedClick })
 
-    // 3. Sources, Skills, Plugins, Settings
+    // 3. Plugins, Sources, Skills, Automations, Settings
+    result.push({ id: 'nav:plugins', type: 'nav', action: handlePluginsClick })
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
-    result.push({ id: 'nav:plugins', type: 'nav', action: handlePluginsClick })
     if (tapdPluginInstalled) {
       result.push({ id: 'nav:plugins:tapd', type: 'nav', action: () => navigate(routes.view.plugins('tapd', 'board')) })
     }
@@ -2415,16 +2411,6 @@ function AppShellContent({
     }
   }, [sidebarFocused, focusedSidebarItemId, unifiedSidebarItems])
 
-  const stories = useAtomValue(storiesAtom)
-  const [storyFilter, setStoryFilter] = useAtom(storyFilterAtom)
-  const [storyCreateDialogOpen, setStoryCreateDialogOpen] = React.useState(false)
-  const storyCounts = React.useMemo(() => {
-    const counts = new Map<StoryStatusId, number>()
-    for (const story of stories) {
-      counts.set(story.status, (counts.get(story.status) ?? 0) + 1)
-    }
-    return counts
-  }, [stories])
 
   const hasSessionSecondaryFilters = listFilter.size > 0 || labelFilter.size > 0 || projectFilter.size > 0 || groupFilter.size > 0
 
@@ -2466,10 +2452,6 @@ function AppShellContent({
     // Settings navigator
     if (isSettingsNavigation(navState)) return t("sidebar.settings")
 
-    if (isStoriesNavigation(navState)) {
-      if (storyFilter === 'all') return "All Stories"
-      return storyStatusById.get(storyFilter)?.label ?? "All Stories"
-    }
 
     if (isPluginsNavigation(navState)) return navState.details?.pluginId === 'tapd' ? 'TAPD' : 'Plugins'
 
@@ -2494,7 +2476,7 @@ function AppShellContent({
       default:
         return t("sidebar.allSessions")
     }
-  }, [navState, t, sessionFilter, automationFilter, labelConfigs, viewConfigs, effectiveSessionStatuses, storyFilter, activeStandaloneProject, projectFilter, listFilter, labelFilter, groupFilter])
+  }, [navState, t, sessionFilter, automationFilter, labelConfigs, viewConfigs, effectiveSessionStatuses, activeStandaloneProject, projectFilter, listFilter, labelFilter, groupFilter])
 
   const handleSessionBoardModeChange = useCallback((mode: 'list' | 'board') => {
     setSessionBoardViewMode(mode)
@@ -2603,63 +2585,6 @@ function AppShellContent({
     </>
   ) : null
 
-  const storyFilterDropdown = isStoriesNavigation(navState) ? (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <HeaderIconButton
-          icon={<ListFilter className="h-4 w-4" />}
-          className={storyFilter !== 'all' ? "bg-accent/5 text-accent rounded-[8px] shadow-tinted" : "rounded-[8px]"}
-          style={storyFilter !== 'all' ? { '--shadow-color': 'var(--accent-rgb)' } as React.CSSProperties : undefined}
-        />
-      </DropdownMenuTrigger>
-      <StyledDropdownMenuContent align="end" light minWidth="min-w-[180px]">
-        <div className="flex items-center justify-between px-2 py-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Filter Stories</span>
-          {storyFilter !== 'all' && (
-            <button
-              onClick={(e) => {
-                e.preventDefault()
-                setStoryFilter('all')
-              }}
-              className="text-xs text-muted-foreground hover:text-foreground"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-        <StyledDropdownMenuSeparator />
-        <StyledDropdownMenuItem
-          onClick={() => setStoryFilter('all')}
-          className={cn(storyFilter === 'all' && "bg-foreground/[0.03]")}
-        >
-          <ListFilter className="h-3.5 w-3.5" />
-          <span className="flex-1">All Stories</span>
-          <span className="text-[10px] tabular-nums text-muted-foreground">{stories.length}</span>
-          {storyFilter === 'all' && <Check className="h-3.5 w-3.5" />}
-        </StyledDropdownMenuItem>
-        <StyledDropdownMenuSeparator />
-        {STORY_STATUSES.map((status) => {
-          const StatusIcon = status.icon
-          return (
-            <StyledDropdownMenuItem
-              key={status.id}
-              onClick={() => setStoryFilter(status.id)}
-              className={cn(storyFilter === status.id && "bg-foreground/[0.03]")}
-            >
-              <StatusIcon className="h-3.5 w-3.5" style={{ color: status.tone }} />
-              <span className="flex-1">{status.label}</span>
-              <span className="text-[10px] tabular-nums text-muted-foreground">
-                {storyCounts.get(status.id) ?? 0}
-              </span>
-              {storyFilter === status.id && <Check className="h-3.5 w-3.5" />}
-            </StyledDropdownMenuItem>
-          )
-        })}
-      </StyledDropdownMenuContent>
-    </DropdownMenu>
-  ) : null
-
-  const defaultNewStoryStatus = storyFilter === 'all' ? 'reviewed' : storyFilter
 
   // Build recursive sidebar items from the shared display-sorted label tree.
   // Each node renders with condensed height (compact: true) since many labels expected.
@@ -2981,6 +2906,28 @@ function AppShellContent({
                     },
                     // --- Separator ---
                     { id: "separator:chats-sources", type: "separator" },
+                    // --- Plugins ---
+                    {
+                      id: "nav:plugins",
+                      title: "Plugins",
+                      label: tapdPluginInstalled ? "1" : undefined,
+                      icon: Workflow,
+                      variant: isPluginsNavigation(navState) && !navState.details ? "default" : "ghost",
+                      onClick: handlePluginsClick,
+                      expandable: true,
+                      expanded: isExpanded('nav:plugins') || isPluginsNavigation(navState),
+                      onToggle: () => toggleExpanded('nav:plugins'),
+                      items: (tapdPluginInstalled || (isPluginsNavigation(navState) && navState.details?.pluginId === 'tapd')) ? [
+                        {
+                          id: "nav:plugins:tapd",
+                          title: "TAPD",
+                          icon: Workflow,
+                          variant: isPluginsNavigation(navState) && navState.details?.pluginId === 'tapd' && (navState.details.page === 'board' || navState.details.page === 'requirement') ? "default" : "ghost",
+                          compact: true,
+                          onClick: () => navigate(routes.view.plugins('tapd', 'board')),
+                        },
+                      ] : [],
+                    },
                     // --- Sources & Skills Section ---
                     {
                       id: "nav:sources",
@@ -3095,35 +3042,7 @@ function AppShellContent({
                         },
                       ],
                     },
-                    {
-                      id: "nav:stories",
-                      title: "Stories",
-                      label: String(STORY_STATUSES.length),
-                      icon: Rocket,
-                      variant: isStoriesNavigation(navState) ? "default" : "ghost",
-                      onClick: handleStoriesClick,
-                    },
-                    {
-                      id: "nav:plugins",
-                      title: "Plugins",
-                      label: tapdPluginInstalled ? "1" : undefined,
-                      icon: Workflow,
-                      variant: isPluginsNavigation(navState) && !navState.details ? "default" : "ghost",
-                      onClick: handlePluginsClick,
-                      expandable: true,
-                      expanded: isExpanded('nav:plugins') || isPluginsNavigation(navState),
-                      onToggle: () => toggleExpanded('nav:plugins'),
-                      items: (tapdPluginInstalled || (isPluginsNavigation(navState) && navState.details?.pluginId === 'tapd')) ? [
-                        {
-                          id: "nav:plugins:tapd",
-                          title: "TAPD",
-                          icon: Workflow,
-                          variant: isPluginsNavigation(navState) && navState.details?.pluginId === 'tapd' && (navState.details.page === 'board' || navState.details.page === 'requirement') ? "default" : "ghost",
-                          compact: true,
-                          onClick: () => navigate(routes.view.plugins('tapd', 'board')),
-                        },
-                      ] : [],
-                    },
+
                     // --- Separator ---
                     { id: "separator:skills-settings", type: "separator" },
                     // --- Settings ---
@@ -3180,14 +3099,6 @@ function AppShellContent({
               ) : undefined}
               actions={
                 <>
-                  {storyFilterDropdown}
-                  {isStoriesNavigation(navState) && (
-                    <HeaderIconButton
-                      icon={<Plus className="h-4 w-4" />}
-                      tooltip="New Story"
-                      onClick={() => setStoryCreateDialogOpen(true)}
-                    />
-                  )}
                   {/* Filter dropdown - available in ALL chat views.
                       Shows user-added filters (removable) and pinned filters (non-removable, derived from route).
                       Pinned filters: state views pin a status, label views pin a label, flagged pins the flag. */}
@@ -4208,13 +4119,6 @@ function AppShellContent({
                 </>
               }
             />
-            {isStoriesNavigation(navState) && (
-              <StoryCreateDialog
-                open={storyCreateDialogOpen}
-                onOpenChange={setStoryCreateDialogOpen}
-                defaultStatus={defaultNewStoryStatus}
-              />
-            )}
             <SshKeyDialog
               open={sshKeyDialogOpen}
               onOpenChange={setSshKeyDialogOpen}
@@ -4234,9 +4138,6 @@ function AppShellContent({
               onChanged={reloadSshData}
             />
             {/* Content: SessionList, SourcesListPanel, or SettingsNavigator based on navigation state */}
-            {isStoriesNavigation(navState) && (
-              <StoryListPanel labels={displayLabelConfigs} />
-            )}
             {isSourcesNavigation(navState) && (
               /* Sources List - filtered by type if sourceFilter is active */
               <SourcesListPanel

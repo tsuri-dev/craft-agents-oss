@@ -19,7 +19,6 @@ import type { NavigationState } from '../../shared/types'
  * - sessions: a session is selected
  * - settings: a subpage is selected (bare `settings` route → false)
  * - sources / skills / automations / plugins: a detail item is selected
- * - stories: board-only navigator, never detail mode
  */
 export function isDetailNavState(navState: NavigationState | null): boolean {
   if (!navState) return false
@@ -33,7 +32,5 @@ export function isDetailNavState(navState: NavigationState | null): boolean {
     case 'automations':
     case 'plugins':
       return navState.details !== null
-    case 'stories':
-      return false
   }
 }
