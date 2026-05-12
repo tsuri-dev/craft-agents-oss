@@ -169,6 +169,122 @@ export interface UsageStats {
   entries: SessionUsageEntry[]
 }
 
+
+export type RequirementPluginConnectionStatus = 'connected' | 'disconnected' | 'needs_auth' | 'failed' | 'untested'
+
+export interface RequirementPluginCapabilities {
+  search: boolean
+  filters: Array<'type' | 'status' | 'project' | 'assignee' | 'binding'>
+  pagination: boolean
+  detailRefresh: boolean
+  sourceLinks: boolean
+}
+
+export interface RequirementPluginDescriptor {
+  id: string
+  sourceSlug?: string
+  displayName: string
+  icon?: string
+  connectionStatus: RequirementPluginConnectionStatus
+  connectionError?: string
+  capabilities: RequirementPluginCapabilities
+}
+
+export interface ExternalRequirementItem {
+  pluginId: string
+  source: string
+  sourceItemId: string
+  title: string
+  type?: string
+  status?: string
+  project?: string
+  assignees?: string[]
+  priority?: string
+  dueAt?: string
+  beginAt?: string
+  createdAt?: string
+  updatedAt?: string
+  creator?: string
+  category?: string
+  version?: string
+  release?: string
+  sourceUrl?: string
+  summary?: string
+  content?: string
+  contentImages?: RequirementContentImage[]
+  comments?: RequirementComment[]
+  raw?: unknown
+  binding?: RequirementBinding
+}
+
+export interface RequirementContentImage {
+  src: string
+  downloadUrl: string
+  idcDownloadUrl?: string
+}
+
+export interface RequirementComment {
+  id: string
+  author: string
+  body?: string
+  title?: string
+  createdAt?: string
+  updatedAt?: string
+  contentImages?: RequirementContentImage[]
+  raw?: unknown
+}
+
+export interface RequirementBinding {
+  pluginId: string
+  sourceItemId: string
+  groupName: string
+  createdAt: number
+  updatedAt: number
+  itemSnapshot?: ExternalRequirementItem
+}
+
+export interface RequirementListFilters {
+  workspaceId?: string
+  keyword?: string
+  type?: string
+  status?: string
+  project?: string
+  assignee?: string
+  bindingState?: 'all' | 'bound' | 'unbound'
+  page?: number
+  limit?: number
+}
+
+export interface RequirementListResult {
+  items: ExternalRequirementItem[]
+  total?: number
+  page: number
+  limit: number
+  hasMore: boolean
+  stale?: boolean
+}
+
+export interface RequirementDetailResult {
+  item: ExternalRequirementItem
+}
+
+export interface RequirementBindInput {
+  pluginId: string
+  item: ExternalRequirementItem
+  groupName: string
+}
+
+export interface RequirementUnlinkInput {
+  pluginId: string
+  sourceItemId: string
+}
+
+export interface RequirementCreateSessionInput {
+  pluginId: string
+  item: ExternalRequirementItem
+  groupName: string
+}
+
 export interface CreateSessionOptions {
   name?: string
   permissionMode?: PermissionMode

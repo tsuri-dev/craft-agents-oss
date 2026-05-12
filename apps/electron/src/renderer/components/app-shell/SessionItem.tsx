@@ -1,6 +1,6 @@
 import { formatDistanceToNowStrict } from "date-fns"
 import type { Locale } from "date-fns"
-import { Flag, ShieldAlert } from "lucide-react"
+import { Flag, ShieldAlert, Workflow } from "lucide-react"
 import { useActionLabel } from "@/actions"
 import { cn } from "@/lib/utils"
 import { rendererPerf } from "@/lib/perf"
@@ -20,6 +20,7 @@ import type { SessionMeta } from "@/atoms/sessions"
 import { messagingBindingsBySessionAtom } from "@/atoms/messaging"
 import { useAtomValue } from "jotai"
 import { extractLabelId } from "@craft-agent/shared/labels"
+import { getTapdRequirementId, isTapdPluginInstalled, TAPD_PLUGIN_ID } from "@/utils/session-requirement-link"
 
 const PLATFORM_PILL: Record<'telegram' | 'whatsapp', { label: string; colorClass: string }> = {
   telegram: {
@@ -55,7 +56,7 @@ export function SessionItem({
   onRangeSelect,
 }: SessionItemProps) {
   const ctx = useSessionListContext()
-  const { workspaces, isCompactMode } = useAppShellContext()
+  const { workspaces, isCompactMode, enabledSources } = useAppShellContext()
   const hasRemoteWorkspaces = workspaces?.some(w => w.remoteServer) ?? false
   const { hotkey: nextHotkey } = useActionLabel('chat.nextSearchMatch')
   const { hotkey: prevHotkey } = useActionLabel('chat.prevSearchMatch')
@@ -75,6 +76,7 @@ export function SessionItem({
   const messagingBindingsBySession = useAtomValue(messagingBindingsBySessionAtom)
   const sessionBindings = messagingBindingsBySession.get(item.id) ?? []
   const hasMessagingBinding = sessionBindings.length > 0
+  const tapdRequirementId = isTapdPluginInstalled(enabledSources) ? getTapdRequirementId(item.labels) : null
 
   const handleClick = (e: React.MouseEvent) => {
     ctx.onFocusZone()
@@ -242,6 +244,22 @@ export function SessionItem({
         </span>
       ) : undefined}
       badges={hasLabels ? <SessionBadges item={item} /> : undefined}
+      overlay={tapdRequirementId ? (
+        <button
+          type="button"
+          aria-label="Open linked TAPD requirement"
+          title="Open linked TAPD requirement"
+          className="absolute bottom-2 right-2 z-10 flex h-6 w-6 items-center justify-center rounded-[7px] text-muted-foreground/55 opacity-0 transition-[opacity,background-color,color,transform] duration-150 hover:bg-foreground/[0.06] hover:text-foreground group-hover:opacity-100 active:scale-95"
+          onMouseDown={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            navigate(routes.view.plugins(TAPD_PLUGIN_ID, 'requirement', tapdRequirementId))
+          }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <Workflow className="h-3.5 w-3.5" />
+        </button>
+      ) : undefined}
     />
   )
 }

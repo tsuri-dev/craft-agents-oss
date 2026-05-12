@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Plugins hub and TAPD plugin board** — Added a Codex-style Plugins sidebar entry with a plugin hub, installed plugin children, and TAPD as the first plugin. Opening TAPD shows a header-first cached requirement board that refreshes from the configured MCP source on demand, opens requirements in a dedicated two-column detail page with safe Markdown/HTML rendering for TAPD descriptions and description images, links or unlinks requirements to session groups from a right-side business properties panel, creates seeded sessions from requirement context, and adds a lightweight requirement shortcut to linked sessions.
+
 ## Improvements
 
 ## Bug Fixes

@@ -1,19 +1,22 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { formatDistanceToNowStrict } from "date-fns"
-import { Flag, GripVertical } from "lucide-react"
+import { Flag, GripVertical, Workflow } from "lucide-react"
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { cn } from "@/lib/utils"
 import type { SessionMeta } from "@/atoms/sessions"
 import { getSessionPreviewText, getSessionTitle, hasUnreadMeta, getSessionStatus } from "@/utils/session"
 import { useOptionalSessionListContext } from "@/context/SessionListContext"
+import { useAppShellContext } from "@/context/AppShellContext"
 import { SessionBadges } from "./SessionBadges"
 import type { LabelConfig } from "@craft-agent/shared/labels"
 import type { SessionStatus, SessionStatusId } from "@/config/session-status-config"
 import { getStateIcon, getStateIconStyle } from "@/config/session-status-config"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { SessionStatusMenu } from "@/components/ui/session-status-menu"
+import { navigate, routes } from "@/lib/navigate"
+import { getTapdRequirementId, isTapdPluginInstalled, TAPD_PLUGIN_ID } from "@/utils/session-requirement-link"
 
 function SessionBoardCardContent({
   item,
@@ -35,6 +38,7 @@ function SessionBoardCardContent({
   isOverlay?: boolean
 }) {
   const ctx = useOptionalSessionListContext()
+  const { enabledSources } = useAppShellContext()
   const { t } = useTranslation()
   const [statusOpen, setStatusOpen] = useState(false)
   const title = getSessionTitle(item)
@@ -49,6 +53,7 @@ function SessionBoardCardContent({
     ? t(`status.${activeStatus.id}`, activeStatus.label)
     : statusId
   const statusIcon = getStateIcon(statusId, statuses ?? [])
+  const tapdRequirementId = isTapdPluginInstalled(enabledSources) ? getTapdRequirementId(item.labels) : null
   const handleStatusSelect = (nextStatusId: SessionStatusId) => {
     setStatusOpen(false)
     onSessionStatusChange?.(item.id, nextStatusId)
@@ -95,8 +100,25 @@ function SessionBoardCardContent({
           </div>
         )}
 
+        <div className="mt-2 flex items-center justify-between gap-2">
+          {tapdRequirementId && !isOverlay ? (
+            <button
+              type="button"
+              aria-label="Open linked TAPD requirement"
+              title="Open linked TAPD requirement"
+              className="flex h-6 w-6 items-center justify-center rounded-[6px] text-muted-foreground/55 transition-[background-color,color,transform] duration-150 hover:bg-foreground/[0.05] hover:text-foreground active:scale-95"
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                navigate(routes.view.plugins(TAPD_PLUGIN_ID, 'requirement', tapdRequirementId))
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <Workflow className="h-3.5 w-3.5" />
+            </button>
+          ) : <span />}
+
         {showStatus && !isOverlay && statuses && statuses.length > 0 && onSessionStatusChange && (
-          <div className="mt-2 flex justify-end">
             <Popover modal={true} open={statusOpen} onOpenChange={setStatusOpen}>
               <PopoverTrigger asChild>
                 <button
@@ -137,8 +159,8 @@ function SessionBoardCardContent({
                 />
               </PopoverContent>
             </Popover>
-          </div>
         )}
+        </div>
       </div>
     </div>
   )

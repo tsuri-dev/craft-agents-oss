@@ -180,6 +180,16 @@ export const routes = {
     /** Story board view */
     stories: () => 'stories' as const,
 
+    /** Plugins hub and installed plugin detail view */
+    plugins: (pluginId?: string, page?: 'intro' | 'board' | 'requirement', sourceItemId?: string) => {
+      if (!pluginId) return 'plugins' as const
+      if (page === 'requirement' && sourceItemId) {
+        return `plugins/plugin/${encodeURIComponent(pluginId)}/requirement/${encodeURIComponent(sourceItemId)}` as const
+      }
+      const suffix = page === 'board' ? '/board' : ''
+      return `plugins/plugin/${encodeURIComponent(pluginId)}${suffix}` as const
+    },
+
     /** Settings view (settings navigator) - uses SettingsSubpage from registry */
     settings: (subpage?: SettingsSubpage) =>
       subpage

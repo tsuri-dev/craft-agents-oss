@@ -351,6 +351,15 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.drafts.DELETE,
   RPC_CHANNELS.drafts.GET_ALL,
 
+  // requirement plugins — workspace source-backed external work items
+  RPC_CHANNELS.requirementPlugins.LIST,
+  RPC_CHANNELS.requirements.LIST_ITEMS,
+  RPC_CHANNELS.requirements.GET_ITEM_DETAIL,
+  RPC_CHANNELS.requirements.CREATE_GROUP_FROM_ITEM,
+  RPC_CHANNELS.requirements.BIND_ITEM_TO_GROUP,
+  RPC_CHANNELS.requirements.UNLINK_ITEM_FROM_GROUP,
+  RPC_CHANNELS.requirements.CREATE_SESSION_FOR_ITEM,
+
   // sources — source config per-workspace
   RPC_CHANNELS.sources.GET,
   RPC_CHANNELS.sources.CREATE,

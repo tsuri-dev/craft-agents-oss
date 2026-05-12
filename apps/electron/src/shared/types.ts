@@ -222,6 +222,14 @@ import type {
   SshKeyValidationResult,
   SshProfileTestResult,
   OpenSshProfileSessionResult,
+  RequirementPluginDescriptor,
+  RequirementListFilters,
+  RequirementListResult,
+  RequirementDetailResult,
+  RequirementBindInput,
+  RequirementBinding,
+  RequirementUnlinkInput,
+  RequirementCreateSessionInput,
 } from '@craft-agent/shared/protocol'
 
 export interface ElectronAPI {
@@ -242,6 +250,14 @@ export interface ElectronAPI {
   // Consolidated session command handler
   sessionCommand(sessionId: string, command: SessionCommand): Promise<void | ShareResult | RefreshTitleResult | { count: number }>
   getUsageStats(workspaceId: string, range?: UsageStatsRange): Promise<UsageStats>
+
+  listRequirementPlugins(workspaceId: string): Promise<RequirementPluginDescriptor[]>
+  listRequirementItems(workspaceId: string, pluginId: string, filters: RequirementListFilters): Promise<RequirementListResult>
+  getRequirementItemDetail(workspaceId: string, pluginId: string, sourceItemId: string, filters?: RequirementListFilters): Promise<RequirementDetailResult>
+  createRequirementGroupFromItem(workspaceId: string, input: RequirementBindInput): Promise<RequirementBinding>
+  bindRequirementItemToGroup(workspaceId: string, input: RequirementBindInput): Promise<RequirementBinding>
+  unlinkRequirementItemFromGroup(workspaceId: string, input: RequirementUnlinkInput): Promise<{ removed: boolean }>
+  createRequirementSessionForItem(workspaceId: string, input: RequirementCreateSessionInput): Promise<{ sessionId: string }>
 
   // Server info (REMOTE_ELIGIBLE — returns data from whichever server owns the workspace)
   getServerHomeDir(): Promise<string>
@@ -885,6 +901,20 @@ export interface StoriesNavigationState {
 }
 
 /**
+ * Plugins navigation state
+ */
+export interface PluginsNavigationState {
+  navigator: 'plugins'
+  details: {
+    type: 'plugin'
+    pluginId: string
+    page?: 'intro' | 'board' | 'requirement'
+    sourceItemId?: string
+  } | null
+  rightSidebar?: RightSidebarPanel
+}
+
+/**
  * Unified navigation state
  */
 export type NavigationState =
@@ -894,6 +924,7 @@ export type NavigationState =
   | SkillsNavigationState
   | AutomationsNavigationState
   | StoriesNavigationState
+  | PluginsNavigationState
 
 export const isSessionsNavigation = (
   state: NavigationState
@@ -918,6 +949,10 @@ export const isAutomationsNavigation = (
 export const isStoriesNavigation = (
   state: NavigationState
 ): state is StoriesNavigationState => state.navigator === 'stories'
+
+export const isPluginsNavigation = (
+  state: NavigationState
+): state is PluginsNavigationState => state.navigator === 'plugins'
 
 export const DEFAULT_NAVIGATION_STATE: NavigationState = {
   navigator: 'sessions',
@@ -946,6 +981,14 @@ export const getNavigationStateKey = (state: NavigationState): string => {
   }
   if (state.navigator === 'stories') {
     return 'stories'
+  }
+  if (state.navigator === 'plugins') {
+    if (!state.details) return 'plugins'
+    if (state.details.page === 'requirement' && state.details.sourceItemId) {
+      return `plugins/plugin/${state.details.pluginId}/requirement/${encodeURIComponent(state.details.sourceItemId)}`
+    }
+    const suffix = state.details.page === 'board' ? '/board' : ''
+    return `plugins/plugin/${state.details.pluginId}${suffix}`
   }
   if (state.navigator === 'settings') {
     if (state.subpage === null) return 'settings'
@@ -997,6 +1040,25 @@ export const parseNavigationStateKey = (key: string): NavigationState | null => 
 
   // Handle stories
   if (key === 'stories') return { navigator: 'stories' }
+
+  // Handle plugins
+  if (key === 'plugins') return { navigator: 'plugins', details: null }
+  if (key.startsWith('plugins/plugin/')) {
+    const rest = key.slice(15)
+    const [pluginId, page, sourceItemId] = rest.split('/')
+    if (pluginId) {
+      return {
+        navigator: 'plugins',
+        details: {
+          type: 'plugin',
+          pluginId,
+          page: page === 'board' ? 'board' : page === 'requirement' ? 'requirement' : 'intro',
+          ...(page === 'requirement' && sourceItemId ? { sourceItemId: decodeURIComponent(sourceItemId) } : {}),
+        },
+      }
+    }
+    return { navigator: 'plugins', details: null }
+  }
 
   // Handle settings
   if (key === 'settings') return { navigator: 'settings', subpage: null }
