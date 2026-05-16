@@ -480,6 +480,7 @@ export class PiAgent extends BaseAgent {
       model: this._model,
       cwd,
       thinkingLevel: this._thinkingLevel,
+      fastMode: this._fastMode,
       workspaceRootPath: this.config.workspace.rootPath,
       sessionId,
       sessionPath,
@@ -2156,6 +2157,17 @@ export class PiAgent extends BaseAgent {
       this.send({ type: 'set_thinking_level', level });
     } else {
       this.debug(`Thinking level updated but no subprocess to forward to: ${previousLevel} → ${level}`);
+    }
+  }
+
+  override setFastMode(enabled: boolean): void {
+    const previousFastMode = this.getFastMode();
+    super.setFastMode(enabled);
+    if (this.subprocess) {
+      this.debug(`Forwarding fast mode change to subprocess: ${previousFastMode} → ${enabled}`);
+      this.send({ type: 'set_fast_mode', enabled });
+    } else {
+      this.debug(`Fast mode updated but no subprocess to forward to: ${previousFastMode} → ${enabled}`);
     }
   }
 

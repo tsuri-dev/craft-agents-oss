@@ -253,6 +253,24 @@ function getConfiguredBaseUrl(): string {
 
 const FAST_MODE_BETA = 'fast-mode-2026-02-01';
 
+function isRuntimeFastModeEnabled(): boolean {
+  const value = process.env.CRAFT_AGENT_FAST_MODE?.trim().toLowerCase();
+  if (value === '1' || value === 'true' || value === 'yes' || value === 'on') return true;
+  if (value === '0' || value === 'false' || value === 'no' || value === 'off') return false;
+  return FEATURE_FLAGS.fastMode;
+}
+
+function shouldApplyOpenAiFastMode(model: unknown): boolean {
+  if (!isRuntimeFastModeEnabled()) return false;
+  return typeof model === 'string' && /^gpt-5(?:[.-]|$)/.test(model);
+}
+
+function applyOpenAiFastMode(body: Record<string, unknown>, adapterName: string): void {
+  if (!shouldApplyOpenAiFastMode(body.model)) return;
+  body.speed = 'fast';
+  debugLog(`[Fast Mode] Enabled for ${adapterName} model=${body.model}`);
+}
+
 /**
  * Strip cache_control from empty text blocks in API request bodies.
  *
@@ -429,7 +447,7 @@ export function upgradePromptCacheTtl(body: Record<string, unknown>): number {
  * Only activates for Opus 4.7 on Anthropic's API when the feature flag is on.
  */
 function shouldEnableFastMode(model: unknown): boolean {
-  if (!FEATURE_FLAGS.fastMode) return false;
+  if (!isRuntimeFastModeEnabled()) return false;
   return typeof model === 'string' && model === 'claude-opus-4-7';
 }
 
@@ -1256,6 +1274,11 @@ const openAiAdapter: ApiAdapter = {
     validateOpenAiChatBody(body);
   },
 
+  modifyRequest(_url: string, init: RequestInit, body: Record<string, unknown>): { init: RequestInit; body: Record<string, unknown> } {
+    applyOpenAiFastMode(body, 'openai');
+    return { init, body };
+  },
+
   createSseProcessor(): TransformStream<Uint8Array, Uint8Array> {
     return createOpenAiSseStrippingStream();
   },
@@ -1472,6 +1495,11 @@ const openAiResponsesAdapter: ApiAdapter = {
 
   validateOutgoingBody(body: Record<string, unknown>): void {
     validateOpenAiResponsesBody(body);
+  },
+
+  modifyRequest(_url: string, init: RequestInit, body: Record<string, unknown>): { init: RequestInit; body: Record<string, unknown> } {
+    applyOpenAiFastMode(body, 'openai-responses');
+    return { init, body };
   },
 
   createSseProcessor(): TransformStream<Uint8Array, Uint8Array> {

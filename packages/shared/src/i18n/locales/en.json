@@ -157,6 +157,8 @@
   "chat.learnMore": "Learn More",
   "chat.mentionFilesSkillsSources": "Mention files, skills, sources",
   "chat.modelPicker.contextSection": "Context",
+  "chat.modelPicker.fastMode": "Fast mode",
+  "chat.modelPicker.fastModeDesc": "Prefer lower latency when supported",
   "chat.modelPicker.modelsSection": "Models",
   "chat.modelPicker.openAiSettings": "Open AI settings",
   "chat.modelPicker.supportsImagesOff": "Image input disabled — click to enable",
