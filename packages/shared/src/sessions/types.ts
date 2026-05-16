@@ -35,7 +35,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   // Config
   'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory', 'remoteTarget',
   // Model/Connection
-  'model', 'llmConnection', 'connectionLocked', 'thinkingLevel', 'modelSwitchFromSdkSessionId',
+  'model', 'llmConnection', 'connectionLocked', 'thinkingLevel', 'fastMode', 'modelSwitchFromSdkSessionId',
   // Sharing
   'sharedUrl', 'sharedId',
   // Plan execution
@@ -161,8 +161,10 @@ export interface SessionConfig {
   llmConnection?: string;
   /** Whether the connection is locked (cannot be changed after first agent creation) */
   connectionLocked?: boolean;
-  /** Thinking level for this session ('off', 'think', 'max') */
+  /** Thinking level for this session ('off', 'low', 'medium', 'high', 'xhigh', 'max') */
   thinkingLevel?: ThinkingLevel;
+  /** Prefer provider fast/speed mode for supported models. */
+  fastMode?: boolean;
   /** SDK session to fork from on next turn after an in-session model switch. */
   modelSwitchFromSdkSessionId?: string;
   /**
@@ -283,8 +285,10 @@ export interface SessionHeader {
   llmConnection?: string;
   /** Whether the connection is locked (cannot be changed after first agent creation) */
   connectionLocked?: boolean;
-  /** Thinking level for this session ('off', 'think', 'max') */
+  /** Thinking level for this session ('off', 'low', 'medium', 'high', 'xhigh', 'max') */
   thinkingLevel?: ThinkingLevel;
+  /** Prefer provider fast/speed mode for supported models. */
+  fastMode?: boolean;
   /** SDK session to fork from on next turn after an in-session model switch. */
   modelSwitchFromSdkSessionId?: string;
   /**
@@ -374,8 +378,10 @@ export interface SessionMetadata {
   llmConnection?: string;
   /** Whether the connection is locked (cannot be changed after first agent creation) */
   connectionLocked?: boolean;
-  /** Thinking level for this session ('off', 'think', 'max') */
+  /** Thinking level for this session ('off', 'low', 'medium', 'high', 'xhigh', 'max') */
   thinkingLevel?: ThinkingLevel;
+  /** Prefer provider fast/speed mode for supported models. */
+  fastMode?: boolean;
   /** SDK session to fork from on next turn after an in-session model switch. */
   modelSwitchFromSdkSessionId?: string;
   /** ID of last message user has read - for unread detection */

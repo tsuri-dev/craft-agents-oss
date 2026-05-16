@@ -24,12 +24,15 @@ export interface SessionOptions {
   permissionModeVersion?: number
   /** Session-level thinking level — sticky, persisted. See {@link ThinkingLevel}. */
   thinkingLevel: ThinkingLevel
+  /** Prefer provider fast/speed mode for supported models. */
+  fastMode: boolean
 }
 
 /** Default values for new sessions */
 export const defaultSessionOptions: SessionOptions = {
   permissionMode: 'ask', // Default to ask mode (prompt for permissions)
   thinkingLevel: DEFAULT_THINKING_LEVEL, // Default to 'medium' level
+  fastMode: false,
 }
 
 /** Type for partial updates to session options */

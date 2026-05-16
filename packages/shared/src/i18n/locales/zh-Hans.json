@@ -157,6 +157,8 @@
   "chat.learnMore": "了解更多",
   "chat.mentionFilesSkillsSources": "提及文件、技能、数据源",
   "chat.modelPicker.contextSection": "上下文",
+  "chat.modelPicker.fastMode": "快速模式",
+  "chat.modelPicker.fastModeDesc": "支持时优先降低延迟",
   "chat.modelPicker.modelsSection": "模型",
   "chat.modelPicker.openAiSettings": "打开 AI 设置",
   "chat.modelPicker.supportsImagesOff": "图像输入已禁用 — 点击启用",

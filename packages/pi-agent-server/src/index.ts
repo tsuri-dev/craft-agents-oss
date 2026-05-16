@@ -99,6 +99,7 @@ interface InitMessage {
   model: string;
   cwd: string;
   thinkingLevel: string;
+  fastMode?: boolean;
   workspaceRootPath: string;
   sessionId: string;
   sessionPath: string;
@@ -142,6 +143,7 @@ type InboundMessage =
   | { type: 'ensure_session_ready'; id: string }
   | { type: 'set_model'; model: string }
   | { type: 'set_thinking_level'; level: string }
+  | { type: 'set_fast_mode'; enabled: boolean }
   | { type: 'compact'; id: string; customInstructions?: string }
   | { type: 'set_auto_compaction'; id: string; enabled: boolean }
   | RuntimeConfigUpdateMessage
@@ -392,6 +394,11 @@ function setInterceptorApiHints(model: { api?: string; provider?: string; baseUr
   debugLog(
     `[interceptor-hint] api=${process.env.CRAFT_PI_MODEL_API || '-'} provider=${process.env.CRAFT_PI_MODEL_PROVIDER || '-'} baseUrl=${process.env.CRAFT_PI_MODEL_BASE_URL || '-'}`,
   );
+}
+
+function setInterceptorFastMode(enabled: boolean): void {
+  process.env.CRAFT_AGENT_FAST_MODE = enabled ? '1' : '0';
+  debugLog(`[interceptor-fast-mode] ${enabled ? 'enabled' : 'disabled'}`);
 }
 
 /**
@@ -654,6 +661,8 @@ async function ensureSession(): Promise<AgentSession> {
   } else {
     setInterceptorApiHints(undefined);
   }
+
+  setInterceptorFastMode(initConfig.fastMode === true);
 
   // Set thinking level
   const piThinkingLevel = THINKING_TO_PI[initConfig.thinkingLevel as keyof typeof THINKING_TO_PI];
@@ -1620,6 +1629,10 @@ async function handleSetThinkingLevel(msg: Extract<InboundMessage, { type: 'set_
   }
 }
 
+function handleSetFastMode(msg: Extract<InboundMessage, { type: 'set_fast_mode' }>): void {
+  setInterceptorFastMode(msg.enabled);
+}
+
 function handleShutdown(): void {
   debugLog('Shutdown requested');
 
@@ -1700,6 +1713,10 @@ async function processMessage(msg: InboundMessage): Promise<void> {
 
     case 'set_thinking_level':
       await handleSetThinkingLevel(msg);
+      break;
+
+    case 'set_fast_mode':
+      handleSetFastMode(msg);
       break;
 
     case 'compact':

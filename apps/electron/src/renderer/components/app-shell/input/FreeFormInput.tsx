@@ -7,6 +7,7 @@ import {
   ArrowUp,
   Square,
   Check,
+  Zap,
   DatabaseZap,
   ChevronDown,
   ChevronUp,
@@ -53,6 +54,7 @@ import {
   StyledDropdownMenuSubContent,
 } from '@/components/ui/styled-dropdown'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { coerceInputText } from '@/lib/input-text'
 import { isMac, PATH_SEP, getPathBasename } from '@/lib/platform'
@@ -160,6 +162,10 @@ export interface FreeFormInputProps {
   thinkingLevel?: ThinkingLevel
   /** Callback when thinking level changes */
   onThinkingLevelChange?: (level: ThinkingLevel) => void
+  /** Prefer provider fast/speed mode for supported models. */
+  fastMode?: boolean
+  /** Callback when fast mode changes */
+  onFastModeChange?: (enabled: boolean) => void
   // Advanced options
   permissionMode?: PermissionMode
   onPermissionModeChange?: (mode: PermissionMode) => void
@@ -280,6 +286,8 @@ export function FreeFormInput({
   onModelChange,
   thinkingLevel = 'medium',
   onThinkingLevelChange,
+  fastMode = false,
+  onFastModeChange,
   permissionMode = 'ask',
   onPermissionModeChange,
   enabledModes = ['safe', 'ask', 'allow-all'],
@@ -385,6 +393,14 @@ export function FreeFormInput({
     const model = availableModels.find(m => typeof m !== 'string' && m.id === currentModel)
     return typeof model !== 'string' && model?.supportsThinking === false
   }, [availableModels, currentModel])
+
+  const fastModeAvailable = React.useMemo(() => {
+    const effectiveSlug = resolveEffectiveConnectionSlug(currentConnection, workspaceDefaultConnection, llmConnections)
+    const connection = llmConnections.find(c => c.slug === effectiveSlug)
+    if (!connection || connectionUnavailable) return false
+    const bareModel = currentModel.startsWith('pi/') ? currentModel.slice(3) : currentModel
+    return connection.providerType === 'pi' && connection.piAuthProvider === 'openai-codex' && /^gpt-5(?:[.-]|$)/.test(bareModel)
+  }, [currentConnection, workspaceDefaultConnection, llmConnections, connectionUnavailable, currentModel])
 
   // Get display name for current model (full name, not short name)
   const currentModelDisplayName = React.useMemo(() => {
@@ -2363,6 +2379,26 @@ export function FreeFormInput({
                       })}
                     </StyledDropdownMenuSubContent>
                   </DropdownMenuSub>
+
+                  {fastModeAvailable && (
+                    <StyledDropdownMenuItem
+                      onSelect={(event) => event.preventDefault()}
+                      className="flex items-center justify-between gap-3 px-2 py-2 rounded-lg cursor-default"
+                    >
+                      <div className="text-left flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 font-medium text-sm">
+                          <Zap className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span>{t('chat.modelPicker.fastMode')}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">{t('chat.modelPicker.fastModeDesc')}</div>
+                      </div>
+                      <Switch
+                        checked={fastMode}
+                        onCheckedChange={(checked) => onFastModeChange?.(checked)}
+                        aria-label={t('chat.modelPicker.fastMode')}
+                      />
+                    </StyledDropdownMenuItem>
+                  )}
                 </>
               )}
 

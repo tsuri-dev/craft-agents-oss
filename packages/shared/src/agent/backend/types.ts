@@ -182,6 +182,9 @@ export interface CoreBackendConfig {
   /** Initial thinking level */
   thinkingLevel?: ThinkingLevel;
 
+  /** Prefer provider fast/speed mode for supported models. */
+  fastMode?: boolean;
+
   /** Headless mode flag (disables interactive tools) */
   isHeadless?: boolean;
 
@@ -472,6 +475,12 @@ export interface AgentBackend {
 
   /** Set thinking level */
   setThinkingLevel(level: ThinkingLevel): void;
+
+  /** Get whether provider fast/speed mode is preferred. */
+  getFastMode(): boolean;
+
+  /** Set whether provider fast/speed mode is preferred. */
+  setFastMode(enabled: boolean): void;
 
   // ============================================================
   // Permission Mode

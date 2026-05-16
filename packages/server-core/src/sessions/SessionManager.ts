@@ -838,8 +838,10 @@ interface ManagedSession {
   llmConnection?: string
   // Whether the connection is locked (cannot be changed after first agent creation)
   connectionLocked?: boolean
-  // Thinking level for this session ('off', 'think', 'max')
+  // Thinking level for this session ('off', 'low', 'medium', 'high', 'xhigh', 'max')
   thinkingLevel?: ThinkingLevel
+  // Prefer provider fast/speed mode for supported models
+  fastMode?: boolean
   // SDK session to fork from on next turn after an in-session model switch
   modelSwitchFromSdkSessionId?: string
   // System prompt preset for mini agents ('default' | 'mini')
@@ -2992,6 +2994,7 @@ export class SessionManager implements ISessionManager {
       model: resolvedModel,
       llmConnection: options?.llmConnection,
       thinkingLevel: defaultThinkingLevel,
+      fastMode: options?.fastMode === true,
       systemPromptPreset: options?.systemPromptPreset,
       enabledSourceSlugs: defaultEnabledSourceSlugs,
       branchFromMessageId: validatedBranch?.sourceMessageId,
@@ -3516,6 +3519,7 @@ export class SessionManager implements ISessionManager {
         workspace: managed.workspace,
         miniModel,
         thinkingLevel: managed.thinkingLevel,
+        fastMode: managed.fastMode === true,
         session: sessionConfig,
         onSdkSessionIdUpdate,
         onSdkSessionIdCleared,
@@ -6977,6 +6981,24 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Enable or disable provider fast/speed mode for a session.
+   * This is sticky and persisted across messages.
+   */
+  setSessionFastMode(sessionId: string, enabled: boolean): void {
+    const managed = this.sessions.get(sessionId)
+    if (managed) {
+      managed.fastMode = enabled
+
+      if (managed.agent) {
+        managed.agent.setFastMode(enabled)
+      }
+
+      sessionLog.info(`Session ${sessionId}: fast mode ${enabled ? 'enabled' : 'disabled'}`)
+      this.persistSession(managed)
+    }
+  }
+
+  /**
    * Generate an AI title for a session from the user's first message.
    * Uses the agent's generateTitle() method which handles provider-specific SDK calls.
    * If no agent exists, creates a temporary one using the session's connection.
@@ -8182,6 +8204,7 @@ export class SessionManager implements ISessionManager {
       llmConnection: header.llmConnection,
       connectionLocked: header.connectionLocked,
       thinkingLevel: header.thinkingLevel,
+      fastMode: header.fastMode,
       hidden: header.hidden,
       transferredSessionSummary: header.transferredSessionSummary,
       transferredSessionSummaryApplied: header.transferredSessionSummaryApplied,
@@ -8225,8 +8248,9 @@ export class SessionManager implements ISessionManager {
         storedSession.llmConnection = undefined
         storedSession.connectionLocked = false
       }
-      // Clear thinking level so the session inherits the workspace default
+      // Clear thinking level/fast mode so the session inherits the workspace default
       storedSession.thinkingLevel = undefined
+      storedSession.fastMode = undefined
       // Clear working directory — the source path won't exist on a different server.
       // The user can set a new cwd after the session is transferred.
       storedSession.workingDirectory = undefined
