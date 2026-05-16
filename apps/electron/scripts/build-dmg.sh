@@ -181,12 +181,20 @@ echo "  Native binary: $((BIN_SIZE / 1024 / 1024)) MB"
 # 5. Copy ripgrep (was previously bundled inside the SDK at vendor/ripgrep/;
 #    moved out in 0.2.113. Search service still needs the binary directly.)
 RG_SOURCE="$ROOT_DIR/node_modules/@vscode/ripgrep"
-require_path "$RG_SOURCE" "@vscode/ripgrep" "Run 'bun install' and 'bun pm trust @vscode/ripgrep' first."
-require_path "$RG_SOURCE/bin/rg" "ripgrep binary" "@vscode/ripgrep postinstall did not run."
+require_path "$RG_SOURCE" "@vscode/ripgrep" "Run 'bun install' first."
+RG_BINARY="$RG_SOURCE/bin/rg"
+if [ ! -e "$RG_BINARY" ]; then
+    RG_PLATFORM_SOURCE="$ROOT_DIR/node_modules/@vscode/ripgrep-darwin-$ARCH/bin/rg"
+    require_path "$RG_PLATFORM_SOURCE" "ripgrep platform binary" "@vscode/ripgrep 1.18+ stores rg in @vscode/ripgrep-darwin-$ARCH."
+    RG_BINARY="$RG_PLATFORM_SOURCE"
+fi
 echo "Copying @vscode/ripgrep..."
 mkdir -p "$ELECTRON_DIR/node_modules/@vscode"
 rm -rf "$ELECTRON_DIR/node_modules/@vscode/ripgrep"
 cp -r "$RG_SOURCE" "$ELECTRON_DIR/node_modules/@vscode/"
+mkdir -p "$ELECTRON_DIR/node_modules/@vscode/ripgrep/bin"
+cp "$RG_BINARY" "$ELECTRON_DIR/node_modules/@vscode/ripgrep/bin/rg"
+chmod +x "$ELECTRON_DIR/node_modules/@vscode/ripgrep/bin/rg"
 
 # 6. Copy network interceptor sources.
 #    NOTE (Phase 1 of SDK uplift): the Claude native binary doesn't accept
