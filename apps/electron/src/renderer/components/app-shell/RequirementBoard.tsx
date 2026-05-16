@@ -12,10 +12,13 @@ import {
   ChevronRight,
   Circle,
   Loader2,
+  Link2,
+  Plus,
   RefreshCw,
   Search,
   Unlink2,
   Workflow,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -38,23 +41,23 @@ import type {
 
 const FILTER_LIMIT = 30
 const TAPD_DETAIL_THEME = {
-  page: 'bg-[#FAFAFA] text-[#18181B] dark:bg-[#111113] dark:text-[#FAFAFA]',
-  panel: 'bg-[#FFFFFF] dark:bg-[#111113]',
-  subtlePanel: 'bg-[#FFFFFF] dark:bg-[#131315]',
-  hover: 'hover:bg-[#F1F2F4] dark:hover:bg-[#18181B]',
-  border: 'border-[#E5E5E8] dark:border-[#29292B]',
-  borderSubtle: 'border-[#E5E5E8]/80 dark:border-[#29292B]/80',
-  title: 'text-[#18181B] dark:text-[#FAFAFA]',
-  body: 'text-[#24262B] dark:text-[#F3F3F3]',
-  secondary: 'text-[#4F535C] dark:text-[#C1C1C1]',
-  weak: 'text-[#7A7F8A] dark:text-[#9F9FA9]',
-  disabled: 'text-[#A8ABB3] dark:text-[#6F6F77]',
-  pill: 'bg-[#F1F2F4] text-[#4F535C] dark:bg-[#18181B] dark:text-[#C1C1C1]',
-  pillStrong: 'bg-[#F1F2F4] text-[#24262B] dark:bg-[#1E1E21] dark:text-[#F0F0F0]',
-  link: 'text-[#2563EB] dark:text-[#578EE7]',
-  danger: 'text-[#D92D20] dark:text-[#EE6E6C]',
-  success: 'text-[#258A3E] dark:text-[#58C36A]',
-  orange: 'text-[#C8661F] dark:text-[#DF742D]',
+  page: 'bg-background text-foreground',
+  panel: 'bg-background',
+  subtlePanel: 'bg-foreground/[0.025]',
+  hover: '[@media(hover:hover)]:hover:bg-foreground/[0.045]',
+  border: 'border-foreground/[0.08]',
+  borderSubtle: 'border-foreground/[0.06]',
+  title: 'text-foreground',
+  body: 'text-foreground/85',
+  secondary: 'text-foreground/70',
+  weak: 'text-foreground/50',
+  disabled: 'text-foreground/35',
+  pill: 'bg-foreground/[0.055] text-foreground/70',
+  pillStrong: 'bg-foreground/[0.075] text-foreground/85',
+  link: 'text-accent',
+  danger: 'text-destructive',
+  success: 'text-success',
+  orange: 'text-info',
 } as const
 const EMPTY_FILTERS: RequirementBoardFilters = {
   workspaceId: '',
@@ -80,6 +83,36 @@ interface RequirementBoardCache {
   listOrder: string[]
   lastSyncedAt?: number
   total?: number
+}
+
+interface ParsedTapdRequirementLink {
+  workspaceId?: string
+  sourceItemId: string
+}
+
+function parseTapdRequirementLink(value: string): ParsedTapdRequirementLink | null {
+  const raw = value.trim()
+  if (!raw) return null
+
+  const decoded = (() => {
+    try {
+      return decodeURIComponent(raw)
+    } catch {
+      return raw
+    }
+  })()
+  const workspaceId = decoded.match(/tapd_fe\/(\d{6,})/)?.[1]
+    ?? decoded.match(/https?:\/\/[^/]+\/(\d{6,})(?=\/)/)?.[1]
+    ?? decoded.match(/#\/(\d{6,})(?=\/)/)?.[1]
+    ?? decoded.match(/^\/?(\d{6,})(?=\/)/)?.[1]
+    ?? decoded.match(/[?&]workspace_id=(\d{6,})/)?.[1]
+  const directStoryId = decoded.match(/^\d{10,}$/)?.[0]
+  const detailStoryId = decoded.match(/\/story\/detail\/(\d{10,})/)?.[1]
+    ?? decoded.match(/\/stories\/view\/(\d{10,})/)?.[1]
+  const longNumericIds = decoded.match(/\d{10,}/g) ?? []
+  const sourceItemId = directStoryId ?? detailStoryId ?? longNumericIds.at(-1)
+
+  return sourceItemId ? { ...(workspaceId ? { workspaceId } : {}), sourceItemId } : null
 }
 
 function getFilterStorageKey(workspaceId: string | null | undefined) {
@@ -319,6 +352,10 @@ export function RequirementBoard() {
   const [cache, setCache] = React.useState<RequirementBoardCache>(() => readCache(activeWorkspaceId, readSavedFilters(activeWorkspaceId)))
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [linkPanelOpen, setLinkPanelOpen] = React.useState(false)
+  const [linkInput, setLinkInput] = React.useState('')
+  const [linkError, setLinkError] = React.useState<string | null>(null)
+  const [addingFromLink, setAddingFromLink] = React.useState(false)
 
   const plugin = plugins.find(item => item.id === TAPD_PLUGIN_ID)
   const connected = plugin?.connectionStatus === 'connected'
@@ -368,6 +405,46 @@ export function RequirementBoard() {
     }
   }, [activeWorkspaceId, connected, filters, plugin?.connectionError, tapdInstalled])
 
+  const addRequirementFromLink = React.useCallback(async () => {
+    if (!activeWorkspaceId || !tapdInstalled) return
+    const parsed = parseTapdRequirementLink(linkInput)
+    if (!parsed) {
+      setLinkError('Paste a TAPD requirement link or story ID.')
+      return
+    }
+    const currentWorkspaceId = filters.workspaceId.trim()
+    const workspaceId = parsed.workspaceId ?? currentWorkspaceId
+    if (!workspaceId) {
+      setLinkError('This link does not include a workspace_id. Set the workspace first, then try again.')
+      return
+    }
+    if (parsed.workspaceId && currentWorkspaceId && parsed.workspaceId !== currentWorkspaceId) {
+      setLinkError(`This link belongs to workspace ${parsed.workspaceId}. Switch workspace first to add it there.`)
+      return
+    }
+    if (!connected) {
+      setLinkError(plugin?.connectionError || 'TAPD source is not connected. Test or enable tapd-mcp-http first.')
+      return
+    }
+
+    const targetFilters: RequirementBoardFilters = currentWorkspaceId ? filters : { ...filters, workspaceId }
+    setAddingFromLink(true)
+    setLinkError(null)
+    try {
+      const result = await window.electronAPI.getRequirementItemDetail(activeWorkspaceId, TAPD_PLUGIN_ID, parsed.sourceItemId, toListFilters(targetFilters, workspaceId))
+      const nextCache = upsertCachedItem(activeWorkspaceId, targetFilters, result.item)
+      if (!currentWorkspaceId) setFilters(targetFilters)
+      setCache(nextCache)
+      setLinkInput('')
+      setLinkPanelOpen(false)
+      toast.success('TAPD requirement added')
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAddingFromLink(false)
+    }
+  }, [activeWorkspaceId, connected, filters, linkInput, plugin?.connectionError, tapdInstalled])
+
   const updateFilter = React.useCallback(<K extends keyof RequirementBoardFilters>(key: K, value: RequirementBoardFilters[K]) => {
     setFilters(current => ({ ...current, [key]: value }))
   }, [])
@@ -401,10 +478,24 @@ export function RequirementBoard() {
               <span>{formatSyncTime(cache.lastSyncedAt)}</span>
             </div>
           </div>
-          <Button size="sm" variant="secondary" onClick={() => void refreshItems()} disabled={loading || !filters.workspaceId.trim()}>
-            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            Refresh from TAPD
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="active:scale-[0.98]"
+              onClick={() => {
+                setLinkPanelOpen(current => !current)
+                setLinkError(null)
+              }}
+            >
+              {linkPanelOpen ? <X className="h-3.5 w-3.5" /> : <Link2 className="h-3.5 w-3.5" />}
+              {linkPanelOpen ? 'Close link form' : 'Add by link'}
+            </Button>
+            <Button size="sm" variant="secondary" className="active:scale-[0.98]" onClick={() => void refreshItems()} disabled={loading || !filters.workspaceId.trim()}>
+              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Refresh from TAPD
+            </Button>
+          </div>
         </div>
 
         <div className="mt-5 grid gap-2 md:grid-cols-[minmax(220px,1fr)_140px_140px_140px_150px]">
@@ -419,13 +510,43 @@ export function RequirementBoard() {
             aria-label="Binding filter"
             value={filters.bindingState}
             onChange={event => updateFilter('bindingState', event.target.value as RequirementBoardFilters['bindingState'])}
-            className="h-9 rounded-[10px] border border-input bg-background px-3 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="h-9 rounded-[10px] border border-input bg-background px-3 text-sm text-foreground shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <option value="all">All binding states</option>
             <option value="unbound">Not linked</option>
             <option value="bound">Bound</option>
           </select>
         </div>
+
+        {linkPanelOpen && (
+          <div className="mt-3 rounded-[14px] bg-foreground/[0.025] px-3 py-3 ring-1 ring-foreground/[0.07]">
+            <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[10px] bg-background px-3 ring-1 ring-foreground/[0.08] focus-within:ring-accent/40">
+                <Link2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <Input
+                  aria-label="TAPD requirement link"
+                  value={linkInput}
+                  onChange={event => {
+                    setLinkInput(event.target.value)
+                    setLinkError(null)
+                  }}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') void addRequirementFromLink()
+                  }}
+                  placeholder="Paste a TAPD story link, for example .../tapd_fe/10045201/story/detail/101..."
+                  className="h-9 border-0 bg-transparent px-0 text-[13px] shadow-none focus-visible:ring-0"
+                />
+              </div>
+              <Button size="sm" className="active:scale-[0.98]" onClick={() => void addRequirementFromLink()} disabled={addingFromLink || !linkInput.trim()}>
+                {addingFromLink ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                Add requirement
+              </Button>
+            </div>
+            <div className={cn('mt-2 text-[12px]', linkError ? 'text-destructive' : 'text-muted-foreground')}>
+              {linkError ?? 'Adds the requirement to the current cached board. If no workspace is set, the link can provide workspace_id.'}
+            </div>
+          </div>
+        )}
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
@@ -700,7 +821,7 @@ function TapdMarkdownContent({ content, onOpenUrl, compact = false }: { content:
             const isBlock = Boolean(className)
             return isBlock
               ? <code className="text-[12px]">{children}</code>
-              : <code className="rounded bg-[#F1F2F4] px-1 py-0.5 text-[12px] dark:bg-[#18181B]">{children}</code>
+              : <code className="rounded bg-foreground/[0.06] px-1 py-0.5 text-[12px]">{children}</code>
           },
           pre: ({ children }) => <pre className={cn(compact ? 'my-2' : 'my-4', 'overflow-x-auto rounded-[12px] border p-3', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.border)}>{children}</pre>,
           table: ({ children }) => <div className={cn(compact ? 'my-2' : 'my-4', 'overflow-x-auto rounded-[12px] border', TAPD_DETAIL_THEME.border)}><table className="min-w-full text-[13px]">{children}</table></div>,
@@ -721,7 +842,7 @@ function RequirementContent({ item, onOpenUrl }: { item: ExternalRequirementItem
   const content = React.useMemo(() => prepareRequirementMarkdown(item), [item])
   if (!content) {
     return (
-      <div className={cn('rounded-[14px] px-5 py-4 text-[13px] ring-1', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.weak, 'ring-[#E5E5E8] dark:ring-[#29292B]')}>
+      <div className={cn('rounded-[14px] px-5 py-4 text-[13px] ring-1 ring-foreground/[0.08]', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.weak)}>
         No description available. Refresh item to pull the latest TAPD details.
       </div>
     )
@@ -995,7 +1116,7 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
             {loading && !item && <div className="h-[420px] rounded-[18px] bg-foreground/[0.035] animate-pulse" />}
 
             {!loading && !item && !error && (
-              <div className={cn('rounded-[18px] p-8 text-center ring-1', TAPD_DETAIL_THEME.subtlePanel, 'ring-[#E5E5E8] dark:ring-[#29292B]')}>
+              <div className={cn('rounded-[18px] p-8 text-center ring-1 ring-foreground/[0.08]', TAPD_DETAIL_THEME.subtlePanel)}>
                 <h2 className={cn('text-base font-semibold', TAPD_DETAIL_THEME.title)}>Requirement is not cached</h2>
                 <p className={cn('mx-auto mt-1 max-w-md text-sm', TAPD_DETAIL_THEME.weak)}>Open it from the board cache, or click Refresh item to fetch this requirement from TAPD.</p>
                 <Button className="mt-4 h-7 rounded-[7px] px-2 text-[12px]" size="sm" variant="secondary" onClick={() => void refreshDetail()}>Refresh item</Button>
