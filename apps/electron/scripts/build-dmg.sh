@@ -100,7 +100,9 @@ cd "$ROOT_DIR"
 # rg binary is staged explicitly below from vendored platform packages or PATH.
 bun install --ignore-scripts
 
-# 3. Download Bun binary with checksum verification
+# 3. Download Bun binary with checksum verification. If GitHub release assets
+# are temporarily unavailable, fall back to a matching local Bun binary so local
+# packaging is not blocked by DNS/rate-limit issues.
 echo "Downloading Bun ${BUN_VERSION} for darwin-${ARCH}..."
 mkdir -p "$ELECTRON_DIR/vendor/bun"
 BUN_DOWNLOAD="bun-darwin-$([ "$ARCH" = "arm64" ] && echo "aarch64" || echo "x64")"
@@ -109,20 +111,43 @@ BUN_DOWNLOAD="bun-darwin-$([ "$ARCH" = "arm64" ] && echo "aarch64" || echo "x64"
 TEMP_DIR=$(mktemp -d)
 trap "rm -rf $TEMP_DIR" EXIT
 
-# Download binary and checksums
-curl -fSL "https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/${BUN_DOWNLOAD}.zip" -o "$TEMP_DIR/${BUN_DOWNLOAD}.zip"
-curl -fSL "https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/SHASUMS256.txt" -o "$TEMP_DIR/SHASUMS256.txt"
+stage_local_bun_fallback() {
+    local local_bun
+    local local_arch
+    local_bun="$(command -v bun || true)"
+    if [ -z "$local_bun" ] || [ ! -x "$local_bun" ]; then
+        echo "ERROR: Failed to download Bun and no local bun executable is available on PATH."
+        exit 1
+    fi
+    local_arch="$(file "$local_bun" | grep -oE 'arm64|x86_64' | head -1 || true)"
+    if [ "$ARCH" = "arm64" ] && [ "$local_arch" != "arm64" ]; then
+        echo "ERROR: Local bun at $local_bun is not arm64 (${local_arch:-unknown})."
+        exit 1
+    fi
+    if [ "$ARCH" = "x64" ] && [ "$local_arch" != "x86_64" ]; then
+        echo "ERROR: Local bun at $local_bun is not x64 (${local_arch:-unknown})."
+        exit 1
+    fi
+    echo "Warning: Using local Bun fallback: $local_bun ($("$local_bun" --version))"
+    cp "$local_bun" "$ELECTRON_DIR/vendor/bun/bun"
+    chmod +x "$ELECTRON_DIR/vendor/bun/bun"
+}
 
-# Verify checksum
-echo "Verifying checksum..."
-cd "$TEMP_DIR"
-grep "${BUN_DOWNLOAD}.zip" SHASUMS256.txt | shasum -a 256 -c -
-cd - > /dev/null
+# Download binary and checksums. Keep the checksum path for reproducible release
+# builds, but allow local fallback for one-off packaging when GitHub is down.
+if curl -fSL "https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/${BUN_DOWNLOAD}.zip" -o "$TEMP_DIR/${BUN_DOWNLOAD}.zip" \
+  && curl -fSL "https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/SHASUMS256.txt" -o "$TEMP_DIR/SHASUMS256.txt"; then
+    echo "Verifying checksum..."
+    cd "$TEMP_DIR"
+    grep "${BUN_DOWNLOAD}.zip" SHASUMS256.txt | shasum -a 256 -c -
+    cd - > /dev/null
 
-# Extract and install
-unzip -o "$TEMP_DIR/${BUN_DOWNLOAD}.zip" -d "$TEMP_DIR"
-cp "$TEMP_DIR/${BUN_DOWNLOAD}/bun" "$ELECTRON_DIR/vendor/bun/"
-chmod +x "$ELECTRON_DIR/vendor/bun/bun"
+    unzip -o "$TEMP_DIR/${BUN_DOWNLOAD}.zip" -d "$TEMP_DIR"
+    cp "$TEMP_DIR/${BUN_DOWNLOAD}/bun" "$ELECTRON_DIR/vendor/bun/"
+    chmod +x "$ELECTRON_DIR/vendor/bun/bun"
+else
+    stage_local_bun_fallback
+fi
 
 # 4. Copy SDK from root node_modules (monorepo hoisting)
 # Note: The SDK is hoisted to root node_modules by the package manager.
