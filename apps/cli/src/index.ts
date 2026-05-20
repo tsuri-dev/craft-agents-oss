@@ -38,8 +38,6 @@ export interface CliArgs {
   model: string
   apiKey: string
   baseUrl: string
-  // File attachments (for `send` / `run`)
-  files: string[]
 }
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -65,7 +63,6 @@ export function parseArgs(argv: string[]): CliArgs {
   let model = ''
   let apiKey = ''
   let baseUrl = ''
-  const files: string[] = []
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -129,10 +126,6 @@ export function parseArgs(argv: string[]): CliArgs {
       case '--base-url':
         baseUrl = args[++i] ?? ''
         break
-      case '--file':
-      case '-f':
-        files.push(args[++i] ?? '')
-        break
       case '--help':
       case '-h':
         command = 'help'
@@ -161,7 +154,7 @@ export function parseArgs(argv: string[]): CliArgs {
   if (!apiKey) apiKey = process.env.LLM_API_KEY ?? ''
   if (!baseUrl) baseUrl = process.env.LLM_BASE_URL ?? ''
 
-  return { url, token, workspace, timeout, json, tlsCa, sendTimeout, command, rest, sources, mode, outputFormat, noCleanup, noSpinner, verbose, serverEntry, workspaceDir, provider, model, apiKey, baseUrl, files }
+  return { url, token, workspace, timeout, json, tlsCa, sendTimeout, command, rest, sources, mode, outputFormat, noCleanup, noSpinner, verbose, serverEntry, workspaceDir, provider, model, apiKey, baseUrl }
 }
 
 // ---------------------------------------------------------------------------
@@ -411,7 +404,6 @@ async function sendAndStream(
   sessionId: string,
   message: string,
   args: CliArgs,
-  attachments?: import('@craft-agent/shared/utils/files').FileAttachment[],
 ): Promise<number> {
   let exitCode = 0
   let finished = false
@@ -460,7 +452,7 @@ async function sendAndStream(
     }
   })
 
-  await client.invoke('sessions:sendMessage', sessionId, message, attachments)
+  await client.invoke('sessions:sendMessage', sessionId, message)
 
   const deadline = Date.now() + args.sendTimeout
   while (!finished && Date.now() < deadline) {
@@ -480,401 +472,20 @@ async function sendAndStream(
 async function cmdSend(client: CliRpcClient, args: CliArgs): Promise<void> {
   const sessionId = args.rest[0]
   if (!sessionId) {
-    err('Usage: send <session-id> <message> [--file <path>...]')
+    err('Usage: send <session-id> <message>')
     process.exit(1)
   }
 
   const message = await readPrompt(args.rest.slice(1), args.rest)
-
-  // Read file attachments (optional)
-  let attachments: import('@craft-agent/shared/utils/files').FileAttachment[] | undefined
-  if (args.files.length > 0) {
-    const { readFileAttachment } = await import('@craft-agent/shared/utils/files')
-    attachments = []
-    for (const f of args.files) {
-      try {
-        const att = readFileAttachment(f)
-        if (!att) {
-          err(`File not found or not a regular file: ${f}`)
-          process.exit(1)
-        }
-        attachments.push(att)
-      } catch (e) {
-        err(`Failed to read attachment ${f}: ${e instanceof Error ? e.message : String(e)}`)
-        process.exit(1)
-      }
-    }
-  }
-
-  // Allow empty message when attachments are provided (default to a placeholder)
-  let finalMessage = message
-  if (!finalMessage.trim()) {
-    if (attachments && attachments.length > 0) {
-      finalMessage = ''  // model will see attachments only
-    } else {
-      err('No message provided')
-      process.exit(1)
-    }
+  if (!message.trim()) {
+    err('No message provided')
+    process.exit(1)
   }
 
   await client.connect()
-  const exitCode = await sendAndStream(client, sessionId, finalMessage, args, attachments)
+  const exitCode = await sendAndStream(client, sessionId, message, args)
   client.destroy()
   process.exit(exitCode)
-}
-
-// ---------------------------------------------------------------------------
-// Interactive chat REPL
-// ---------------------------------------------------------------------------
-
-export type ChatLaunchRequest =
-  | { kind: 'pick' }
-  | { kind: 'new'; name?: string }
-  | { kind: 'existing'; sessionId: string }
-
-export function parseChatLaunchArgs(rest: string[]): ChatLaunchRequest {
-  const first = rest[0]
-  if (!first) return { kind: 'pick' }
-  if (first === 'new') {
-    const name = rest.slice(1).join(' ').trim()
-    return name ? { kind: 'new', name } : { kind: 'new' }
-  }
-  return { kind: 'existing', sessionId: first }
-}
-
-async function cmdChat(client: CliRpcClient, args: CliArgs): Promise<void> {
-  const readline = await import('node:readline')
-  const path = await import('node:path')
-  const fs = await import('node:fs')
-  const os = await import('node:os')
-  const { readFileAttachment } = await import('@craft-agent/shared/utils/files')
-
-  await client.connect()
-  let currentWorkspaceId = await resolveWorkspace(client, args.workspace)
-
-  // Helper: ensure the WS is still alive; if not, reconnect + rebind workspace
-  const ensureConnected = async (): Promise<void> => {
-    if (client.isConnected) return
-    process.stdout.write('\x1b[2m[reconnecting...]\x1b[0m\n')
-    await client.connect()
-    currentWorkspaceId = await resolveWorkspace(client, args.workspace)
-  }
-
-  // Keepalive: cheap RPC every 15s to keep the server's heartbeat happy
-  // (Bun's browser-style WebSocket does not always auto-pong)
-  const keepaliveTimer = setInterval(() => {
-    if (client.isConnected) {
-      client.invoke('server:getStatus').catch(() => {})
-    }
-  }, 15_000)
-
-  const fetchSessions = async (): Promise<Array<{ id: string; name?: string; preview?: string; isProcessing?: boolean }>> => {
-    await ensureConnected()
-    return (await client.invoke('sessions:get')) as Array<{ id: string; name?: string; preview?: string; isProcessing?: boolean }>
-  }
-
-  // Read history (load before creating rl so it can pre-populate)
-  const histPath = path.join(os.homedir(), '.craft-cli-history')
-  let history: string[] = []
-  try { history = fs.readFileSync(histPath, 'utf8').split('\n').filter(Boolean).slice(-500) } catch {}
-
-  // Create the readline ONCE; we use rl.question() for the picker too.
-  // (Do NOT spin up a throwaway readline for the picker — closing it
-  // ends stdin, which then synthetically closes the main rl and triggers
-  // client.destroy(). That's why early versions reported 'Client destroyed'
-  // on the first message after picking.)
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    terminal: true,
-    history: history.slice().reverse(),
-    historySize: 500,
-    prompt: '',
-  })
-  const askOnce = (q: string): Promise<string> =>
-    new Promise((resolve) => rl.question(q, (a) => resolve(a)))
-
-  // Resolve initial session id: new > explicit id > pick from list
-  const launch = parseChatLaunchArgs(args.rest)
-  let sessionId: string | undefined
-  if (launch.kind === 'new') {
-    const wsId = currentWorkspaceId ?? await resolveWorkspace(client, args.workspace)
-    if (!wsId) {
-      process.stdout.write('No workspace available. Use --workspace <id>\n')
-      rl.close()
-      client.destroy()
-      process.exit(1)
-    }
-    const created = (await client.invoke('sessions:create', wsId, { name: launch.name })) as { id: string }
-    sessionId = created.id
-  } else if (launch.kind === 'existing') {
-    sessionId = launch.sessionId
-  } else {
-    const sessions = await fetchSessions()
-    if (!sessions.length) {
-      process.stdout.write('No sessions yet. Create one in the desktop app first, or run: craft-cli session create --name <name>\n')
-      rl.close()
-      client.destroy()
-      process.exit(1)
-    }
-    process.stdout.write('Pick a session:\n')
-    sessions.slice(0, 30).forEach((s, i) => {
-      const tag = s.isProcessing ? ' [processing]' : ''
-      process.stdout.write(`  [${String(i + 1).padStart(2)}] ${s.id}  ${s.name ?? ''}  ${truncate(s.preview ?? '', 50)}${tag}\n`)
-    })
-    const ans = (await askOnce('Number (or session-id): ')).trim()
-    const asNum = parseInt(ans, 10)
-    if (!isNaN(asNum) && asNum >= 1 && asNum <= sessions.length) {
-      sessionId = sessions[asNum - 1]!.id
-    } else if (ans) {
-      sessionId = ans
-    } else {
-      rl.close()
-      client.destroy()
-      process.exit(0)
-    }
-  }
-
-  // Queued attachments for the next message
-  let queued: import('@craft-agent/shared/utils/files').FileAttachment[] = []
-
-  // Streaming state
-  let processing = false
-  let currentExitCode = 0
-  let resolveDone: (() => void) | null = null
-
-  const eventUnsub = client.on('session:event', (event: unknown) => {
-    const ev = event as { type: string; sessionId: string; [key: string]: unknown }
-    if (ev.sessionId !== sessionId) return
-    switch (ev.type) {
-      case 'text_delta':
-        process.stdout.write(ev.delta as string)
-        break
-      case 'tool_start':
-        process.stdout.write(`\n\x1b[2m[tool: ${ev.toolName}${ev.toolIntent ? ` — ${ev.toolIntent}` : ''}]\x1b[0m\n`)
-        break
-      case 'tool_result': {
-        const result = String(ev.result ?? '')
-        if (result.length > 200) {
-          process.stdout.write(`\x1b[2m${result.slice(0, 200)}...\x1b[0m\n`)
-        } else if (result) {
-          process.stdout.write(`\x1b[2m${result}\x1b[0m\n`)
-        }
-        break
-      }
-      case 'error':
-        process.stdout.write(`\n\x1b[31m[error] ${String(ev.error)}\x1b[0m\n`)
-        currentExitCode = 1
-        processing = false
-        resolveDone?.()
-        break
-      case 'complete':
-        process.stdout.write('\n')
-        processing = false
-        resolveDone?.()
-        break
-      case 'interrupted':
-        process.stdout.write('\n\x1b[33m[interrupted]\x1b[0m\n')
-        processing = false
-        resolveDone?.()
-        break
-    }
-  })
-
-  const histPath2 = histPath  // already defined above; keep symbol stable
-  void histPath2
-
-  const setPrompt = () => {
-    const tag = queued.length ? `\x1b[36m[+${queued.length}]\x1b[0m ` : ''
-    rl.setPrompt(`${tag}\x1b[35m${shortId(sessionId!)}\x1b[0m \x1b[1m›\x1b[0m `)
-  }
-
-  const persistHistory = () => {
-    try {
-      const h = (rl as unknown as { history: string[] }).history
-      fs.writeFileSync(histPath, h.slice().reverse().filter(Boolean).join('\n') + '\n')
-    } catch {}
-  }
-
-  process.stdout.write(`\x1b[2mConnected to session \x1b[0m\x1b[35m${sessionId}\x1b[0m\x1b[2m. Type /help for commands, Ctrl-D to exit.\x1b[0m` + '\n')
-  setPrompt()
-  rl.prompt()
-
-  rl.on('SIGINT', () => {
-    if (processing) {
-      // Cancel current processing, stay in REPL
-      client.invoke('sessions:cancel', sessionId, false).catch(() => {})
-    } else {
-      // Empty line + Ctrl-C → exit
-      process.stdout.write('' + '\n')
-      rl.close()
-    }
-  })
-
-  rl.on('line', async (rawLine) => {
-    const line = rawLine.trim()
-    if (processing) {
-      // Ignore input while streaming (user can Ctrl-C to cancel)
-      return
-    }
-    if (!line) {
-      rl.prompt()
-      return
-    }
-
-    // Slash commands
-    if (line.startsWith('/')) {
-      const [cmd, ...rest] = line.slice(1).split(/\s+/)
-      const argLine = rest.join(' ').trim()
-      try {
-        switch (cmd) {
-          case 'help':
-          case '?':
-            process.stdout.write(`\x1b[2mCommands:
-  /help                       Show this help
-  /sessions                   List recent sessions
-  /switch <id|number>         Switch to another session
-  /new [name]                 Create a new session and switch to it
-  /attach <path>  (or /f)     Queue a file to send with next message
-  /files                      Show queued attachments
-  /clear                      Clear queued attachments
-  /cancel                     Cancel in-progress processing
-  /history [n]                Show last n messages (default 10)
-  /exit  /quit                Exit (or Ctrl-D)\x1b[0m` + '\n')
-            break
-          case 'sessions': {
-            const list = await fetchSessions()
-            list.slice(0, 20).forEach((s, i) => {
-              const here = s.id === sessionId ? '\x1b[32m●\x1b[0m' : ' '
-              const tag = s.isProcessing ? ' [processing]' : ''
-              process.stdout.write(`${here} [${String(i + 1).padStart(2)}] ${s.id}  ${s.name ?? ''}  ${truncate(s.preview ?? '', 40)}${tag}` + '\n')
-            })
-            break
-          }
-          case 'switch': {
-            if (!argLine) { process.stdout.write('Usage: /switch <id|number>' + '\n'); break }
-            const list = await fetchSessions()
-            const asNum = parseInt(argLine, 10)
-            const target = (!isNaN(asNum) && list[asNum - 1]) ? list[asNum - 1]!.id : argLine
-            sessionId = target
-            queued = []
-            process.stdout.write(`\x1b[2mSwitched to \x1b[0m\x1b[35m${sessionId}\x1b[0m` + '\n')
-            break
-          }
-          case 'new': {
-            const wsId = currentWorkspaceId ?? await resolveWorkspace(client, args.workspace)
-            if (!wsId) { process.stdout.write('No workspace available' + '\n'); break }
-            const created = (await client.invoke('sessions:create', wsId, { name: argLine || undefined })) as { id: string }
-            sessionId = created.id
-            queued = []
-            process.stdout.write(`\x1b[2mCreated and switched to \x1b[0m\x1b[35m${sessionId}\x1b[0m` + '\n')
-            break
-          }
-          case 'attach':
-          case 'f':
-          case 'file': {
-            if (!argLine) { process.stdout.write('Usage: /attach <path>' + '\n'); break }
-            try {
-              const att = readFileAttachment(argLine)
-              if (!att) { process.stdout.write(`\x1b[31mFile not found: ${argLine}\x1b[0m` + '\n'); break }
-              queued.push(att)
-              process.stdout.write(`\x1b[2m+ ${att.name} (${att.type}, ${att.size}B)\x1b[0m` + '\n')
-            } catch (e) {
-              process.stdout.write(`\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m` + '\n')
-            }
-            break
-          }
-          case 'files': {
-            if (!queued.length) { process.stdout.write('\x1b[2m(no queued attachments)\x1b[0m' + '\n'); break }
-            queued.forEach((a, i) => process.stdout.write(`  [${i + 1}] ${a.name}  (${a.type}, ${a.size}B)` + '\n'))
-            break
-          }
-          case 'clear':
-            queued = []
-            process.stdout.write('\x1b[2mCleared queued attachments.\x1b[0m' + '\n')
-            break
-          case 'cancel':
-            await client.invoke('sessions:cancel', sessionId, false).catch(() => {})
-            process.stdout.write('\x1b[2mCancel requested.\x1b[0m' + '\n')
-            break
-          case 'history': {
-            const n = parseInt(argLine, 10) || 10
-            const info = (await client.invoke('sessions:getMessages', sessionId)) as { messages?: Array<{ role: string; content: string }> }
-            const msgs = (info.messages ?? []).slice(-n)
-            for (const m of msgs) {
-              const tag = m.role === 'user' ? '\x1b[36muser\x1b[0m' : m.role === 'assistant' ? '\x1b[32massistant\x1b[0m' : `\x1b[31m${m.role}\x1b[0m`
-              process.stdout.write(`${tag}: ${truncate(m.content ?? '', 200)}` + '\n')
-            }
-            break
-          }
-          case 'exit':
-          case 'quit':
-          case 'q':
-            rl.close()
-            return
-          default:
-            process.stdout.write(`\x1b[31mUnknown command: /${cmd}\x1b[0m  (try /help)` + '\n')
-        }
-      } catch (e) {
-        process.stdout.write(`\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m` + '\n')
-      }
-      setPrompt()
-      rl.prompt()
-      return
-    }
-
-    // Normal message
-    processing = true
-    const attsToSend = queued.length ? queued : undefined
-    queued = []
-    const done = new Promise<void>((resolve) => { resolveDone = resolve })
-    try {
-      await ensureConnected()
-      await client.invoke('sessions:sendMessage', sessionId, line, attsToSend)
-    } catch (e) {
-      process.stdout.write(`\x1b[31m${e instanceof Error ? e.message : String(e)}\x1b[0m` + '\n')
-      processing = false
-      resolveDone = null
-      setPrompt()
-      rl.prompt()
-      return
-    }
-    await done
-    resolveDone = null
-    setPrompt()
-    rl.prompt()
-  })
-
-  rl.on('close', () => {
-    clearInterval(keepaliveTimer)
-    persistHistory()
-    eventUnsub()
-    client.destroy()
-    process.stdout.write('\x1b[2mbye.\x1b[0m' + '\n')
-    process.exit(currentExitCode)
-  })
-
-  // Block cmdChat from resolving while the REPL is alive. Without this,
-  // cmdChat returns as soon as the rl handlers are attached, which lets
-  // main()'s `finally { client.destroy() }` run and destroy the client
-  // out from under us. The rl 'close' handler above is what eventually
-  // ends the process.
-  await new Promise<never>(() => {})
-}
-
-function shortId(id: string): string {
-  // 260428-fit-opal -> fit-opal
-  const parts = id.split('-')
-  return parts.length >= 3 ? parts.slice(1).join('-') : id
-}
-
-function truncate(s: string, n: number): string {
-  return s.length > n ? s.slice(0, n) + '…' : s
-}
-
-function prompt(_question: string): Promise<string> {
-  // Deprecated. cmdChat uses its own rl.question() so it shares one readline.
-  return Promise.resolve('')
 }
 
 interface LocalServer {
@@ -2318,12 +1929,6 @@ Commands:
   session messages <id>  Print session message history
   session delete <id>    Delete a session
   send <id> <message>    Send message and stream AI response
-                         --file <path> / -f      Attach a file (repeatable)
-  chat                   Pick an existing session and enter REPL (alias: repl)
-  chat <id>              Enter REPL bound to an existing session
-  chat new [name]        Create a new session and enter REPL
-                         Slash commands inside: /help /sessions /switch /new
-                                                /attach /files /clear /cancel /exit
   cancel <id>            Cancel in-progress processing
   invoke <channel> [...] Raw RPC call with JSON args
   listen <channel>       Subscribe to push events (Ctrl+C to stop)
@@ -2342,8 +1947,6 @@ Examples:
   craft-cli ping
   craft-cli sessions
   craft-cli send abc-123 "What files are in the current directory?"
-  craft-cli send abc-123 "explain these" -f src/foo.ts -f src/bar.ts
-  craft-cli chat new "scratch task"
   echo "Summarize this" | craft-cli send abc-123
   craft-cli --validate-server
   craft-cli invoke system:homeDir
@@ -2443,10 +2046,6 @@ export async function main(argv: string[] = process.argv): Promise<void> {
       case 'send':
         await cmdSend(client, args)
         break // cmdSend calls process.exit
-      case 'chat':
-      case 'repl':
-        await cmdChat(client, args)
-        break // cmdChat calls process.exit
       case 'cancel':
         await cmdCancel(client, args)
         break
