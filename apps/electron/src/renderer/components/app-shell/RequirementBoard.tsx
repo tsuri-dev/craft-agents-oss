@@ -793,21 +793,28 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     setGroupName(cached ? cached.binding?.groupName ?? defaultGroupName(cached) : '')
   }, [activeWorkspaceId, sourceItemId, tapdInstalled])
 
-  React.useEffect(() => {
+  const refreshInfoFiles = React.useCallback(async () => {
     if (!activeWorkspaceId || !tapdInstalled) {
       setInfoFiles(null)
       return
     }
-    let cancelled = false
-    window.electronAPI.listRequirementInfoFiles(activeWorkspaceId, TAPD_PLUGIN_ID, sourceItemId)
-      .then(result => {
-        if (!cancelled) setInfoFiles(result)
-      })
-      .catch(() => {
-        if (!cancelled) setInfoFiles(null)
-      })
-    return () => { cancelled = true }
+    try {
+      const result = await window.electronAPI.listRequirementInfoFiles(activeWorkspaceId, TAPD_PLUGIN_ID, sourceItemId)
+      setInfoFiles(result)
+    } catch {
+      setInfoFiles(null)
+    }
   }, [activeWorkspaceId, sourceItemId, tapdInstalled])
+
+  React.useEffect(() => {
+    void refreshInfoFiles()
+  }, [refreshInfoFiles])
+
+  React.useEffect(() => {
+    const onFocus = () => { void refreshInfoFiles() }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [refreshInfoFiles])
 
   const groupSessions = React.useMemo(() => {
     if (!item?.binding) return []
@@ -1086,12 +1093,18 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
                   <div className={cn('min-w-0 truncate text-[12px]', TAPD_DETAIL_THEME.weak)} title={infoFiles?.infoDirPath}>
                     {infoFiles?.files.length ? `${infoFiles.files.length} file${infoFiles.files.length > 1 ? 's' : ''}` : 'No saved info yet'}
                   </div>
-                  {infoFiles?.infoDirPath && (
-                    <Button size="sm" variant="ghost" className={cn('h-7 rounded-[7px] px-2 text-[12px]', TAPD_DETAIL_THEME.secondary)} onClick={() => void window.electronAPI.showInFolder(infoFiles.infoDirPath)}>
-                      <FolderOpen className="h-3.5 w-3.5" />
-                      Open
+                  <div className="flex shrink-0 gap-1">
+                    <Button size="sm" variant="ghost" className={cn('h-7 rounded-[7px] px-2 text-[12px]', TAPD_DETAIL_THEME.secondary)} onClick={() => void refreshInfoFiles()}>
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Refresh
                     </Button>
-                  )}
+                    {infoFiles?.infoDirPath && (
+                      <Button size="sm" variant="ghost" className={cn('h-7 rounded-[7px] px-2 text-[12px]', TAPD_DETAIL_THEME.secondary)} onClick={() => void window.electronAPI.showInFolder(infoFiles.infoDirPath)}>
+                        <FolderOpen className="h-3.5 w-3.5" />
+                        Open
+                      </Button>
+                    )}
+                  </div>
                 </div>
 
                 {infoFiles?.files.length ? (
