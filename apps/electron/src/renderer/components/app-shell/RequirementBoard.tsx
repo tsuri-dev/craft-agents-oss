@@ -233,10 +233,6 @@ function RequirementCard({ item }: { item: ExternalRequirementItem }) {
   )
 }
 
-function buildSessionSeed(item: ExternalRequirementItem) {
-  return `Use this TAPD requirement as the working context.\n\nTAPD ID: ${item.sourceItemId}\nTitle: ${item.title}\nStatus: ${item.status ?? 'Unknown'}\nType: ${item.type ?? 'Unknown'}\nProject: ${item.project ?? 'Unknown'}\nAssignees: ${item.assignees?.join(', ') || 'Unknown'}\nRelease/Due: ${item.dueAt ?? 'Unknown'}\nSource: ${item.sourceUrl ?? 'Unknown'}\n\nSummary:\n${item.summary || 'No TAPD description summary available yet.'}\n\nStart by restating the requirement, identifying missing information, and proposing an implementation plan.`
-}
-
 function PluginUnavailableState() {
   return (
     <div className="flex h-full items-center justify-center bg-background p-8">
@@ -749,7 +745,7 @@ function RequirementSessionLogRow({ session }: { session: { id: string; name?: s
 }
 
 export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }) {
-  const { activeWorkspaceId, onOpenUrl, onInputChange, enabledSources, onSessionLabelsChange } = useAppShellContext()
+  const { activeWorkspaceId, onOpenUrl, enabledSources, onSessionLabelsChange } = useAppShellContext()
   const tapdInstalled = isTapdPluginInstalled(enabledSources)
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   const [item, setItem] = React.useState<ExternalRequirementItem | null>(() => readCache(activeWorkspaceId).itemsById[sourceItemId] ?? null)
@@ -852,10 +848,9 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
       return
     }
     const result = await window.electronAPI.createRequirementSessionForItem(activeWorkspaceId, { pluginId: TAPD_PLUGIN_ID, item, groupName: item.binding.groupName })
-    onInputChange(result.sessionId, buildSessionSeed(item))
     toast.success('Session created for requirement')
     navigate(routes.view.allSessions(result.sessionId))
-  }, [activeWorkspaceId, item, onInputChange])
+  }, [activeWorkspaceId, item])
 
   if (!tapdInstalled) return <PluginUnavailableState />
 
