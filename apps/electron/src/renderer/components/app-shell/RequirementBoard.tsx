@@ -746,7 +746,7 @@ function RequirementSessionLogRow({ session }: { session: { id: string; name?: s
 }
 
 export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }) {
-  const { activeWorkspaceId, onOpenUrl, enabledSources, onSessionLabelsChange } = useAppShellContext()
+  const { activeWorkspaceId, onOpenUrl, enabledSources, onSessionLabelsChange, onSessionOptionsChange } = useAppShellContext()
   const { navigateToSession } = useNavigation()
   const tapdInstalled = isTapdPluginInstalled(enabledSources)
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
@@ -856,9 +856,14 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     // auto-selection validator can find it and the requirement detail sidebar
     // shows the new linked session without a manual refresh.
     addSession(result.session)
+    // Keep the mode selector in sync with the authoritative session returned
+    // by the backend. Otherwise this direct RPC path falls back to the renderer
+    // default ('ask') before the session_created broadcast arrives, which can
+    // make the UI and injected <session_state> disagree.
+    onSessionOptionsChange(result.sessionId, { permissionMode: result.session.permissionMode ?? 'ask' })
     toast.success('Session created for requirement')
     navigateToSession(result.sessionId)
-  }, [activeWorkspaceId, addSession, item, navigateToSession])
+  }, [activeWorkspaceId, addSession, item, navigateToSession, onSessionOptionsChange])
 
   if (!tapdInstalled) return <PluginUnavailableState />
 

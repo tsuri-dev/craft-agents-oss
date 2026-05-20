@@ -649,6 +649,10 @@ export function registerRequirementsHandlers(server: RpcServer, deps: HandlerDep
     const session = await deps.sessionManager.createSession(workspaceId, {
       name: groupName,
       labels: buildRequirementLabels(input.item, groupName),
+      // TAPD-created sessions are work sessions, not read-only exploration sessions.
+      // Pin them to Ask so the visible mode and the agent prompt agree even when
+      // the workspace default is Explore/safe.
+      permissionMode: 'ask',
       // The TAPD requirement snapshot is stored once at workspace scope and the
       // session references it through its tapd::<id> label. Do not enable
       // tapd-mcp-http by default here; the session can read the shared snapshot
