@@ -559,7 +559,10 @@ export function registerRequirementsHandlers(server: RpcServer, deps: HandlerDep
     const session = await deps.sessionManager.createSession(workspaceId, {
       name: groupName,
       labels: buildRequirementLabels(input.item, groupName),
-      enabledSourceSlugs: [TAPD_SOURCE_SLUG],
+      // The TAPD requirement snapshot is already copied into the local plugin cache
+      // and seeded into the new session by the renderer. Do not enable tapd-mcp-http
+      // by default here; it adds MCP tools/context that this session does not need.
+      enabledSourceSlugs: [],
     })
     return { sessionId: session.id }
   })

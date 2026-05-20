@@ -8,7 +8,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
-- **TAPD link-only board** — Simplified the TAPD Requirement Board by removing direct workspace/list refresh and filter controls. The board now only imports full TAPD requirement links, fetches the matched requirement, and saves it to the local cache.
+- **TAPD link-only board** — Simplified the TAPD Requirement Board by removing direct workspace/list refresh and filter controls. The board now only imports full TAPD requirement links, fetches the matched requirement, and saves it to the local cache. Sessions created from saved TAPD requirements no longer enable the TAPD MCP source by default because the requirement context is already copied locally.
 - **GPT session controls** — Added a session-scoped Fast mode switch under the model picker’s thinking controls for GPT-5 Codex/ChatGPT connections, while keeping Extra High mapped to the existing `xhigh` reasoning level.
 - **Sidebar navigation cleanup** — Removed the experimental Stories sidebar workflow, moved Plugins ahead of Sources, and made All Sessions reset secondary filters when selected.
 
