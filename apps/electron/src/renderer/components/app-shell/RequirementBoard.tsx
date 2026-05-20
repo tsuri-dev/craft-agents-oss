@@ -786,6 +786,7 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
   const [groupName, setGroupName] = React.useState(() => item ? defaultGroupName(item) : '')
   const [editingGroup, setEditingGroup] = React.useState(false)
   const [infoFiles, setInfoFiles] = React.useState<RequirementInfoFilesResult | null>(null)
+  const [infoFilesError, setInfoFilesError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     const cached = tapdInstalled ? readCache(activeWorkspaceId).itemsById[sourceItemId] : undefined
@@ -793,16 +794,23 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     setGroupName(cached ? cached.binding?.groupName ?? defaultGroupName(cached) : '')
   }, [activeWorkspaceId, sourceItemId, tapdInstalled])
 
-  const refreshInfoFiles = React.useCallback(async () => {
+  const refreshInfoFiles = React.useCallback(async (options?: { notifyOnError?: boolean }) => {
     if (!activeWorkspaceId || !tapdInstalled) {
       setInfoFiles(null)
+      setInfoFilesError(null)
       return
     }
     try {
       const result = await window.electronAPI.listRequirementInfoFiles(activeWorkspaceId, TAPD_PLUGIN_ID, sourceItemId)
       setInfoFiles(result)
-    } catch {
+      setInfoFilesError(null)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setInfoFilesError(message)
       setInfoFiles(null)
+      if (options?.notifyOnError) {
+        toast.error('Could not refresh TAPD info files', { description: message })
+      }
     }
   }, [activeWorkspaceId, sourceItemId, tapdInstalled])
 
@@ -1008,7 +1016,7 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
         </ScrollArea>
       </div>
 
-      <aside className={cn('hidden w-[340px] shrink-0 border-l px-5 py-6 lg:block', TAPD_DETAIL_THEME.panel, TAPD_DETAIL_THEME.border)}>
+      <aside className={cn('hidden h-full min-h-0 w-[340px] shrink-0 overflow-y-auto overscroll-contain border-l px-5 py-6 lg:block', TAPD_DETAIL_THEME.panel, TAPD_DETAIL_THEME.border)}>
         {item ? (
           <div className="space-y-1">
             <DetailSection title="Properties">
@@ -1094,7 +1102,7 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
                     {infoFiles?.files.length ? `${infoFiles.files.length} file${infoFiles.files.length > 1 ? 's' : ''}` : 'No saved info yet'}
                   </div>
                   <div className="flex shrink-0 gap-1">
-                    <Button size="sm" variant="ghost" className={cn('h-7 rounded-[7px] px-2 text-[12px]', TAPD_DETAIL_THEME.secondary)} onClick={() => void refreshInfoFiles()}>
+                    <Button size="sm" variant="ghost" className={cn('h-7 rounded-[7px] px-2 text-[12px]', TAPD_DETAIL_THEME.secondary)} onClick={() => void refreshInfoFiles({ notifyOnError: true })}>
                       <RefreshCw className="h-3.5 w-3.5" />
                       Refresh
                     </Button>
@@ -1107,7 +1115,11 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
                   </div>
                 </div>
 
-                {infoFiles?.files.length ? (
+                {infoFilesError ? (
+                  <p className={cn('rounded-[10px] px-3 py-2 text-[12px] leading-5 text-destructive', TAPD_DETAIL_THEME.subtlePanel)}>
+                    Could not load info files: {infoFilesError}
+                  </p>
+                ) : infoFiles?.files.length ? (
                   <div className="space-y-1">
                     {infoFiles.files.slice(0, 5).map(file => <RequirementInfoFileRow key={file.relativePath} file={file} />)}
                   </div>
