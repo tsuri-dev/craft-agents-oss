@@ -2,7 +2,7 @@ import * as React from 'react'
 import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
-import { useAtomValue } from 'jotai'
+import { useAtomValue, useSetAtom } from 'jotai'
 import {
   ArrowLeft,
   ArrowRight,
@@ -25,7 +25,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { navigate, routes } from '@/lib/navigate'
 import { useNavigation } from '@/contexts/NavigationContext'
-import { sessionMetaMapAtom } from '@/atoms/sessions'
+import { addSessionAtom, sessionMetaMapAtom } from '@/atoms/sessions'
 import { sessionHasGroup } from '@/utils/session-group-filter'
 import { isTapdPluginInstalled, TAPD_PLUGIN_ID } from '@/utils/session-requirement-link'
 import { useAppShellContext } from '@/context/AppShellContext'
@@ -750,6 +750,7 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
   const { navigateToSession } = useNavigation()
   const tapdInstalled = isTapdPluginInstalled(enabledSources)
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
+  const addSession = useSetAtom(addSessionAtom)
   const [item, setItem] = React.useState<ExternalRequirementItem | null>(() => readCache(activeWorkspaceId).itemsById[sourceItemId] ?? null)
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -850,9 +851,14 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
       return
     }
     const result = await window.electronAPI.createRequirementSessionForItem(activeWorkspaceId, { pluginId: TAPD_PLUGIN_ID, item, groupName: item.binding.groupName })
+    // The generic session_created broadcast can arrive slightly after this RPC
+    // returns. Add the session to local atoms immediately so navigation's
+    // auto-selection validator can find it and the requirement detail sidebar
+    // shows the new linked session without a manual refresh.
+    addSession(result.session)
     toast.success('Session created for requirement')
     navigateToSession(result.sessionId)
-  }, [activeWorkspaceId, item, navigateToSession])
+  }, [activeWorkspaceId, addSession, item, navigateToSession])
 
   if (!tapdInstalled) return <PluginUnavailableState />
 

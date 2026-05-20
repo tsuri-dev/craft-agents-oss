@@ -286,6 +286,11 @@ export interface RequirementCreateSessionInput {
   groupName: string
 }
 
+export interface RequirementCreateSessionResult {
+  sessionId: string
+  session: Session
+}
+
 export interface CreateSessionOptions {
   name?: string
   permissionMode?: PermissionMode

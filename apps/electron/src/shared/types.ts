@@ -230,6 +230,7 @@ import type {
   RequirementBinding,
   RequirementUnlinkInput,
   RequirementCreateSessionInput,
+  RequirementCreateSessionResult,
 } from '@craft-agent/shared/protocol'
 
 export interface ElectronAPI {
@@ -257,7 +258,7 @@ export interface ElectronAPI {
   createRequirementGroupFromItem(workspaceId: string, input: RequirementBindInput): Promise<RequirementBinding>
   bindRequirementItemToGroup(workspaceId: string, input: RequirementBindInput): Promise<RequirementBinding>
   unlinkRequirementItemFromGroup(workspaceId: string, input: RequirementUnlinkInput): Promise<{ removed: boolean }>
-  createRequirementSessionForItem(workspaceId: string, input: RequirementCreateSessionInput): Promise<{ sessionId: string }>
+  createRequirementSessionForItem(workspaceId: string, input: RequirementCreateSessionInput): Promise<RequirementCreateSessionResult>
 
   // Server info (REMOTE_ELIGIBLE — returns data from whichever server owns the workspace)
   getServerHomeDir(): Promise<string>

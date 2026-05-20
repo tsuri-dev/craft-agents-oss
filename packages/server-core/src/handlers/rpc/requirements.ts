@@ -655,6 +655,6 @@ export function registerRequirementsHandlers(server: RpcServer, deps: HandlerDep
       // file instead of carrying TAPD MCP tool schemas/context.
       enabledSourceSlugs: [],
     })
-    return { sessionId: session.id }
+    return { sessionId: session.id, session }
   })
 }

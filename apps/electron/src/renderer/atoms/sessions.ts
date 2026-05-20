@@ -421,9 +421,10 @@ export const addSessionAtom = atom(
     newMetaMap.set(session.id, extractSessionMeta(session))
     set(sessionMetaMapAtom, newMetaMap)
 
-    // Add to beginning of IDs list
+    // Add to beginning of IDs list. If the session already arrived via a
+    // broadcast race, keep a single entry and move it to the top.
     const ids = get(sessionIdsAtom)
-    set(sessionIdsAtom, [session.id, ...ids])
+    set(sessionIdsAtom, [session.id, ...ids.filter(id => id !== session.id)])
 
     // Mark as loaded (new sessions are complete - no lazy loading needed)
     const loadedSessions = get(loadedSessionsAtom)
