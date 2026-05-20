@@ -95,7 +95,10 @@ rm -rf "$ELECTRON_DIR/release"
 # 2. Install dependencies
 echo "Installing dependencies..."
 cd "$ROOT_DIR"
-bun install
+# Skip dependency postinstall scripts during packaging. @vscode/ripgrep@1.17.x
+# downloads from GitHub in postinstall and can fail under API rate limits; the
+# rg binary is staged explicitly below from vendored platform packages or PATH.
+bun install --ignore-scripts
 
 # 3. Download Bun binary with checksum verification
 echo "Downloading Bun ${BUN_VERSION} for darwin-${ARCH}..."
@@ -185,8 +188,13 @@ require_path "$RG_SOURCE" "@vscode/ripgrep" "Run 'bun install' first."
 RG_BINARY="$RG_SOURCE/bin/rg"
 if [ ! -e "$RG_BINARY" ]; then
     RG_PLATFORM_SOURCE="$ROOT_DIR/node_modules/@vscode/ripgrep-darwin-$ARCH/bin/rg"
-    require_path "$RG_PLATFORM_SOURCE" "ripgrep platform binary" "@vscode/ripgrep 1.18+ stores rg in @vscode/ripgrep-darwin-$ARCH."
-    RG_BINARY="$RG_PLATFORM_SOURCE"
+    if [ -e "$RG_PLATFORM_SOURCE" ]; then
+        RG_BINARY="$RG_PLATFORM_SOURCE"
+    else
+        RG_PATH_BIN="$(command -v rg || true)"
+        require_path "$RG_PATH_BIN" "ripgrep binary" "Install rg or ensure @vscode/ripgrep provides a platform binary."
+        RG_BINARY="$RG_PATH_BIN"
+    fi
 fi
 echo "Copying @vscode/ripgrep..."
 mkdir -p "$ELECTRON_DIR/node_modules/@vscode"
