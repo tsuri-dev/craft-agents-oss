@@ -12,11 +12,14 @@
  * - Format user preferences for prompt injection
  */
 
+import { existsSync } from 'fs';
+import { join } from 'path';
 import { isLocalMcpEnabled } from '../../workspaces/storage.ts';
 import { formatPreferencesForPrompt } from '../../config/preferences.ts';
 import { formatSessionState } from '../mode-manager.ts';
 import { getDateTimeContext, getWorkingDirectoryContext } from '../../prompts/system.ts';
 import { getSessionPlansPath, getSessionDataPath, getSessionPath } from '../../sessions/storage.ts';
+import { parseLabelEntry } from '../../labels/values.ts';
 import type {
   PromptBuilderConfig,
   ContextBlockOptions,
@@ -93,6 +96,11 @@ export class PromptBuilder {
       parts.push(sourceStateBlock);
     }
 
+    const linkedRequirementContext = this.getLinkedRequirementContext();
+    if (linkedRequirementContext) {
+      parts.push(linkedRequirementContext);
+    }
+
     // Add workspace capabilities
     parts.push(this.formatWorkspaceCapabilities());
 
@@ -142,6 +150,29 @@ export class PromptBuilder {
       isSessionRoot,
       this.config.session?.sdkCwd
     );
+  }
+
+  getLinkedRequirementContext(): string | null {
+    const labels = this.config.session?.labels ?? [];
+    const tapdIds = labels
+      .map(label => parseLabelEntry(label))
+      .filter(parsed => parsed.id === 'tapd' && parsed.rawValue?.trim())
+      .map(parsed => parsed.rawValue!.trim());
+
+    const uniqueTapdIds = Array.from(new Set(tapdIds));
+    if (uniqueTapdIds.length === 0 || !this.workspaceRootPath) return null;
+
+    const entries = uniqueTapdIds.map((id) => {
+      const filePath = join(this.workspaceRootPath, 'requirements', 'tapd', `${id.replace(/[^a-zA-Z0-9._-]/g, '_') || 'unknown'}.md`);
+      return `- TAPD-${id}: ${filePath}${existsSync(filePath) ? '' : ' (snapshot not found yet — open or refresh the TAPD requirement from the plugin board)'}`;
+    });
+
+    return `<linked_requirements>
+This session is linked to workspace-level TAPD requirement snapshots.
+Read the referenced file when you need requirement details. These files are shared by all sessions linked to the same TAPD requirement, so refreshing the requirement updates the single shared snapshot for every session.
+Do not enable or call the TAPD MCP source unless the user explicitly asks to refresh/fetch live TAPD data.
+${entries.join('\n')}
+</linked_requirements>`;
   }
 
   getRemoteTargetContext(): string | null {

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
@@ -414,6 +414,87 @@ function buildRequirementLabels(item: ExternalRequirementItem, groupName: string
   return entries
 }
 
+function sanitizeRequirementFileName(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/g, '_') || 'unknown'
+}
+
+function getTapdRequirementSnapshotPath(workspaceRootPath: string, sourceItemId: string): string {
+  return join(workspaceRootPath, 'requirements', 'tapd', `${sanitizeRequirementFileName(sourceItemId)}.md`)
+}
+
+function compactValue(value: string | undefined): string | undefined {
+  const trimmed = value?.trim()
+  return trimmed || undefined
+}
+
+function formatRequirementSnapshotMarkdown(item: ExternalRequirementItem): string {
+  const lines: string[] = []
+  lines.push(`# TAPD-${item.sourceItemId}: ${item.title}`)
+  lines.push('')
+  lines.push('> Workspace-level shared TAPD requirement snapshot. Sessions reference this file through their `tapd::<id>` label. Refreshing the requirement updates this single file for every linked session.')
+  lines.push('')
+  lines.push('## Metadata')
+  lines.push('')
+  const metadata: Array<[string, string | undefined]> = [
+    ['TAPD ID', item.sourceItemId],
+    ['Title', item.title],
+    ['Status', item.status],
+    ['Type', item.type],
+    ['Priority', item.priority],
+    ['Project', item.project],
+    ['Assignees', item.assignees?.join(', ')],
+    ['Category', item.category],
+    ['Version', item.version],
+    ['Release', item.release],
+    ['Begin date', item.beginAt],
+    ['Due date', item.dueAt],
+    ['Created by', item.creator],
+    ['Created', item.createdAt],
+    ['Updated', item.updatedAt],
+    ['Source URL', item.sourceUrl],
+    ['Linked group', item.binding?.groupName],
+  ]
+  for (const [label, value] of metadata) {
+    const compact = compactValue(value)
+    if (compact) lines.push(`- ${label}: ${compact}`)
+  }
+
+  if (item.summary) {
+    lines.push('', '## Summary', '', item.summary.trim())
+  }
+
+  if (item.content) {
+    lines.push('', '## Description', '', item.content.trim())
+  }
+
+  if (item.contentImages?.length) {
+    lines.push('', '## Description images', '')
+    for (const image of item.contentImages) {
+      lines.push(`- ${image.src} → ${image.downloadUrl}`)
+    }
+  }
+
+  if (item.comments?.length) {
+    lines.push('', '## Comments', '')
+    for (const comment of item.comments) {
+      const timestamp = comment.updatedAt ?? comment.createdAt ?? ''
+      lines.push(`### ${comment.author}${timestamp ? ` · ${timestamp}` : ''}`)
+      if (comment.title) lines.push('', `**${comment.title}**`)
+      lines.push('', comment.body?.trim() || '_No visible content._', '')
+    }
+  }
+
+  lines.push('', '---', `Snapshot saved at ${new Date().toISOString()}`)
+  return `${lines.join('\n')}\n`
+}
+
+function writeTapdRequirementSnapshot(workspaceRootPath: string, item: ExternalRequirementItem): string {
+  const filePath = getTapdRequirementSnapshotPath(workspaceRootPath, item.sourceItemId)
+  mkdirSync(join(workspaceRootPath, 'requirements', 'tapd'), { recursive: true })
+  writeFileSync(filePath, formatRequirementSnapshotMarkdown(item), 'utf-8')
+  return filePath
+}
+
 function upsertBinding(workspaceRootPath: string, input: RequirementBindInput): RequirementBinding {
   const now = Date.now()
   const store = readBindingStore(workspaceRootPath)
@@ -429,16 +510,23 @@ function upsertBinding(workspaceRootPath: string, input: RequirementBindInput): 
   }
   store.bindings[key] = binding
   writeBindingStore(workspaceRootPath, store)
+  writeTapdRequirementSnapshot(workspaceRootPath, { ...input.item, binding })
   return binding
 }
 
 function removeBinding(workspaceRootPath: string, input: RequirementUnlinkInput): boolean {
   const store = readBindingStore(workspaceRootPath)
   const key = bindingKey(input.pluginId, input.sourceItemId)
-  const existed = Boolean(store.bindings[key])
+  const existing = store.bindings[key]
+  const existed = Boolean(existing)
   if (existed) {
     delete store.bindings[key]
     writeBindingStore(workspaceRootPath, store)
+    if (existing?.itemSnapshot) {
+      const item = { ...existing.itemSnapshot }
+      delete item.binding
+      writeTapdRequirementSnapshot(workspaceRootPath, item)
+    }
   }
   return existed
 }
@@ -530,7 +618,9 @@ export function registerRequirementsHandlers(server: RpcServer, deps: HandlerDep
       contentImages = extractDescImages(imagePayload)
       comments = normalizeTapdComments(commentsPayload)
     }
-    return { item: normalizeTapdStory(row ?? { id: sourceItemId }, filters.workspaceId, binding, contentImages, comments) }
+    const item = normalizeTapdStory(row ?? { id: sourceItemId }, filters.workspaceId, binding, contentImages, comments)
+    writeTapdRequirementSnapshot(workspace.rootPath, item)
+    return { item }
   })
 
   server.handle(RPC_CHANNELS.requirements.CREATE_GROUP_FROM_ITEM, async (_ctx, workspaceId: string, input: RequirementBindInput) => {
@@ -559,9 +649,10 @@ export function registerRequirementsHandlers(server: RpcServer, deps: HandlerDep
     const session = await deps.sessionManager.createSession(workspaceId, {
       name: groupName,
       labels: buildRequirementLabels(input.item, groupName),
-      // The TAPD requirement snapshot is already copied into the local plugin cache
-      // and seeded into the new session by the renderer. Do not enable tapd-mcp-http
-      // by default here; it adds MCP tools/context that this session does not need.
+      // The TAPD requirement snapshot is stored once at workspace scope and the
+      // session references it through its tapd::<id> label. Do not enable
+      // tapd-mcp-http by default here; the session can read the shared snapshot
+      // file instead of carrying TAPD MCP tool schemas/context.
       enabledSourceSlugs: [],
     })
     return { sessionId: session.id }
