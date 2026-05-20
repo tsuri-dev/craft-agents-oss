@@ -24,6 +24,7 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { navigate, routes } from '@/lib/navigate'
+import { useNavigation } from '@/contexts/NavigationContext'
 import { sessionMetaMapAtom } from '@/atoms/sessions'
 import { sessionHasGroup } from '@/utils/session-group-filter'
 import { isTapdPluginInstalled, TAPD_PLUGIN_ID } from '@/utils/session-requirement-link'
@@ -746,6 +747,7 @@ function RequirementSessionLogRow({ session }: { session: { id: string; name?: s
 
 export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }) {
   const { activeWorkspaceId, onOpenUrl, enabledSources, onSessionLabelsChange } = useAppShellContext()
+  const { navigateToSession } = useNavigation()
   const tapdInstalled = isTapdPluginInstalled(enabledSources)
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   const [item, setItem] = React.useState<ExternalRequirementItem | null>(() => readCache(activeWorkspaceId).itemsById[sourceItemId] ?? null)
@@ -849,8 +851,8 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     }
     const result = await window.electronAPI.createRequirementSessionForItem(activeWorkspaceId, { pluginId: TAPD_PLUGIN_ID, item, groupName: item.binding.groupName })
     toast.success('Session created for requirement')
-    navigate(routes.view.allSessions(result.sessionId))
-  }, [activeWorkspaceId, item])
+    navigateToSession(result.sessionId)
+  }, [activeWorkspaceId, item, navigateToSession])
 
   if (!tapdInstalled) return <PluginUnavailableState />
 
