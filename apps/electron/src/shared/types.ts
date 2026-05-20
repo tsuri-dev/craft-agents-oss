@@ -226,6 +226,7 @@ import type {
   RequirementListFilters,
   RequirementListResult,
   RequirementDetailResult,
+  RequirementInfoFilesResult,
   RequirementBindInput,
   RequirementBinding,
   RequirementUnlinkInput,
@@ -255,6 +256,7 @@ export interface ElectronAPI {
   listRequirementPlugins(workspaceId: string): Promise<RequirementPluginDescriptor[]>
   listRequirementItems(workspaceId: string, pluginId: string, filters: RequirementListFilters): Promise<RequirementListResult>
   getRequirementItemDetail(workspaceId: string, pluginId: string, sourceItemId: string, filters?: RequirementListFilters): Promise<RequirementDetailResult>
+  listRequirementInfoFiles(workspaceId: string, pluginId: string, sourceItemId: string): Promise<RequirementInfoFilesResult>
   createRequirementGroupFromItem(workspaceId: string, input: RequirementBindInput): Promise<RequirementBinding>
   bindRequirementItemToGroup(workspaceId: string, input: RequirementBindInput): Promise<RequirementBinding>
   unlinkRequirementItemFromGroup(workspaceId: string, input: RequirementUnlinkInput): Promise<{ removed: boolean }>

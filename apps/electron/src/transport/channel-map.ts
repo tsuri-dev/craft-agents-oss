@@ -222,6 +222,7 @@ export const CHANNEL_MAP = {
   listRequirementPlugins: invoke(RPC_CHANNELS.requirementPlugins.LIST),
   listRequirementItems: invoke(RPC_CHANNELS.requirements.LIST_ITEMS),
   getRequirementItemDetail: invoke(RPC_CHANNELS.requirements.GET_ITEM_DETAIL),
+  listRequirementInfoFiles: invoke(RPC_CHANNELS.requirements.LIST_INFO_FILES),
   createRequirementGroupFromItem: invoke(RPC_CHANNELS.requirements.CREATE_GROUP_FROM_ITEM),
   bindRequirementItemToGroup: invoke(RPC_CHANNELS.requirements.BIND_ITEM_TO_GROUP),
   unlinkRequirementItemFromGroup: invoke(RPC_CHANNELS.requirements.UNLINK_ITEM_FROM_GROUP),

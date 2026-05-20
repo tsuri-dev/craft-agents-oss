@@ -12,7 +12,7 @@
  * - Format user preferences for prompt injection
  */
 
-import { existsSync } from 'fs';
+import { existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { isLocalMcpEnabled } from '../../workspaces/storage.ts';
 import { formatPreferencesForPrompt } from '../../config/preferences.ts';
@@ -152,6 +152,36 @@ export class PromptBuilder {
     );
   }
 
+  private listRequirementInfoFiles(infoDir: string): string[] {
+    const files: string[] = [];
+
+    const visit = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name.startsWith('.')) continue;
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          visit(path);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        const stats = statSync(path);
+        if (stats.size > 2 * 1024 * 1024) {
+          files.push(`${path} (${Math.round(stats.size / 1024 / 1024)} MB; read selectively)`);
+        } else {
+          files.push(path);
+        }
+      }
+    };
+
+    try {
+      visit(infoDir);
+    } catch {
+      return [];
+    }
+
+    return files.sort();
+  }
+
   getLinkedRequirementContext(): string | null {
     const labels = this.config.session?.labels ?? [];
     const tapdIds = labels
@@ -162,14 +192,31 @@ export class PromptBuilder {
     const uniqueTapdIds = Array.from(new Set(tapdIds));
     if (uniqueTapdIds.length === 0 || !this.workspaceRootPath) return null;
 
-    const entries = uniqueTapdIds.map((id) => {
-      const filePath = join(this.workspaceRootPath, 'requirements', 'tapd', `${id.replace(/[^a-zA-Z0-9._-]/g, '_') || 'unknown'}.md`);
-      return `- TAPD-${id}: ${filePath}${existsSync(filePath) ? '' : ' (snapshot not found yet — open or refresh the TAPD requirement from the plugin board)'}`;
+    const entries = uniqueTapdIds.flatMap((id) => {
+      const safeId = id.replace(/[^a-zA-Z0-9._-]/g, '_') || 'unknown';
+      const filePath = join(this.workspaceRootPath, 'requirements', 'tapd', `${safeId}.md`);
+      const infoDir = join(this.workspaceRootPath, 'requirements', 'tapd', safeId, 'info');
+      const lines = [
+        `- TAPD-${id} snapshot: ${filePath}${existsSync(filePath) ? '' : ' (snapshot not found yet — open or refresh the TAPD requirement from the plugin board)'}`,
+        `  - Info directory: ${infoDir}${existsSync(infoDir) ? '' : ' (not created yet)'}`,
+      ];
+
+      if (existsSync(infoDir)) {
+        const infoFiles = this.listRequirementInfoFiles(infoDir);
+        if (infoFiles.length > 0) {
+          lines.push(...infoFiles.map(path => `  - Info file: ${path}`));
+        } else {
+          lines.push('  - Info files: none yet. Save handoff notes or implementation plans here when the user asks to preserve TAPD-related context.');
+        }
+      }
+
+      return lines;
     });
 
     return `<linked_requirements>
-This session is linked to workspace-level TAPD requirement snapshots.
-Read the referenced file when you need requirement details. These files are shared by all sessions linked to the same TAPD requirement, so refreshing the requirement updates the single shared snapshot for every session.
+This session is linked to workspace-level TAPD requirement snapshots and requirement-scoped info directories.
+Read the referenced snapshot file when you need requirement details. Read info files when you need prior implementation plans, handoff notes, or artifacts saved by other sessions.
+These files are shared by all sessions linked to the same TAPD requirement, so updates are visible to existing and future sessions on the next turn.
 Do not enable or call the TAPD MCP source unless the user explicitly asks to refresh/fetch live TAPD data.
 ${entries.join('\n')}
 </linked_requirements>`;

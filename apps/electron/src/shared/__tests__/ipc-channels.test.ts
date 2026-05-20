@@ -200,6 +200,7 @@ const EXPECTED_CHANNELS: string[] = [
   'requirements:createGroupFromItem',
   'requirements:createSessionForItem',
   'requirements:getItemDetail',
+  'requirements:listInfoFiles',
   'requirements:listItems',
   'requirements:unlinkItemFromGroup',
   'resources:export',

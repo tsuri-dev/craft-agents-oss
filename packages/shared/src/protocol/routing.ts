@@ -355,6 +355,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.requirementPlugins.LIST,
   RPC_CHANNELS.requirements.LIST_ITEMS,
   RPC_CHANNELS.requirements.GET_ITEM_DETAIL,
+  RPC_CHANNELS.requirements.LIST_INFO_FILES,
   RPC_CHANNELS.requirements.CREATE_GROUP_FROM_ITEM,
   RPC_CHANNELS.requirements.BIND_ITEM_TO_GROUP,
   RPC_CHANNELS.requirements.UNLINK_ITEM_FROM_GROUP,

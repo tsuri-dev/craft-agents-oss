@@ -249,6 +249,7 @@ export const RPC_CHANNELS = {
   requirements: {
     LIST_ITEMS: 'requirements:listItems',
     GET_ITEM_DETAIL: 'requirements:getItemDetail',
+    LIST_INFO_FILES: 'requirements:listInfoFiles',
     CREATE_GROUP_FROM_ITEM: 'requirements:createGroupFromItem',
     BIND_ITEM_TO_GROUP: 'requirements:bindItemToGroup',
     UNLINK_ITEM_FROM_GROUP: 'requirements:unlinkItemFromGroup',

@@ -269,6 +269,22 @@ export interface RequirementDetailResult {
   item: ExternalRequirementItem
 }
 
+export interface RequirementInfoFile {
+  name: string
+  relativePath: string
+  path: string
+  size: number
+  updatedAt: number
+  kind: 'markdown' | 'json' | 'text' | 'file'
+}
+
+export interface RequirementInfoFilesResult {
+  sourceItemId: string
+  snapshotPath: string
+  infoDirPath: string
+  files: RequirementInfoFile[]
+}
+
 export interface RequirementBindInput {
   pluginId: string
   item: ExternalRequirementItem
