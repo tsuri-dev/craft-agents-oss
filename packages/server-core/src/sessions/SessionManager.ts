@@ -165,6 +165,17 @@ export const AGENT_FLAGS = {
   defaultModesEnabled: true,
 } as const
 
+const TAPD_SOURCE_SLUG = 'tapd-mcp-http'
+
+function hasTapdRequirementLabel(labels?: string[]): boolean {
+  return (labels ?? []).some(label => label.startsWith('tapd::') && label.slice('tapd::'.length).trim().length > 0)
+}
+
+function filterTapdSourceForLinkedRequirementSession(sourceSlugs: string[] | undefined, labels?: string[]): string[] {
+  const slugs = sourceSlugs ?? []
+  return hasTapdRequirementLabel(labels) ? slugs.filter(slug => slug !== TAPD_SOURCE_SLUG) : slugs
+}
+
 const MAX_ADMIN_REMEMBER_MINUTES = 60
 const MAX_ANNOTATIONS_PER_MESSAGE = 200
 const MAX_ANNOTATION_JSON_BYTES = 32 * 1024
@@ -3256,7 +3267,7 @@ export class SessionManager implements ISessionManager {
       // ============================================================
 
       const sessionPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
-      const enabledSlugs = managed.enabledSourceSlugs || []
+      const enabledSlugs = filterTapdSourceForLinkedRequirementSession(managed.enabledSourceSlugs, managed.labels)
       const allSources = loadAllSources(managed.workspace.rootPath)
       const enabledSources = allSources.filter(s =>
         enabledSlugs.includes(s.config.slug) && isSourceUsable(s)
@@ -3307,6 +3318,7 @@ export class SessionManager implements ISessionManager {
         sdkCwd: managed.sdkCwd,
         model: managed.model,
         llmConnection: managed.llmConnection,
+        labels: managed.labels,
         permissionMode: managed.permissionMode,
         previousPermissionMode: managed.previousPermissionMode,
         modelSwitchFromSdkSessionId: managed.modelSwitchFromSdkSessionId,
@@ -5855,7 +5867,16 @@ export class SessionManager implements ISessionManager {
     const sendSpan = perf.span('session.sendMessage', { sessionId })
 
     const workspaceRootPath = managed.workspace.rootPath
-    const enabledSlugs = managed.enabledSourceSlugs ?? []
+    const enabledSlugs = filterTapdSourceForLinkedRequirementSession(managed.enabledSourceSlugs, managed.labels)
+    if (hasTapdRequirementLabel(managed.labels) && (managed.enabledSourceSlugs ?? []).includes(TAPD_SOURCE_SLUG)) {
+      managed.enabledSourceSlugs = enabledSlugs
+      this.persistSession(managed)
+      this.sendEvent({
+        type: 'sources_changed',
+        sessionId,
+        enabledSourceSlugs: enabledSlugs,
+      }, managed.workspace.id)
+    }
     const hasSources = enabledSlugs.length > 0
 
     // Load enabled sources up-front so we can refresh tokens BEFORE getOrCreateAgent
@@ -5887,8 +5908,10 @@ export class SessionManager implements ISessionManager {
     agent.setAllSources(allSources)
     sendSpan.mark('sources.loaded')
 
-    // Apply source servers if any are enabled
-    if (hasSources) {
+    // Apply source servers if any are enabled. For TAPD-linked sessions, also
+    // apply an empty source set when TAPD was filtered out, so existing live
+    // agents created before this policy do not keep tapd-mcp-http active.
+    if (hasSources || hasTapdRequirementLabel(managed.labels)) {
       const sessionPath = getSessionStoragePath(workspaceRootPath, sessionId)
       // Single fresh build — tokens already refreshed above.
       const { mcpServers, apiServers, errors } = await buildServersFromSources(sources, sessionPath, managed.tokenRefreshManager, agent.getSummarizeCallback())
