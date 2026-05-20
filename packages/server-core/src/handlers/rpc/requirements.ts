@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { extname, join } from 'node:path'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { loadWorkspaceSources } from '@craft-agent/shared/sources'
@@ -13,6 +13,7 @@ import type {
   RequirementBindInput,
   RequirementBinding,
   RequirementCreateSessionInput,
+  RequirementInfoFile,
   RequirementListFilters,
   RequirementListResult,
   RequirementPluginConnectionStatus,
@@ -29,6 +30,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.requirementPlugins.LIST,
   RPC_CHANNELS.requirements.LIST_ITEMS,
   RPC_CHANNELS.requirements.GET_ITEM_DETAIL,
+  RPC_CHANNELS.requirements.LIST_INFO_FILES,
   RPC_CHANNELS.requirements.CREATE_GROUP_FROM_ITEM,
   RPC_CHANNELS.requirements.BIND_ITEM_TO_GROUP,
   RPC_CHANNELS.requirements.UNLINK_ITEM_FROM_GROUP,
@@ -418,8 +420,63 @@ function sanitizeRequirementFileName(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, '_') || 'unknown'
 }
 
+function getTapdRequirementBaseDir(workspaceRootPath: string, sourceItemId: string): string {
+  return join(workspaceRootPath, 'requirements', 'tapd', sanitizeRequirementFileName(sourceItemId))
+}
+
+function getTapdRequirementInfoDir(workspaceRootPath: string, sourceItemId: string): string {
+  return join(getTapdRequirementBaseDir(workspaceRootPath, sourceItemId), 'info')
+}
+
 function getTapdRequirementSnapshotPath(workspaceRootPath: string, sourceItemId: string): string {
   return join(workspaceRootPath, 'requirements', 'tapd', `${sanitizeRequirementFileName(sourceItemId)}.md`)
+}
+
+function ensureTapdRequirementInfoDir(workspaceRootPath: string, sourceItemId: string): string {
+  const infoDir = getTapdRequirementInfoDir(workspaceRootPath, sourceItemId)
+  mkdirSync(infoDir, { recursive: true })
+  return infoDir
+}
+
+function getRequirementInfoFileKind(path: string): RequirementInfoFile['kind'] {
+  const ext = extname(path).toLowerCase()
+  if (ext === '.md' || ext === '.markdown') return 'markdown'
+  if (ext === '.json') return 'json'
+  if (['.txt', '.log', '.yaml', '.yml'].includes(ext)) return 'text'
+  return 'file'
+}
+
+function listRequirementInfoFiles(workspaceRootPath: string, sourceItemId: string): RequirementInfoFile[] {
+  const infoDir = ensureTapdRequirementInfoDir(workspaceRootPath, sourceItemId)
+  const files: RequirementInfoFile[] = []
+
+  const visit = (dir: string, prefix = '') => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue
+      const absolutePath = join(dir, entry.name)
+      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name
+      if (entry.isDirectory()) {
+        visit(absolutePath, relativePath)
+        continue
+      }
+      if (!entry.isFile()) continue
+      const stats = statSync(absolutePath)
+      files.push({
+        name: entry.name,
+        relativePath,
+        path: absolutePath,
+        size: stats.size,
+        updatedAt: stats.mtimeMs,
+        kind: getRequirementInfoFileKind(entry.name),
+      })
+    }
+  }
+
+  visit(infoDir)
+  return files.sort((a, b) => {
+    const kindScore = (file: RequirementInfoFile) => file.kind === 'markdown' ? 0 : file.kind === 'text' ? 1 : file.kind === 'json' ? 2 : 3
+    return kindScore(a) - kindScore(b) || a.relativePath.localeCompare(b.relativePath)
+  })
 }
 
 function compactValue(value: string | undefined): string | undefined {
@@ -491,6 +548,7 @@ function formatRequirementSnapshotMarkdown(item: ExternalRequirementItem): strin
 function writeTapdRequirementSnapshot(workspaceRootPath: string, item: ExternalRequirementItem): string {
   const filePath = getTapdRequirementSnapshotPath(workspaceRootPath, item.sourceItemId)
   mkdirSync(join(workspaceRootPath, 'requirements', 'tapd'), { recursive: true })
+  ensureTapdRequirementInfoDir(workspaceRootPath, item.sourceItemId)
   writeFileSync(filePath, formatRequirementSnapshotMarkdown(item), 'utf-8')
   return filePath
 }
@@ -621,6 +679,18 @@ export function registerRequirementsHandlers(server: RpcServer, deps: HandlerDep
     const item = normalizeTapdStory(row ?? { id: sourceItemId }, filters.workspaceId, binding, contentImages, comments)
     writeTapdRequirementSnapshot(workspace.rootPath, item)
     return { item }
+  })
+
+  server.handle(RPC_CHANNELS.requirements.LIST_INFO_FILES, async (_ctx, workspaceId: string, pluginId: string, sourceItemId: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+    if (pluginId !== TAPD_PLUGIN_ID) throw new Error(`Unknown requirement plugin: ${pluginId}`)
+    return {
+      sourceItemId,
+      snapshotPath: getTapdRequirementSnapshotPath(workspace.rootPath, sourceItemId),
+      infoDirPath: ensureTapdRequirementInfoDir(workspace.rootPath, sourceItemId),
+      files: listRequirementInfoFiles(workspace.rootPath, sourceItemId),
+    }
   })
 
   server.handle(RPC_CHANNELS.requirements.CREATE_GROUP_FROM_ITEM, async (_ctx, workspaceId: string, input: RequirementBindInput) => {

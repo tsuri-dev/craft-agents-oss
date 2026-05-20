@@ -11,6 +11,8 @@ import {
   CheckCircle2,
   ChevronRight,
   Circle,
+  FileText,
+  FolderOpen,
   Loader2,
   Link2,
   Plus,
@@ -34,6 +36,7 @@ import type {
   ExternalRequirementItem,
   RequirementBinding,
   RequirementComment,
+  RequirementInfoFilesResult,
   RequirementListFilters,
   RequirementPluginDescriptor,
 } from '../../../shared/types'
@@ -725,6 +728,32 @@ function RequirementActivity({ item, onOpenUrl }: { item: ExternalRequirementIte
   )
 }
 
+function formatInfoFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function RequirementInfoFileRow({ file }: { file: RequirementInfoFilesResult['files'][number] }) {
+  return (
+    <button
+      type="button"
+      onClick={() => void window.electronAPI.openFile(file.path)}
+      className={cn('grid w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2 rounded-[10px] px-2 py-2 text-left transition-colors', TAPD_DETAIL_THEME.hover)}
+      title={file.path}
+    >
+      <span className={cn('flex h-7 w-7 items-center justify-center rounded-full', TAPD_DETAIL_THEME.pill)}>
+        <FileText className="h-3.5 w-3.5" />
+      </span>
+      <span className="min-w-0">
+        <span className={cn('block truncate text-[13px]', TAPD_DETAIL_THEME.secondary)}>{file.relativePath}</span>
+        <span className={cn('mt-0.5 block truncate text-[12px]', TAPD_DETAIL_THEME.weak)}>{file.kind} · {formatInfoFileSize(file.size)}</span>
+      </span>
+      <span className={cn('whitespace-nowrap text-[12px]', TAPD_DETAIL_THEME.weak)}>{formatRelativeRequirementTime(file.updatedAt)}</span>
+    </button>
+  )
+}
+
 function RequirementSessionLogRow({ session }: { session: { id: string; name?: string; preview?: string; lastMessageAt?: number } }) {
   const preview = session.preview?.trim() || session.name || 'Session started'
   return (
@@ -756,11 +785,28 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
   const [error, setError] = React.useState<string | null>(null)
   const [groupName, setGroupName] = React.useState(() => item ? defaultGroupName(item) : '')
   const [editingGroup, setEditingGroup] = React.useState(false)
+  const [infoFiles, setInfoFiles] = React.useState<RequirementInfoFilesResult | null>(null)
 
   React.useEffect(() => {
     const cached = tapdInstalled ? readCache(activeWorkspaceId).itemsById[sourceItemId] : undefined
     setItem(cached ?? null)
     setGroupName(cached ? cached.binding?.groupName ?? defaultGroupName(cached) : '')
+  }, [activeWorkspaceId, sourceItemId, tapdInstalled])
+
+  React.useEffect(() => {
+    if (!activeWorkspaceId || !tapdInstalled) {
+      setInfoFiles(null)
+      return
+    }
+    let cancelled = false
+    window.electronAPI.listRequirementInfoFiles(activeWorkspaceId, TAPD_PLUGIN_ID, sourceItemId)
+      .then(result => {
+        if (!cancelled) setInfoFiles(result)
+      })
+      .catch(() => {
+        if (!cancelled) setInfoFiles(null)
+      })
+    return () => { cancelled = true }
   }, [activeWorkspaceId, sourceItemId, tapdInstalled])
 
   const groupSessions = React.useMemo(() => {
@@ -1030,6 +1076,32 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
                       </Button>
                     </div>
                   </div>
+                )}
+              </div>
+            </DetailSection>
+
+            <DetailSection title="Requirement info">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className={cn('min-w-0 truncate text-[12px]', TAPD_DETAIL_THEME.weak)} title={infoFiles?.infoDirPath}>
+                    {infoFiles?.files.length ? `${infoFiles.files.length} file${infoFiles.files.length > 1 ? 's' : ''}` : 'No saved info yet'}
+                  </div>
+                  {infoFiles?.infoDirPath && (
+                    <Button size="sm" variant="ghost" className={cn('h-7 rounded-[7px] px-2 text-[12px]', TAPD_DETAIL_THEME.secondary)} onClick={() => void window.electronAPI.showInFolder(infoFiles.infoDirPath)}>
+                      <FolderOpen className="h-3.5 w-3.5" />
+                      Open
+                    </Button>
+                  )}
+                </div>
+
+                {infoFiles?.files.length ? (
+                  <div className="space-y-1">
+                    {infoFiles.files.slice(0, 5).map(file => <RequirementInfoFileRow key={file.relativePath} file={file} />)}
+                  </div>
+                ) : (
+                  <p className={cn('rounded-[10px] px-3 py-2 text-[12px] leading-5', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.weak)}>
+                    Save implementation plans or handoff notes into this TAPD info folder. Any session linked to TAPD-{item.sourceItemId} can read them on the next turn.
+                  </p>
                 )}
               </div>
             </DetailSection>
