@@ -15,10 +15,8 @@ import {
   Link2,
   Plus,
   RefreshCw,
-  Search,
   Unlink2,
   Workflow,
-  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -39,7 +37,7 @@ import type {
   RequirementPluginDescriptor,
 } from '../../../shared/types'
 
-const FILTER_LIMIT = 30
+const TAPD_CACHE_STORAGE_VERSION = 1
 const TAPD_DETAIL_THEME = {
   page: 'bg-background text-foreground',
   panel: 'bg-background',
@@ -59,23 +57,6 @@ const TAPD_DETAIL_THEME = {
   success: 'text-success',
   orange: 'text-info',
 } as const
-const EMPTY_FILTERS: RequirementBoardFilters = {
-  workspaceId: '',
-  keyword: '',
-  status: '',
-  type: '',
-  assignee: '',
-  bindingState: 'all',
-}
-
-interface RequirementBoardFilters {
-  workspaceId: string
-  keyword: string
-  status: string
-  type: string
-  assignee: string
-  bindingState: 'all' | 'bound' | 'unbound'
-}
 
 interface RequirementBoardCache {
   version: 1
@@ -106,71 +87,29 @@ function parseTapdRequirementLink(value: string): ParsedTapdRequirementLink | nu
     ?? decoded.match(/#\/(\d{6,})(?=\/)/)?.[1]
     ?? decoded.match(/^\/?(\d{6,})(?=\/)/)?.[1]
     ?? decoded.match(/[?&]workspace_id=(\d{6,})/)?.[1]
-  const directStoryId = decoded.match(/^\d{10,}$/)?.[0]
   const detailStoryId = decoded.match(/\/story\/detail\/(\d{10,})/)?.[1]
     ?? decoded.match(/\/stories\/view\/(\d{10,})/)?.[1]
   const longNumericIds = decoded.match(/\d{10,}/g) ?? []
-  const sourceItemId = directStoryId ?? detailStoryId ?? longNumericIds.at(-1)
+  const sourceItemId = detailStoryId ?? longNumericIds.at(-1)
 
   return sourceItemId ? { ...(workspaceId ? { workspaceId } : {}), sourceItemId } : null
 }
 
-function getFilterStorageKey(workspaceId: string | null | undefined) {
-  return `requirement-board.${TAPD_PLUGIN_ID}.filters.${workspaceId ?? 'default'}`
-}
-
-function sourceQuerySignature(filters: RequirementBoardFilters) {
-  return JSON.stringify({
-    workspaceId: filters.workspaceId.trim(),
-    keyword: filters.keyword.trim(),
-    status: filters.status.trim(),
-    type: filters.type.trim(),
-    assignee: filters.assignee.trim(),
-  })
-}
-
-function getCacheStorageKey(workspaceId: string | null | undefined, filters: RequirementBoardFilters) {
-  return `requirement-board.${TAPD_PLUGIN_ID}.cache.${workspaceId ?? 'default'}.${sourceQuerySignature(filters)}`
+function getCacheStorageKey(workspaceId: string | null | undefined) {
+  return `requirement-board.${TAPD_PLUGIN_ID}.cache.${workspaceId ?? 'default'}.manual`
 }
 
 function emptyCache(): RequirementBoardCache {
-  return { version: 1, itemsById: {}, listOrder: [] }
+  return { version: TAPD_CACHE_STORAGE_VERSION, itemsById: {}, listOrder: [] }
 }
 
-function readSavedFilters(workspaceId: string | null | undefined): RequirementBoardFilters {
+function readCache(workspaceId: string | null | undefined): RequirementBoardCache {
   try {
-    const raw = window.localStorage.getItem(getFilterStorageKey(workspaceId))
-    if (!raw) return { ...EMPTY_FILTERS }
-    const parsed = JSON.parse(raw) as Partial<RequirementBoardFilters>
-    return {
-      workspaceId: parsed.workspaceId ?? '',
-      keyword: parsed.keyword ?? '',
-      status: parsed.status ?? '',
-      type: parsed.type ?? '',
-      assignee: parsed.assignee ?? '',
-      bindingState: parsed.bindingState ?? 'all',
-    }
-  } catch {
-    return { ...EMPTY_FILTERS }
-  }
-}
-
-function saveFilters(workspaceId: string | null | undefined, filters: RequirementBoardFilters) {
-  try {
-    window.localStorage.setItem(getFilterStorageKey(workspaceId), JSON.stringify(filters))
-  } catch {
-    // Ignore localStorage failures; querying still works for the current render.
-  }
-}
-
-function readCache(workspaceId: string | null | undefined, filters: RequirementBoardFilters): RequirementBoardCache {
-  if (!filters.workspaceId.trim()) return emptyCache()
-  try {
-    const raw = window.localStorage.getItem(getCacheStorageKey(workspaceId, filters))
+    const raw = window.localStorage.getItem(getCacheStorageKey(workspaceId))
     if (!raw) return emptyCache()
     const parsed = JSON.parse(raw) as Partial<RequirementBoardCache>
     return {
-      version: 1,
+      version: TAPD_CACHE_STORAGE_VERSION,
       itemsById: parsed.itemsById ?? {},
       listOrder: parsed.listOrder ?? [],
       lastSyncedAt: parsed.lastSyncedAt,
@@ -181,48 +120,33 @@ function readCache(workspaceId: string | null | undefined, filters: RequirementB
   }
 }
 
-function writeCache(workspaceId: string | null | undefined, filters: RequirementBoardFilters, cache: RequirementBoardCache) {
-  if (!filters.workspaceId.trim()) return
+function writeCache(workspaceId: string | null | undefined, cache: RequirementBoardCache) {
   try {
-    window.localStorage.setItem(getCacheStorageKey(workspaceId, filters), JSON.stringify(cache))
+    window.localStorage.setItem(getCacheStorageKey(workspaceId), JSON.stringify(cache))
   } catch {
     // Cache is an optimization; ignore storage failures.
   }
 }
 
-function buildCacheFromItems(items: ExternalRequirementItem[], total?: number): RequirementBoardCache {
-  return {
-    version: 1,
-    itemsById: Object.fromEntries(items.map(item => [item.sourceItemId, item])),
-    listOrder: items.map(item => item.sourceItemId),
-    lastSyncedAt: Date.now(),
-    total,
-  }
-}
-
-function upsertCachedItem(workspaceId: string | null | undefined, filters: RequirementBoardFilters, item: ExternalRequirementItem) {
-  const current = readCache(workspaceId, filters)
+function upsertCachedItem(workspaceId: string | null | undefined, item: ExternalRequirementItem) {
+  const current = readCache(workspaceId)
   const listOrder = current.listOrder.includes(item.sourceItemId) ? current.listOrder : [item.sourceItemId, ...current.listOrder]
   const next: RequirementBoardCache = {
     ...current,
+    total: undefined,
     itemsById: { ...current.itemsById, [item.sourceItemId]: item },
     listOrder,
     lastSyncedAt: Date.now(),
   }
-  writeCache(workspaceId, filters, next)
+  writeCache(workspaceId, next)
   return next
 }
 
-function toListFilters(filters: RequirementBoardFilters, workspaceIdOverride?: string): RequirementListFilters {
+function toDetailFilters(workspaceId: string): RequirementListFilters {
   return {
-    workspaceId: workspaceIdOverride?.trim() || filters.workspaceId.trim(),
-    keyword: filters.keyword.trim() || undefined,
-    status: filters.status.trim() || undefined,
-    type: filters.type.trim() || undefined,
-    assignee: filters.assignee.trim() || undefined,
-    bindingState: filters.bindingState,
+    workspaceId: workspaceId.trim(),
     page: 1,
-    limit: FILTER_LIMIT,
+    limit: 1,
   }
 }
 
@@ -260,26 +184,8 @@ function formatSyncTime(timestamp?: number) {
   return `Synced ${new Date(timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
 }
 
-function filterCachedItems(cache: RequirementBoardCache, filters: RequirementBoardFilters): ExternalRequirementItem[] {
-  const keyword = filters.keyword.trim().toLowerCase()
-  const status = filters.status.trim().toLowerCase()
-  const type = filters.type.trim().toLowerCase()
-  const assignee = filters.assignee.trim().toLowerCase()
-  return cache.listOrder
-    .map(id => cache.itemsById[id])
-    .filter(Boolean)
-    .filter(item => {
-      if (keyword) {
-        const haystack = [item.title, item.sourceItemId, item.summary, item.project].filter(Boolean).join(' ').toLowerCase()
-        if (!haystack.includes(keyword)) return false
-      }
-      if (status && !(item.status ?? '').toLowerCase().includes(status)) return false
-      if (type && !(item.type ?? '').toLowerCase().includes(type)) return false
-      if (assignee && !(item.assignees ?? []).some(person => person.toLowerCase().includes(assignee))) return false
-      if (filters.bindingState === 'bound' && !item.binding) return false
-      if (filters.bindingState === 'unbound' && item.binding) return false
-      return true
-    })
+function getCachedItems(cache: RequirementBoardCache): ExternalRequirementItem[] {
+  return cache.listOrder.map(id => cache.itemsById[id]).filter(Boolean)
 }
 
 function RequirementCard({ item }: { item: ExternalRequirementItem }) {
@@ -348,78 +254,43 @@ export function RequirementBoard() {
   const { activeWorkspaceId, enabledSources } = useAppShellContext()
   const tapdInstalled = isTapdPluginInstalled(enabledSources)
   const [plugins, setPlugins] = React.useState<RequirementPluginDescriptor[]>([])
-  const [filters, setFilters] = React.useState<RequirementBoardFilters>(() => readSavedFilters(activeWorkspaceId))
-  const [cache, setCache] = React.useState<RequirementBoardCache>(() => readCache(activeWorkspaceId, readSavedFilters(activeWorkspaceId)))
-  const [loading, setLoading] = React.useState(false)
+  const [cache, setCache] = React.useState<RequirementBoardCache>(() => readCache(activeWorkspaceId))
   const [error, setError] = React.useState<string | null>(null)
-  const [linkPanelOpen, setLinkPanelOpen] = React.useState(false)
   const [linkInput, setLinkInput] = React.useState('')
   const [linkError, setLinkError] = React.useState<string | null>(null)
   const [addingFromLink, setAddingFromLink] = React.useState(false)
 
   const plugin = plugins.find(item => item.id === TAPD_PLUGIN_ID)
   const connected = plugin?.connectionStatus === 'connected'
-  const visibleItems = React.useMemo(() => filterCachedItems(cache, filters), [cache, filters])
+  const visibleItems = React.useMemo(() => getCachedItems(cache), [cache])
 
   React.useEffect(() => {
-    const nextFilters = readSavedFilters(activeWorkspaceId)
-    setFilters(nextFilters)
-    setCache(tapdInstalled ? readCache(activeWorkspaceId, nextFilters) : emptyCache())
+    setCache(tapdInstalled ? readCache(activeWorkspaceId) : emptyCache())
   }, [activeWorkspaceId, tapdInstalled])
-
-  React.useEffect(() => {
-    saveFilters(activeWorkspaceId, filters)
-    setCache(tapdInstalled ? readCache(activeWorkspaceId, filters) : emptyCache())
-  }, [activeWorkspaceId, filters, tapdInstalled])
 
   React.useEffect(() => {
     if (!activeWorkspaceId || !tapdInstalled) return
     let stale = false
     window.electronAPI.listRequirementPlugins(activeWorkspaceId)
-      .then(result => { if (!stale) setPlugins(result) })
+      .then(result => {
+        if (!stale) {
+          setPlugins(result)
+          setError(null)
+        }
+      })
       .catch(err => { if (!stale) setError(err instanceof Error ? err.message : String(err)) })
     return () => { stale = true }
   }, [activeWorkspaceId, tapdInstalled])
-
-  const refreshItems = React.useCallback(async () => {
-    if (!activeWorkspaceId || !tapdInstalled) return
-    if (!filters.workspaceId.trim()) {
-      setError('Enter a TAPD workspace_id before refreshing.')
-      return
-    }
-    if (!connected) {
-      setError(plugin?.connectionError || 'TAPD source is not connected. Test or enable tapd-mcp-http first.')
-      return
-    }
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await window.electronAPI.listRequirementItems(activeWorkspaceId, TAPD_PLUGIN_ID, toListFilters(filters))
-      const nextCache = buildCacheFromItems(result.items, result.total)
-      writeCache(activeWorkspaceId, filters, nextCache)
-      setCache(nextCache)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }, [activeWorkspaceId, connected, filters, plugin?.connectionError, tapdInstalled])
 
   const addRequirementFromLink = React.useCallback(async () => {
     if (!activeWorkspaceId || !tapdInstalled) return
     const parsed = parseTapdRequirementLink(linkInput)
     if (!parsed) {
-      setLinkError('Paste a TAPD requirement link or story ID.')
+      setLinkError('Paste a full TAPD requirement link.')
       return
     }
-    const currentWorkspaceId = filters.workspaceId.trim()
-    const workspaceId = parsed.workspaceId ?? currentWorkspaceId
-    if (!workspaceId) {
-      setLinkError('This link does not include a workspace_id. Set the workspace first, then try again.')
-      return
-    }
-    if (parsed.workspaceId && currentWorkspaceId && parsed.workspaceId !== currentWorkspaceId) {
-      setLinkError(`This link belongs to workspace ${parsed.workspaceId}. Switch workspace first to add it there.`)
+    if (!parsed.workspaceId) {
+      setLinkError('Paste the full TAPD link so the workspace_id can be detected.')
       return
     }
     if (!connected) {
@@ -427,163 +298,92 @@ export function RequirementBoard() {
       return
     }
 
-    const targetFilters: RequirementBoardFilters = currentWorkspaceId ? filters : { ...filters, workspaceId }
     setAddingFromLink(true)
     setLinkError(null)
     try {
-      const result = await window.electronAPI.getRequirementItemDetail(activeWorkspaceId, TAPD_PLUGIN_ID, parsed.sourceItemId, toListFilters(targetFilters, workspaceId))
-      const nextCache = upsertCachedItem(activeWorkspaceId, targetFilters, result.item)
-      if (!currentWorkspaceId) setFilters(targetFilters)
+      const result = await window.electronAPI.getRequirementItemDetail(activeWorkspaceId, TAPD_PLUGIN_ID, parsed.sourceItemId, toDetailFilters(parsed.workspaceId))
+      const nextCache = upsertCachedItem(activeWorkspaceId, result.item)
       setCache(nextCache)
       setLinkInput('')
-      setLinkPanelOpen(false)
-      toast.success('TAPD requirement added')
+      toast.success('TAPD requirement saved locally')
     } catch (err) {
       setLinkError(err instanceof Error ? err.message : String(err))
     } finally {
       setAddingFromLink(false)
     }
-  }, [activeWorkspaceId, connected, filters, linkInput, plugin?.connectionError, tapdInstalled])
-
-  const updateFilter = React.useCallback(<K extends keyof RequirementBoardFilters>(key: K, value: RequirementBoardFilters[K]) => {
-    setFilters(current => ({ ...current, [key]: value }))
-  }, [])
+  }, [activeWorkspaceId, connected, linkInput, plugin?.connectionError, tapdInstalled])
 
   if (!tapdInstalled) return <PluginUnavailableState />
 
-  const visibleCount = visibleItems.length
-  const sourceCount = cache.total ?? cache.listOrder.length
+  const cachedCount = cache.listOrder.length
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="shrink-0 border-b border-foreground/[0.06] px-8 py-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="text-[28px] font-semibold leading-8 tracking-[-0.022em] text-foreground text-balance">Requirement Board</h1>
-            <p className="mt-1 text-[13px] text-muted-foreground">Browse cached TAPD requirements. Refresh pulls the latest data from MCP.</p>
+            <h1 className="text-[28px] font-semibold leading-8 tracking-[-0.022em] text-foreground text-balance">TAPD Requirements</h1>
+            <p className="mt-1 text-[13px] text-muted-foreground">Paste a TAPD requirement link to fetch it and keep it in the local board cache.</p>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
               <MetaPill className="bg-foreground/[0.045] text-foreground/70">TAPD</MetaPill>
-              <span>Workspace</span>
-              <Input
-                aria-label="TAPD workspace id"
-                value={filters.workspaceId}
-                onChange={event => updateFilter('workspaceId', event.target.value)}
-                placeholder="workspace_id"
-                className="h-7 w-[150px] rounded-[8px] px-2 text-[12px]"
-              />
               <span className={cn('inline-flex h-6 items-center rounded-full px-2 text-[11px] font-medium', connected ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning')}>
                 {plugin?.connectionStatus ?? 'unknown'}
               </span>
-              <span className="tabular-nums">{visibleCount} shown · {sourceCount} cached</span>
+              <span className="tabular-nums">{cachedCount} saved locally</span>
               <span>{formatSyncTime(cache.lastSyncedAt)}</span>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              className="active:scale-[0.98]"
-              onClick={() => {
-                setLinkPanelOpen(current => !current)
-                setLinkError(null)
-              }}
-            >
-              {linkPanelOpen ? <X className="h-3.5 w-3.5" /> : <Link2 className="h-3.5 w-3.5" />}
-              {linkPanelOpen ? 'Close link form' : 'Add by link'}
-            </Button>
-            <Button size="sm" variant="secondary" className="active:scale-[0.98]" onClick={() => void refreshItems()} disabled={loading || !filters.workspaceId.trim()}>
-              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              Refresh from TAPD
-            </Button>
-          </div>
         </div>
 
-        <div className="mt-5 grid gap-2 md:grid-cols-[minmax(220px,1fr)_140px_140px_140px_150px]">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input value={filters.keyword} onChange={event => updateFilter('keyword', event.target.value)} placeholder="Search cached requirements" className="h-9 rounded-[10px] pl-8" />
+        <div className="mt-5 rounded-[14px] bg-foreground/[0.025] px-3 py-3 ring-1 ring-foreground/[0.07]">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[10px] bg-background px-3 ring-1 ring-foreground/[0.08] focus-within:ring-accent/40">
+              <Link2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <Input
+                aria-label="TAPD requirement link"
+                value={linkInput}
+                onChange={event => {
+                  setLinkInput(event.target.value)
+                  setLinkError(null)
+                }}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') void addRequirementFromLink()
+                }}
+                placeholder="Paste a TAPD story link, for example .../tapd_fe/10045201/story/detail/101..."
+                className="h-9 border-0 bg-transparent px-0 text-[13px] shadow-none focus-visible:ring-0"
+              />
+            </div>
+            <Button size="sm" className="active:scale-[0.98]" onClick={() => void addRequirementFromLink()} disabled={addingFromLink || !linkInput.trim()}>
+              {addingFromLink ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              Save locally
+            </Button>
           </div>
-          <Input value={filters.status} onChange={event => updateFilter('status', event.target.value)} placeholder="Status" className="h-9 rounded-[10px]" />
-          <Input value={filters.type} onChange={event => updateFilter('type', event.target.value)} placeholder="Type" className="h-9 rounded-[10px]" />
-          <Input value={filters.assignee} onChange={event => updateFilter('assignee', event.target.value)} placeholder="Assignee" className="h-9 rounded-[10px]" />
-          <select
-            aria-label="Binding filter"
-            value={filters.bindingState}
-            onChange={event => updateFilter('bindingState', event.target.value as RequirementBoardFilters['bindingState'])}
-            className="h-9 rounded-[10px] border border-input bg-background px-3 text-sm text-foreground shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <option value="all">All binding states</option>
-            <option value="unbound">Not linked</option>
-            <option value="bound">Bound</option>
-          </select>
+          <div className={cn('mt-2 text-[12px]', linkError ? 'text-destructive' : 'text-muted-foreground')}>
+            {linkError ?? 'No list query or direct filtering. Only requirements imported from full TAPD links are saved here.'}
+          </div>
         </div>
-
-        {linkPanelOpen && (
-          <div className="mt-3 rounded-[14px] bg-foreground/[0.025] px-3 py-3 ring-1 ring-foreground/[0.07]">
-            <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[10px] bg-background px-3 ring-1 ring-foreground/[0.08] focus-within:ring-accent/40">
-                <Link2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <Input
-                  aria-label="TAPD requirement link"
-                  value={linkInput}
-                  onChange={event => {
-                    setLinkInput(event.target.value)
-                    setLinkError(null)
-                  }}
-                  onKeyDown={event => {
-                    if (event.key === 'Enter') void addRequirementFromLink()
-                  }}
-                  placeholder="Paste a TAPD story link, for example .../tapd_fe/10045201/story/detail/101..."
-                  className="h-9 border-0 bg-transparent px-0 text-[13px] shadow-none focus-visible:ring-0"
-                />
-              </div>
-              <Button size="sm" className="active:scale-[0.98]" onClick={() => void addRequirementFromLink()} disabled={addingFromLink || !linkInput.trim()}>
-                {addingFromLink ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-                Add requirement
-              </Button>
-            </div>
-            <div className={cn('mt-2 text-[12px]', linkError ? 'text-destructive' : 'text-muted-foreground')}>
-              {linkError ?? 'Adds the requirement to the current cached board. If no workspace is set, the link can provide workspace_id.'}
-            </div>
-          </div>
-        )}
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="px-8 py-6">
-          {!filters.workspaceId.trim() && (
-            <div className="rounded-[18px] bg-foreground/[0.025] p-8 text-center ring-1 ring-foreground/[0.06]">
-              <Workflow className="mx-auto h-8 w-8 text-muted-foreground" />
-              <h2 className="mt-3 text-base font-semibold text-foreground">Set a TAPD workspace first</h2>
-              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Enter the workspace id in the header. Nothing is fetched until you click Refresh from TAPD.</p>
-            </div>
-          )}
-
-          {filters.workspaceId.trim() && error && (
-            <div className="rounded-[18px] bg-destructive/10 p-5 text-sm text-destructive ring-1 ring-destructive/15">
-              <div className="font-medium">We couldn't refresh TAPD requirements.</div>
+          {error && (
+            <div className="mb-4 rounded-[18px] bg-destructive/10 p-5 text-sm text-destructive ring-1 ring-destructive/15">
+              <div className="font-medium">We couldn't load TAPD plugin status.</div>
               <div className="mt-1 text-destructive/80">{error}</div>
-              <Button size="sm" variant="secondary" className="mt-3" onClick={() => void refreshItems()}>Retry refresh</Button>
             </div>
           )}
 
-          {filters.workspaceId.trim() && loading && cache.listOrder.length === 0 && (
+          {addingFromLink && cache.listOrder.length === 0 && (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-[210px] rounded-[16px] bg-foreground/[0.035] animate-pulse" />)}
+              {Array.from({ length: 3 }).map((_, index) => <div key={index} className="h-[210px] rounded-[16px] bg-foreground/[0.035] animate-pulse" />)}
             </div>
           )}
 
-          {filters.workspaceId.trim() && !loading && !error && cache.listOrder.length === 0 && (
+          {!addingFromLink && cache.listOrder.length === 0 && (
             <div className="rounded-[18px] bg-foreground/[0.025] p-8 text-center ring-1 ring-foreground/[0.06]">
-              <h2 className="text-base font-semibold text-foreground">No cached requirements yet</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Click Refresh from TAPD to fetch requirements for this workspace and assignee.</p>
-            </div>
-          )}
-
-          {cache.listOrder.length > 0 && visibleItems.length === 0 && (
-            <div className="rounded-[18px] bg-foreground/[0.025] p-8 text-center ring-1 ring-foreground/[0.06]">
-              <h2 className="text-base font-semibold text-foreground">No cached requirements match these filters</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Try clearing search, status, type, assignee, or binding filters.</p>
+              <Link2 className="mx-auto h-8 w-8 text-muted-foreground" />
+              <h2 className="mt-3 text-base font-semibold text-foreground">No saved requirements yet</h2>
+              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Paste a TAPD requirement link above. Craft Agent will fetch that single requirement from TAPD and save it locally.</p>
             </div>
           )}
 
@@ -952,17 +752,14 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
   const { activeWorkspaceId, onOpenUrl, onInputChange, enabledSources, onSessionLabelsChange } = useAppShellContext()
   const tapdInstalled = isTapdPluginInstalled(enabledSources)
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
-  const [filters, setFilters] = React.useState<RequirementBoardFilters>(() => readSavedFilters(activeWorkspaceId))
-  const [item, setItem] = React.useState<ExternalRequirementItem | null>(() => readCache(activeWorkspaceId, readSavedFilters(activeWorkspaceId)).itemsById[sourceItemId] ?? null)
+  const [item, setItem] = React.useState<ExternalRequirementItem | null>(() => readCache(activeWorkspaceId).itemsById[sourceItemId] ?? null)
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [groupName, setGroupName] = React.useState(() => item ? defaultGroupName(item) : '')
   const [editingGroup, setEditingGroup] = React.useState(false)
 
   React.useEffect(() => {
-    const nextFilters = readSavedFilters(activeWorkspaceId)
-    setFilters(nextFilters)
-    const cached = tapdInstalled ? readCache(activeWorkspaceId, nextFilters).itemsById[sourceItemId] : undefined
+    const cached = tapdInstalled ? readCache(activeWorkspaceId).itemsById[sourceItemId] : undefined
     setItem(cached ?? null)
     setGroupName(cached ? cached.binding?.groupName ?? defaultGroupName(cached) : '')
   }, [activeWorkspaceId, sourceItemId, tapdInstalled])
@@ -980,35 +777,35 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
 
   const refreshDetail = React.useCallback(async () => {
     if (!activeWorkspaceId || !tapdInstalled) return
-    const detailWorkspaceId = filters.workspaceId.trim() || getTapdWorkspaceIdFromItem(item)
+    const detailWorkspaceId = getTapdWorkspaceIdFromItem(item)
     if (!detailWorkspaceId) {
-      setError('Set a TAPD workspace id from the Requirement Board before refreshing details.')
+      setError('Add this requirement from a full TAPD link first so Craft Agent can detect the TAPD workspace.')
       return
     }
     setLoading(true)
     setError(null)
     try {
-      const result = await window.electronAPI.getRequirementItemDetail(activeWorkspaceId, TAPD_PLUGIN_ID, sourceItemId, toListFilters(filters, detailWorkspaceId))
+      const result = await window.electronAPI.getRequirementItemDetail(activeWorkspaceId, TAPD_PLUGIN_ID, sourceItemId, toDetailFilters(detailWorkspaceId))
       setItem(result.item)
       setGroupName(result.item.binding?.groupName ?? defaultGroupName(result.item))
-      upsertCachedItem(activeWorkspaceId, filters, result.item)
+      upsertCachedItem(activeWorkspaceId, result.item)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
-  }, [activeWorkspaceId, filters, item, sourceItemId, tapdInstalled])
+  }, [activeWorkspaceId, item, sourceItemId, tapdInstalled])
 
   const applyBinding = React.useCallback((binding: RequirementBinding) => {
     setItem(current => {
       if (!current) return current
       const next = { ...current, binding }
-      upsertCachedItem(activeWorkspaceId, filters, next)
+      upsertCachedItem(activeWorkspaceId, next)
       return next
     })
     setGroupName(binding.groupName)
     setEditingGroup(false)
-  }, [activeWorkspaceId, filters])
+  }, [activeWorkspaceId])
 
   const renameLinkedGroupSessions = React.useCallback((fromGroupName: string, toGroupName: string) => {
     if (!onSessionLabelsChange || fromGroupName === toGroupName) return
@@ -1036,11 +833,11 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     const next = { ...item }
     delete next.binding
     setItem(next)
-    upsertCachedItem(activeWorkspaceId, filters, next)
+    upsertCachedItem(activeWorkspaceId, next)
     setGroupName(defaultGroupName(next))
     setEditingGroup(false)
     toast.success('Requirement unlinked')
-  }, [activeWorkspaceId, filters, item])
+  }, [activeWorkspaceId, item])
 
   const openGroup = React.useCallback(() => {
     if (!item?.binding || groupSessionCount === 0) return
@@ -1118,8 +915,8 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
             {!loading && !item && !error && (
               <div className={cn('rounded-[18px] p-8 text-center ring-1 ring-foreground/[0.08]', TAPD_DETAIL_THEME.subtlePanel)}>
                 <h2 className={cn('text-base font-semibold', TAPD_DETAIL_THEME.title)}>Requirement is not cached</h2>
-                <p className={cn('mx-auto mt-1 max-w-md text-sm', TAPD_DETAIL_THEME.weak)}>Open it from the board cache, or click Refresh item to fetch this requirement from TAPD.</p>
-                <Button className="mt-4 h-7 rounded-[7px] px-2 text-[12px]" size="sm" variant="secondary" onClick={() => void refreshDetail()}>Refresh item</Button>
+                <p className={cn('mx-auto mt-1 max-w-md text-sm', TAPD_DETAIL_THEME.weak)}>Return to the board and paste the full TAPD link to fetch and save this requirement locally.</p>
+                <Button className="mt-4 h-7 rounded-[7px] px-2 text-[12px]" size="sm" variant="secondary" onClick={() => navigate(routes.view.plugins(TAPD_PLUGIN_ID, 'board'))}>Return to board</Button>
               </div>
             )}
 
@@ -1235,7 +1032,7 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
               <PropertyRow label="Updated" value={updatedText} emptyText="Unknown" />
               <PropertyRow label="Begin date" value={beginText} emptyText="No begin date" />
               <PropertyRow label="Source ID" value={<InlineValue>{item.sourceItemId}</InlineValue>} />
-              <PropertyRow label="Workspace" value={filters.workspaceId ? <InlineValue>{filters.workspaceId}</InlineValue> : undefined} emptyText="Unknown" />
+              <PropertyRow label="Workspace" value={getTapdWorkspaceIdFromItem(item) ? <InlineValue>{getTapdWorkspaceIdFromItem(item)}</InlineValue> : undefined} emptyText="Unknown" />
               {item.sourceUrl && (
                 <div className="pt-2">
                   <Button className="h-7 w-full justify-start rounded-[7px] px-2 text-[12px]" variant="ghost" size="sm" onClick={() => onOpenUrl(item.sourceUrl!)}>
