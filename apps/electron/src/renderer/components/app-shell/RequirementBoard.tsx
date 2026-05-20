@@ -13,6 +13,7 @@ import {
   Circle,
   FileText,
   FolderOpen,
+  Info,
   Loader2,
   Link2,
   Plus,
@@ -24,6 +25,8 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
 import { cn } from '@/lib/utils'
 import { navigate, routes } from '@/lib/navigate'
 import { useNavigation } from '@/contexts/NavigationContext'
@@ -754,6 +757,78 @@ function RequirementInfoFileRow({ file }: { file: RequirementInfoFilesResult['fi
   )
 }
 
+function RequirementInfoPopover({
+  item,
+  infoFiles,
+  infoFilesError,
+  onRefresh,
+}: {
+  item: ExternalRequirementItem
+  infoFiles: RequirementInfoFilesResult | null
+  infoFilesError: string | null
+  onRefresh: (options?: { notifyOnError?: boolean }) => void
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <PanelHeaderCenterButton
+          icon={<Info className="h-4 w-4" />}
+          tooltip={infoFiles?.files.length ? `Requirement info (${infoFiles.files.length})` : 'Requirement info'}
+          aria-label="Requirement info"
+        />
+      </PopoverTrigger>
+      <PopoverContent
+        side="bottom"
+        align="end"
+        sideOffset={8}
+        className="h-[460px] w-[360px] max-w-[calc(100vw-32px)] overflow-hidden rounded-[8px] bg-background p-0 text-foreground shadow-modal-small"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+        onCloseAutoFocus={(event) => event.preventDefault()}
+      >
+        <div className={cn('flex items-center justify-between gap-3 border-b px-3 py-2.5', TAPD_DETAIL_THEME.borderSubtle)}>
+          <div className="min-w-0">
+            <div className={cn('truncate text-[13px] font-medium', TAPD_DETAIL_THEME.title)}>Requirement info</div>
+            <div className={cn('mt-0.5 truncate text-[12px]', TAPD_DETAIL_THEME.weak)} title={infoFiles?.infoDirPath}>
+              TAPD-{item.sourceItemId}
+            </div>
+          </div>
+          <div className="flex shrink-0 gap-1">
+            <PanelHeaderCenterButton
+              icon={<RefreshCw className="h-3.5 w-3.5" />}
+              tooltip="Refresh info files"
+              aria-label="Refresh info files"
+              onClick={() => onRefresh({ notifyOnError: true })}
+            />
+            {infoFiles?.infoDirPath && (
+              <PanelHeaderCenterButton
+                icon={<FolderOpen className="h-3.5 w-3.5" />}
+                tooltip="Open info folder"
+                aria-label="Open info folder"
+                onClick={() => void window.electronAPI.showInFolder(infoFiles.infoDirPath)}
+              />
+            )}
+          </div>
+        </div>
+        <div className="h-[calc(460px-57px)] overflow-y-auto px-2 py-2">
+          {infoFilesError ? (
+            <p className={cn('rounded-[10px] px-3 py-2 text-[12px] leading-5 text-destructive', TAPD_DETAIL_THEME.subtlePanel)}>
+              Could not load info files: {infoFilesError}
+            </p>
+          ) : infoFiles?.files.length ? (
+            <div className="space-y-1">
+              {infoFiles.files.map(file => <RequirementInfoFileRow key={file.relativePath} file={file} />)}
+            </div>
+          ) : (
+            <p className={cn('rounded-[10px] px-3 py-2 text-[12px] leading-5', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.weak)}>
+              Save implementation plans or handoff notes into this TAPD info folder. Any session linked to TAPD-{item.sourceItemId} can read them on the next turn.
+            </p>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 function RequirementSessionLogRow({ session }: { session: { id: string; name?: string; preview?: string; lastMessageAt?: number } }) {
   const preview = session.preview?.trim() || session.name || 'Session started'
   return (
@@ -958,10 +1033,21 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
                   Open in TAPD
                 </Button>
               )}
-              <Button variant="secondary" size="sm" className="h-7 rounded-[7px] px-2 text-[12px]" onClick={() => void refreshDetail()} disabled={loading}>
-                {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                Refresh item
-              </Button>
+              <PanelHeaderCenterButton
+                icon={loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                tooltip="Refresh item"
+                aria-label="Refresh item"
+                onClick={() => void refreshDetail()}
+                disabled={loading}
+              />
+              {item && (
+                <RequirementInfoPopover
+                  item={item}
+                  infoFiles={infoFiles}
+                  infoFilesError={infoFilesError}
+                  onRefresh={refreshInfoFiles}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -1095,41 +1181,6 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
               </div>
             </DetailSection>
 
-            <DetailSection title="Requirement info">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div className={cn('min-w-0 truncate text-[12px]', TAPD_DETAIL_THEME.weak)} title={infoFiles?.infoDirPath}>
-                    {infoFiles?.files.length ? `${infoFiles.files.length} file${infoFiles.files.length > 1 ? 's' : ''}` : 'No saved info yet'}
-                  </div>
-                  <div className="flex shrink-0 gap-1">
-                    <Button size="sm" variant="ghost" className={cn('h-7 rounded-[7px] px-2 text-[12px]', TAPD_DETAIL_THEME.secondary)} onClick={() => void refreshInfoFiles({ notifyOnError: true })}>
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      Refresh
-                    </Button>
-                    {infoFiles?.infoDirPath && (
-                      <Button size="sm" variant="ghost" className={cn('h-7 rounded-[7px] px-2 text-[12px]', TAPD_DETAIL_THEME.secondary)} onClick={() => void window.electronAPI.showInFolder(infoFiles.infoDirPath)}>
-                        <FolderOpen className="h-3.5 w-3.5" />
-                        Open
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                {infoFilesError ? (
-                  <p className={cn('rounded-[10px] px-3 py-2 text-[12px] leading-5 text-destructive', TAPD_DETAIL_THEME.subtlePanel)}>
-                    Could not load info files: {infoFilesError}
-                  </p>
-                ) : infoFiles?.files.length ? (
-                  <div className="space-y-1">
-                    {infoFiles.files.slice(0, 5).map(file => <RequirementInfoFileRow key={file.relativePath} file={file} />)}
-                  </div>
-                ) : (
-                  <p className={cn('rounded-[10px] px-3 py-2 text-[12px] leading-5', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.weak)}>
-                    Save implementation plans or handoff notes into this TAPD info folder. Any session linked to TAPD-{item.sourceItemId} can read them on the next turn.
-                  </p>
-                )}
-              </div>
-            </DetailSection>
 
             <DetailSection title="TAPD details">
               <PropertyRow label="Created by" value={item.creator ? <InlineValue>{item.creator}</InlineValue> : undefined} emptyText="Unknown" />
