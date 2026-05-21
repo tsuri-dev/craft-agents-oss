@@ -27,7 +27,10 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
+import { getModelDisplayName } from '@config/models'
 
 export interface AgentProfileMock {
   id: string
@@ -48,6 +51,41 @@ export interface AgentProfileMock {
   recentRuns: number
   lastRun: string
 }
+
+type AgentConnectionOption = {
+  slug: string
+  name: string
+  models: string[]
+  defaultModel?: string
+  isAuthenticated?: boolean
+}
+
+const FALLBACK_AGENT_CONNECTIONS: AgentConnectionOption[] = [
+  {
+    slug: 'claude-code',
+    name: 'Claude Code',
+    defaultModel: 'claude-opus-4-5-20251101',
+    models: ['claude-opus-4-5-20251101', 'claude-sonnet-4-5-20250929', 'claude-haiku-4-5-20251001'],
+    isAuthenticated: true,
+  },
+  {
+    slug: 'codex',
+    name: 'Codex',
+    defaultModel: 'gpt-5.1-codex',
+    models: ['gpt-5.1-codex', 'gpt-5.1', 'gpt-5.1-mini'],
+    isAuthenticated: true,
+  },
+]
+
+const THINKING_OPTIONS = [
+  { value: 'workspace', label: 'Follow workspace default' },
+  { value: 'off', label: 'Off' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'xhigh', label: 'Extra High' },
+  { value: 'max', label: 'Max' },
+]
 
 export const MOCK_AGENT_PROFILES: AgentProfileMock[] = [
   {
@@ -449,6 +487,36 @@ export function AgentProfileDetailPage({
 
 function AgentDetailInspectorCard({ agent }: { agent: AgentProfileMock }) {
   const Icon = agent.icon
+  const appShell = useOptionalAppShellContext()
+  const connectionOptions = React.useMemo(
+    () => buildAgentConnectionOptions(appShell?.llmConnections),
+    [appShell?.llmConnections],
+  )
+  const defaultConnectionSlug = React.useMemo(() => {
+    const workspaceDefault = appShell?.workspaceDefaultLlmConnection
+    if (workspaceDefault && connectionOptions.some(connection => connection.slug === workspaceDefault)) return workspaceDefault
+    return connectionOptions[0]?.slug ?? FALLBACK_AGENT_CONNECTIONS[0]!.slug
+  }, [appShell?.workspaceDefaultLlmConnection, connectionOptions])
+  const [connectionSlug, setConnectionSlug] = React.useState(defaultConnectionSlug)
+  const selectedConnection = connectionOptions.find(connection => connection.slug === connectionSlug) ?? connectionOptions[0] ?? FALLBACK_AGENT_CONNECTIONS[0]!
+  const availableModels = selectedConnection.models.length > 0
+    ? selectedConnection.models
+    : [selectedConnection.defaultModel ?? 'connection-default']
+  const [model, setModel] = React.useState(() => availableModels[0] ?? agent.model)
+  const [thinking, setThinking] = React.useState('workspace')
+
+  React.useEffect(() => {
+    if (!connectionOptions.some(connection => connection.slug === connectionSlug)) {
+      setConnectionSlug(defaultConnectionSlug)
+    }
+  }, [connectionOptions, connectionSlug, defaultConnectionSlug])
+
+  React.useEffect(() => {
+    if (!availableModels.includes(model)) {
+      setModel(availableModels[0] ?? '')
+    }
+  }, [availableModels, model])
+
   return (
     <aside className="flex w-full flex-col overflow-hidden rounded-lg border border-border bg-background md:h-full md:min-h-0 md:overflow-y-auto">
       <div className="flex flex-col gap-3 border-b border-border px-5 pb-5 pt-5">
@@ -463,26 +531,35 @@ function AgentDetailInspectorCard({ agent }: { agent: AgentProfileMock }) {
       </div>
 
       <AgentInspectorSection label="Properties">
-        <AgentPropRow label="Runtime">
-          <span className="flex min-w-0 items-center gap-2">
-            <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="truncate">{agent.runtime}</span>
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
-          </span>
+        <AgentPropRow label="Connection">
+          <AgentInspectorSelect
+            ariaLabel="Agent connection"
+            value={selectedConnection.slug}
+            onValueChange={setConnectionSlug}
+            options={connectionOptions.map(connection => ({ value: connection.slug, label: connection.name }))}
+          />
+          <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', selectedConnection.isAuthenticated === false ? 'bg-warning' : 'bg-success')} />
         </AgentPropRow>
-        <AgentPropRow label="Model">{agent.model}</AgentPropRow>
-        <AgentPropRow label="Thinking">Follow CLI config</AgentPropRow>
+        <AgentPropRow label="Model">
+          <AgentInspectorSelect
+            ariaLabel="Agent model"
+            value={model}
+            onValueChange={setModel}
+            options={availableModels.map(modelId => ({ value: modelId, label: modelId === 'connection-default' ? 'Connection default' : getModelDisplayName(modelId) }))}
+          />
+        </AgentPropRow>
+        <AgentPropRow label="Thinking">
+          <AgentInspectorSelect
+            ariaLabel="Agent thinking"
+            value={thinking}
+            onValueChange={setThinking}
+            options={THINKING_OPTIONS}
+          />
+        </AgentPropRow>
         <AgentPropRow label="Visibility">Workspace</AgentPropRow>
-        <AgentPropRow label="Concurrency">6</AgentPropRow>
       </AgentInspectorSection>
 
       <AgentInspectorSection label="Details">
-        <AgentPropRow label="Owner">
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-warning text-[9px] font-semibold text-warning-foreground">c</span>
-            <span className="truncate">ccco little</span>
-          </span>
-        </AgentPropRow>
         <AgentPropRow label="Created">8d ago</AgentPropRow>
         <AgentPropRow label="Updated">8d ago</AgentPropRow>
       </AgentInspectorSection>
@@ -504,6 +581,34 @@ function AgentDetailInspectorCard({ agent }: { agent: AgentProfileMock }) {
   )
 }
 
+type LlmConnectionLike = {
+  slug: string
+  name: string
+  models?: Array<string | { id: string }>
+  defaultModel?: string
+  isAuthenticated?: boolean
+}
+
+function buildAgentConnectionOptions(connections?: LlmConnectionLike[] | null): AgentConnectionOption[] {
+  if (!connections || connections.length === 0) return FALLBACK_AGENT_CONNECTIONS
+  return connections.map(connection => {
+    const models = (connection.models ?? [])
+      .map(model => typeof model === 'string' ? model : model.id)
+      .filter(Boolean)
+    const dedupedModels = Array.from(new Set([
+      ...(connection.defaultModel ? [connection.defaultModel] : []),
+      ...models,
+    ]))
+    return {
+      slug: connection.slug,
+      name: connection.name || connection.slug,
+      defaultModel: connection.defaultModel,
+      models: dedupedModels,
+      isAuthenticated: connection.isAuthenticated,
+    }
+  })
+}
+
 function AgentInspectorSection({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="border-b border-border px-5 py-4">
@@ -523,6 +628,36 @@ function AgentPropRow({ label, children }: { label: string; children: React.Reac
         {children}
       </div>
     </div>
+  )
+}
+
+function AgentInspectorSelect({
+  ariaLabel,
+  value,
+  onValueChange,
+  options,
+}: {
+  ariaLabel: string
+  value: string
+  onValueChange: (value: string) => void
+  options: Array<{ value: string; label: string }>
+}) {
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger
+        aria-label={ariaLabel}
+        className="h-7 min-w-0 flex-1 border-transparent bg-transparent px-1.5 py-0 text-xs shadow-none hover:bg-accent/50 focus:ring-0 data-[state=open]:ring-1 data-[state=open]:ring-foreground/20"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent className="min-w-[180px]">
+        {options.map(option => (
+          <SelectItem key={option.value} value={option.value} className="text-xs">
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
 
