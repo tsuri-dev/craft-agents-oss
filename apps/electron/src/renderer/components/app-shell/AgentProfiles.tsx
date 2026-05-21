@@ -6,17 +6,23 @@ import {
   BookOpenText,
   Bot,
   CheckCircle2,
+  ChevronDown,
   CircleX,
   Code2,
   FileText,
+  Filter,
   GitPullRequest,
   Hash,
+  Info,
   KeyRound,
+  ListChecks,
   Monitor,
   MoreHorizontal,
   Plus,
+  Save,
   Search,
-  Terminal,
+  SlidersHorizontal,
+  Square,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -46,22 +52,22 @@ export interface AgentProfileMock {
 export const MOCK_AGENT_PROFILES: AgentProfileMock[] = [
   {
     id: 'qqnews-implementation',
-    name: 'QQNews Implementation',
-    description: 'Turns linked requirements and local handoff notes into implementation plans and code changes.',
-    instruction: 'Read linked requirement context first. Prefer local snapshots and info files. Use repo context before changing code. Save durable decisions back to the parent context.',
+    name: 'Orion',
+    description: 'Breaks down work, drafts specs, keeps the board tidy.',
+    instruction: 'You are a Planning Agent. Turn loose ideas and open issues into scoped, ready-to-execute work: break them down into subtasks, write acceptance criteria, and propose owners and sequencing. Prefer clarity over speed. When blocked by missing context, ask one specific question rather than guessing.',
     icon: Code2,
-    tone: 'Build agent',
+    tone: 'Planning agent',
     status: 'ready',
-    model: 'Claude Opus',
-    thinkingLevel: 'High',
+    model: 'Default',
+    thinkingLevel: 'Follow CLI config',
     permissionMode: 'Ask',
-    skillSlugs: ['save-to-tapd-info', 'verification-before-completion'],
-    sourceSlugs: ['qqnews-context-wiki'],
+    skillSlugs: [],
+    sourceSlugs: [],
     runtime: 'Codex (CORINLI-MC6)',
     availability: 'online',
     workload: 'Idle',
-    recentRuns: 12,
-    lastRun: 'Today',
+    recentRuns: 5,
+    lastRun: '8d ago',
   },
   {
     id: 'reviewer',
@@ -465,6 +471,7 @@ function AgentDetailInspectorCard({ agent }: { agent: AgentProfileMock }) {
           </span>
         </AgentPropRow>
         <AgentPropRow label="Model">{agent.model}</AgentPropRow>
+        <AgentPropRow label="Thinking">Follow CLI config</AgentPropRow>
         <AgentPropRow label="Visibility">Workspace</AgentPropRow>
         <AgentPropRow label="Concurrency">6</AgentPropRow>
       </AgentInspectorSection>
@@ -519,15 +526,14 @@ function AgentPropRow({ label, children }: { label: string; children: React.Reac
   )
 }
 
-type AgentDetailTab = 'activity' | 'tasks' | 'instructions' | 'skills' | 'environment' | 'custom-args'
+type AgentDetailTab = 'activity' | 'tasks' | 'instructions' | 'skills' | 'environment'
 
 const AGENT_DETAIL_TABS: Array<{ id: AgentDetailTab; label: string; icon: typeof Bot }> = [
   { id: 'activity', label: 'Activity', icon: Activity },
-  { id: 'tasks', label: 'Tasks', icon: CheckCircle2 },
+  { id: 'tasks', label: 'Tasks', icon: ListChecks },
   { id: 'instructions', label: 'Instructions', icon: FileText },
   { id: 'skills', label: 'Skills', icon: BookOpenText },
   { id: 'environment', label: 'Environment', icon: KeyRound },
-  { id: 'custom-args', label: 'Custom Args', icon: Terminal },
 ]
 
 function AgentOverviewPaneMock({ agent }: { agent: AgentProfileMock }) {
@@ -556,11 +562,10 @@ function AgentOverviewPaneMock({ agent }: { agent: AgentProfileMock }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {activeTab === 'activity' && <AgentActivityTab agent={agent} />}
-        {activeTab === 'tasks' && <AgentPlaceholderTab title="Tasks" body="Task assignment and dispatch history will live here once Agent Runs are wired." />}
+        {activeTab === 'tasks' && <AgentTasksTab />}
         {activeTab === 'instructions' && <AgentInstructionsTab agent={agent} />}
-        {activeTab === 'skills' && <AgentTokensTab title="Skills" items={agent.skillSlugs} empty="No skills attached." />}
-        {activeTab === 'environment' && <AgentPlaceholderTab title="Environment" body="Environment variables and runtime device settings will be configured here." />}
-        {activeTab === 'custom-args' && <AgentPlaceholderTab title="Custom Args" body="Runtime-specific CLI arguments and advanced execution switches will be configured here." />}
+        {activeTab === 'skills' && <AgentSkillsTab agent={agent} />}
+        {activeTab === 'environment' && <AgentEnvironmentTab />}
       </div>
     </section>
   )
@@ -642,40 +647,166 @@ function MiniSparkline() {
   )
 }
 
+const TASK_SECTIONS: Array<{
+  id: string
+  title: string
+  count: number
+  color: string
+  rows?: Array<{ id: string; key: string; title: string; agent: string }>
+}> = [
+  { id: 'backlog', title: 'Backlog', count: 0, color: 'border-muted-foreground/70' },
+  { id: 'todo', title: 'Todo', count: 0, color: 'border-muted-foreground/70' },
+  { id: 'in-progress', title: 'In Progress', count: 0, color: 'border-warning' },
+  { id: 'in-review', title: 'In Review', count: 1, color: 'border-success', rows: [{ id: 'cta-2', key: 'CTA-2', title: 'Test', agent: 'Orion' }] },
+  { id: 'done', title: 'Done', count: 0, color: 'border-info' },
+  { id: 'blocked', title: 'Blocked', count: 1, color: 'border-destructive' },
+]
+
+function AgentTasksTab() {
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex h-[52px] shrink-0 items-center gap-3 border-b border-border px-4">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input placeholder="Search issues..." className="h-8 w-full rounded-md pl-8 text-sm" />
+        </div>
+        <Button variant="outline" size="sm" className="h-8 rounded-md text-xs">Assigned</Button>
+        <Button variant="outline" size="sm" className="h-8 rounded-md text-xs text-muted-foreground">Created</Button>
+        <div className="ml-auto flex items-center gap-1.5">
+          <Button variant="outline" size="icon" className="h-8 w-8 rounded-md">
+            <Filter className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="icon" className="h-8 w-8 rounded-md">
+            <SlidersHorizontal className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        <div className="space-y-5">
+          {TASK_SECTIONS.map(section => (
+            <TaskStatusSection key={section.id} section={section} />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TaskStatusSection({ section }: { section: (typeof TASK_SECTIONS)[number] }) {
+  const rows = section.rows ?? []
+  return (
+    <section>
+      <div className="flex h-11 items-center gap-2 rounded-lg bg-muted/50 px-3">
+        <Square className="h-4 w-4 text-muted-foreground" />
+        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className={cn('h-3.5 w-3.5 rounded-full border-2', section.color)} />
+        <span className="text-sm font-semibold text-foreground">{section.title}</span>
+        <span className="font-mono text-xs tabular-nums text-muted-foreground">{section.count}</span>
+      </div>
+      {rows.length === 0 ? (
+        <div className="flex h-[104px] items-center justify-center text-sm text-muted-foreground">No issues</div>
+      ) : (
+        <div className="space-y-1 px-6 py-3">
+          {rows.map(row => (
+            <div key={row.id} className="group flex h-10 items-center gap-4 rounded-md px-2 text-sm hover:bg-muted/40">
+              <span className="font-mono text-muted-foreground">—</span>
+              <span className="font-mono text-xs text-muted-foreground">{row.key}</span>
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">{row.title}</span>
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-muted-foreground opacity-80">
+                <Bot className="h-3.5 w-3.5" />
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 function AgentInstructionsTab({ agent }: { agent: AgentProfileMock }) {
   return (
-    <div className="mx-auto flex h-full max-w-2xl flex-col p-4 md:p-6">
-      <h2 className="text-sm font-semibold">Instructions</h2>
-      <div className="mt-4 rounded-lg border border-border bg-background p-4">
-        <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground/85">{agent.instruction}</p>
+    <div className="flex h-full flex-col gap-4 p-6">
+      <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
+        Define this agent&apos;s identity and working style. Injected into the agent&apos;s context for every task.
+        Markdown is supported.
+      </p>
+      <div className="min-h-0 flex-1 rounded-lg border border-border bg-background px-5 py-4">
+        <p className="whitespace-pre-wrap text-[18px] leading-8 text-foreground">{agent.instruction}</p>
+      </div>
+      <div className="flex items-center justify-end">
+        <Button size="sm" className="gap-1.5">
+          <Save className="h-3.5 w-3.5" />
+          Save
+        </Button>
       </div>
     </div>
   )
 }
 
-function AgentTokensTab({ title, items, empty }: { title: string; items: string[]; empty: string }) {
+function AgentSkillsTab({ agent }: { agent: AgentProfileMock }) {
+  const skills = agent.skillSlugs
   return (
-    <div className="mx-auto flex h-full max-w-2xl flex-col p-4 md:p-6">
-      <h2 className="text-sm font-semibold">{title}</h2>
-      <div className="mt-4 rounded-lg border border-border bg-background p-4">
-        {items.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {items.map(item => <AgentSmallToken key={item}>{item}</AgentSmallToken>)}
-          </div>
-        ) : (
-          <p className="text-sm italic text-muted-foreground/65">{empty}</p>
-        )}
+    <div className="space-y-4 p-6">
+      <div className="flex items-start justify-between gap-3">
+        <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
+          Workspace skills assigned to this agent. Local runtime skills are always available automatically.
+        </p>
+        <Button variant="outline" size="sm" className="shrink-0 gap-1.5">
+          <Plus className="h-3 w-3" />
+          Add skill
+        </Button>
       </div>
+
+      <div className="flex items-start gap-2 rounded-md border border-info/30 bg-info/5 px-3 py-2.5">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" />
+        <p className="text-xs text-muted-foreground">Importing creates a workspace copy that your team can edit and reuse.</p>
+      </div>
+
+      {skills.length === 0 ? (
+        <div className="flex min-h-[240px] flex-col items-center justify-center rounded-lg border border-dashed border-border py-12 text-center">
+          <FileText className="h-8 w-8 text-muted-foreground/40" />
+          <p className="mt-3 text-sm text-muted-foreground">No skills assigned</p>
+          <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">
+            Add workspace skills to share team knowledge with this agent.
+          </p>
+        </div>
+      ) : (
+        <ul className="space-y-1.5">
+          {skills.map(skill => (
+            <li key={skill} className="flex items-center gap-2.5 rounded-md border border-border px-3 py-2">
+              <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">{skill}</div>
+                <div className="truncate text-xs text-muted-foreground">Workspace skill</div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
 
-function AgentPlaceholderTab({ title, body }: { title: string; body: string }) {
+function AgentEnvironmentTab() {
   return (
-    <div className="mx-auto flex h-full max-w-2xl flex-col p-4 md:p-6">
-      <h2 className="text-sm font-semibold">{title}</h2>
-      <div className="mt-4 rounded-lg border border-border bg-background p-4 text-xs leading-relaxed text-muted-foreground">
-        {body}
+    <div className="flex h-full flex-col p-6">
+      <div className="flex items-start justify-between gap-3">
+        <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
+          Injected into the agent process at launch (e.g.{' '}
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px]">ANTHROPIC_API_KEY</code>,{' '}
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px]">ANTHROPIC_BASE_URL</code>).
+        </p>
+        <div className="flex shrink-0 flex-col items-end gap-3">
+          <Button variant="outline" size="sm" className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" />
+            Add
+          </Button>
+          <Button size="sm" className="gap-1.5">
+            <Save className="h-3.5 w-3.5" />
+            Save
+          </Button>
+        </div>
       </div>
     </div>
   )
