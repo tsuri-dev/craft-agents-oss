@@ -31,6 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
 import { getModelDisplayName } from '@config/models'
+import { DEFAULT_THINKING_LEVEL, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 
 export interface AgentProfileMock {
   id: string
@@ -41,11 +42,11 @@ export interface AgentProfileMock {
   tone: string
   status: 'ready' | 'draft'
   model: string
-  thinkingLevel: string
+  thinkingLevel: ThinkingLevel
   permissionMode: string
   skillSlugs: string[]
   sourceSlugs: string[]
-  runtime: string
+  connectionName: string
   availability: 'online' | 'unstable' | 'offline'
   workload: string
   recentRuns: number
@@ -77,8 +78,7 @@ const FALLBACK_AGENT_CONNECTIONS: AgentConnectionOption[] = [
   },
 ]
 
-const THINKING_OPTIONS = [
-  { value: 'workspace', label: 'Follow workspace default' },
+const THINKING_OPTIONS: Array<{ value: ThinkingLevel; label: string }> = [
   { value: 'off', label: 'Off' },
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium' },
@@ -97,11 +97,11 @@ export const MOCK_AGENT_PROFILES: AgentProfileMock[] = [
     tone: 'Planning agent',
     status: 'ready',
     model: 'Default',
-    thinkingLevel: 'Follow CLI config',
+    thinkingLevel: 'medium',
     permissionMode: 'Ask',
     skillSlugs: [],
     sourceSlugs: [],
-    runtime: 'Codex (CORINLI-MC6)',
+    connectionName: 'Claude Code',
     availability: 'online',
     workload: 'Idle',
     recentRuns: 5,
@@ -116,11 +116,11 @@ export const MOCK_AGENT_PROFILES: AgentProfileMock[] = [
     tone: 'Review agent',
     status: 'ready',
     model: 'Claude Sonnet',
-    thinkingLevel: 'Medium',
+    thinkingLevel: 'medium',
     permissionMode: 'Safe',
     skillSlugs: ['receiving-code-review', 'verification-before-completion'],
     sourceSlugs: [],
-    runtime: 'Claude Code (local)',
+    connectionName: 'Claude Code',
     availability: 'online',
     workload: 'Idle',
     recentRuns: 8,
@@ -135,11 +135,11 @@ export const MOCK_AGENT_PROFILES: AgentProfileMock[] = [
     tone: 'Documentation agent',
     status: 'draft',
     model: 'GPT Mini',
-    thinkingLevel: 'Low',
+    thinkingLevel: 'low',
     permissionMode: 'Ask',
     skillSlugs: ['save-to-tapd-info'],
     sourceSlugs: [],
-    runtime: 'Codex (CORINLI-MC6)',
+    connectionName: 'Codex',
     availability: 'unstable',
     workload: 'Queued 1',
     recentRuns: 3,
@@ -230,7 +230,7 @@ export function AgentProfilesOverviewPage({ onAgentClick }: { onAgentClick: (age
             <div>Agent</div>
             <div>Status</div>
             <div>Workload</div>
-            <div>Runtime</div>
+            <div>Connection</div>
             <div>Activity (7d)</div>
             <div className="text-right">Runs</div>
             <div />
@@ -336,7 +336,7 @@ function AgentTableRow({ agent, onClick }: { agent: AgentProfileMock; onClick: (
       <div className="text-xs text-muted-foreground">{agent.workload}</div>
       <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
         <Monitor className="h-3.5 w-3.5 shrink-0" />
-        <span className="truncate">{agent.runtime}</span>
+        <span className="truncate">{agent.connectionName}</span>
       </div>
       <div className="h-px w-20 bg-border" />
       <div className="text-right font-mono text-xs tabular-nums text-muted-foreground">{agent.recentRuns}</div>
@@ -431,7 +431,7 @@ function AgentProfileRow({ agent, selected, onClick }: { agent: AgentProfileMock
       <div className="mt-2 flex flex-wrap gap-1 pl-[42px]">
         <MiniBadge>{agent.skillSlugs.length} skills</MiniBadge>
         <MiniBadge>{agent.sourceSlugs.length} sources</MiniBadge>
-        <MiniBadge>{agent.thinkingLevel}</MiniBadge>
+        <MiniBadge>{getThinkingLabel(agent.thinkingLevel)}</MiniBadge>
       </div>
     </button>
   )
@@ -503,7 +503,7 @@ function AgentDetailInspectorCard({ agent }: { agent: AgentProfileMock }) {
     ? selectedConnection.models
     : [selectedConnection.defaultModel ?? 'connection-default']
   const [model, setModel] = React.useState(() => availableModels[0] ?? agent.model)
-  const [thinking, setThinking] = React.useState('workspace')
+  const [thinking, setThinking] = React.useState<ThinkingLevel>(normalizeAgentThinking(agent.thinkingLevel))
 
   React.useEffect(() => {
     if (!connectionOptions.some(connection => connection.slug === connectionSlug)) {
@@ -552,7 +552,7 @@ function AgentDetailInspectorCard({ agent }: { agent: AgentProfileMock }) {
           <AgentInspectorSelect
             ariaLabel="Agent thinking"
             value={thinking}
-            onValueChange={setThinking}
+            onValueChange={value => setThinking(normalizeAgentThinking(value))}
             options={THINKING_OPTIONS}
           />
         </AgentPropRow>
@@ -587,6 +587,16 @@ type LlmConnectionLike = {
   models?: Array<string | { id: string }>
   defaultModel?: string
   isAuthenticated?: boolean
+}
+
+function getThinkingLabel(value: string): string {
+  return THINKING_OPTIONS.find(option => option.value === value)?.label ?? value
+}
+
+function normalizeAgentThinking(value: string): ThinkingLevel {
+  return THINKING_OPTIONS.some(option => option.value === value)
+    ? value as ThinkingLevel
+    : DEFAULT_THINKING_LEVEL
 }
 
 function buildAgentConnectionOptions(connections?: LlmConnectionLike[] | null): AgentConnectionOption[] {
@@ -885,7 +895,7 @@ function AgentSkillsTab({ agent }: { agent: AgentProfileMock }) {
     <div className="space-y-4 p-6">
       <div className="flex items-start justify-between gap-3">
         <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
-          Workspace skills assigned to this agent. Local runtime skills are always available automatically.
+          Workspace skills assigned to this agent. Local skills are always available automatically.
         </p>
         <Button variant="outline" size="sm" className="shrink-0 gap-1.5">
           <Plus className="h-3 w-3" />
