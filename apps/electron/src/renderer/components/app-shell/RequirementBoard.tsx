@@ -11,9 +11,6 @@ import {
   CheckCircle2,
   ChevronRight,
   Circle,
-  FileText,
-  FolderOpen,
-  Info,
   Loader2,
   Link2,
   Plus,
@@ -25,8 +22,9 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
+import { SessionFilesSection } from '../right-sidebar/SessionFilesSection'
+import { InfoPopoverShell, InfoPopoverTriggerButton } from './SessionInfoPopover'
 import { cn } from '@/lib/utils'
 import { navigate, routes } from '@/lib/navigate'
 import { useNavigation } from '@/contexts/NavigationContext'
@@ -41,6 +39,7 @@ import type {
   RequirementComment,
   RequirementInfoFilesResult,
   RequirementListFilters,
+  SessionFile,
   RequirementPluginDescriptor,
 } from '../../../shared/types'
 
@@ -731,30 +730,46 @@ function RequirementActivity({ item, onOpenUrl }: { item: ExternalRequirementIte
   )
 }
 
-function formatInfoFileSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
+function buildRequirementInfoFileTree(files: RequirementInfoFilesResult['files'] = []): SessionFile[] {
+  const roots: SessionFile[] = []
+  const directories = new Map<string, SessionFile>()
 
-function RequirementInfoFileRow({ file }: { file: RequirementInfoFilesResult['files'][number] }) {
-  return (
-    <button
-      type="button"
-      onClick={() => void window.electronAPI.openFile(file.path)}
-      className={cn('grid w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2 rounded-[10px] px-2 py-2 text-left transition-colors', TAPD_DETAIL_THEME.hover)}
-      title={file.path}
-    >
-      <span className={cn('flex h-7 w-7 items-center justify-center rounded-full', TAPD_DETAIL_THEME.pill)}>
-        <FileText className="h-3.5 w-3.5" />
-      </span>
-      <span className="min-w-0">
-        <span className={cn('block truncate text-[13px]', TAPD_DETAIL_THEME.secondary)}>{file.relativePath}</span>
-        <span className={cn('mt-0.5 block truncate text-[12px]', TAPD_DETAIL_THEME.weak)}>{file.kind} · {formatInfoFileSize(file.size)}</span>
-      </span>
-      <span className={cn('whitespace-nowrap text-[12px]', TAPD_DETAIL_THEME.weak)}>{formatRelativeRequirementTime(file.updatedAt)}</span>
-    </button>
-  )
+  for (const file of files) {
+    const parts = file.relativePath.split('/').filter(Boolean)
+    let currentChildren = roots
+    let currentPath = ''
+
+    for (let i = 0; i < parts.length; i += 1) {
+      const part = parts[i]
+      const isLeaf = i === parts.length - 1
+      currentPath = currentPath ? `${currentPath}/${part}` : part
+
+      if (isLeaf) {
+        currentChildren.push({
+          name: part,
+          path: file.path,
+          type: 'file',
+          size: file.size,
+        })
+        continue
+      }
+
+      let directory = directories.get(currentPath)
+      if (!directory) {
+        directory = {
+          name: part,
+          path: `${file.path.slice(0, file.path.length - file.relativePath.length)}${currentPath}`,
+          type: 'directory',
+          children: [],
+        }
+        directories.set(currentPath, directory)
+        currentChildren.push(directory)
+      }
+      currentChildren = directory.children ?? []
+    }
+  }
+
+  return roots
 }
 
 function RequirementInfoPopover({
@@ -768,64 +783,39 @@ function RequirementInfoPopover({
   infoFilesError: string | null
   onRefresh: (options?: { notifyOnError?: boolean }) => void
 }) {
+  const fileTree = React.useMemo(() => buildRequirementInfoFileTree(infoFiles?.files ?? []), [infoFiles?.files])
+
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <PanelHeaderCenterButton
-          icon={<Info className="h-4 w-4" />}
-          tooltip={infoFiles?.files.length ? `Requirement info (${infoFiles.files.length})` : 'Requirement info'}
-          aria-label="Requirement info"
+    <InfoPopoverShell
+      side="bottom"
+      align="end"
+      sideOffset={8}
+      onOpenChange={(open) => {
+        if (open) onRefresh()
+      }}
+      trigger={(
+        <InfoPopoverTriggerButton
+          label="Info"
+          aria-label={infoFiles?.files.length ? `Requirement info (${infoFiles.files.length})` : 'Requirement info'}
         />
-      </PopoverTrigger>
-      <PopoverContent
-        side="bottom"
-        align="end"
-        sideOffset={8}
-        className="h-[460px] w-[360px] max-w-[calc(100vw-32px)] overflow-hidden rounded-[8px] bg-background p-0 text-foreground shadow-modal-small"
-        onOpenAutoFocus={(event) => event.preventDefault()}
-        onCloseAutoFocus={(event) => event.preventDefault()}
-      >
-        <div className={cn('flex items-center justify-between gap-3 border-b px-3 py-2.5', TAPD_DETAIL_THEME.borderSubtle)}>
-          <div className="min-w-0">
-            <div className={cn('truncate text-[13px] font-medium', TAPD_DETAIL_THEME.title)}>Requirement info</div>
-            <div className={cn('mt-0.5 truncate text-[12px]', TAPD_DETAIL_THEME.weak)} title={infoFiles?.infoDirPath}>
-              TAPD-{item.sourceItemId}
-            </div>
-          </div>
-          <div className="flex shrink-0 gap-1">
-            <PanelHeaderCenterButton
-              icon={<RefreshCw className="h-3.5 w-3.5" />}
-              tooltip="Refresh info files"
-              aria-label="Refresh info files"
-              onClick={() => onRefresh({ notifyOnError: true })}
-            />
-            {infoFiles?.infoDirPath && (
-              <PanelHeaderCenterButton
-                icon={<FolderOpen className="h-3.5 w-3.5" />}
-                tooltip="Open info folder"
-                aria-label="Open info folder"
-                onClick={() => void window.electronAPI.showInFolder(infoFiles.infoDirPath)}
-              />
-            )}
-          </div>
+      )}
+    >
+      {infoFilesError ? (
+        <div className="h-full min-h-0 p-3">
+          <p className="rounded-[10px] bg-destructive/10 px-3 py-2 text-[12px] leading-5 text-destructive">
+            Could not load info files: {infoFilesError}
+          </p>
         </div>
-        <div className="h-[calc(460px-57px)] overflow-y-auto px-2 py-2">
-          {infoFilesError ? (
-            <p className={cn('rounded-[10px] px-3 py-2 text-[12px] leading-5 text-destructive', TAPD_DETAIL_THEME.subtlePanel)}>
-              Could not load info files: {infoFilesError}
-            </p>
-          ) : infoFiles?.files.length ? (
-            <div className="space-y-1">
-              {infoFiles.files.map(file => <RequirementInfoFileRow key={file.relativePath} file={file} />)}
-            </div>
-          ) : (
-            <p className={cn('rounded-[10px] px-3 py-2 text-[12px] leading-5', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.weak)}>
-              Save implementation plans or handoff notes into this TAPD info folder. Any session linked to TAPD-{item.sourceItemId} can read them on the next turn.
-            </p>
-          )}
-        </div>
-      </PopoverContent>
-    </Popover>
+      ) : (
+        <SessionFilesSection
+          filesOverride={fileTree}
+          sessionFolderPath={infoFiles?.infoDirPath}
+          title="Requirement info"
+          emptyText={`Save implementation plans or handoff notes here. Any session linked to TAPD-${item.sourceItemId} can read them on the next turn.`}
+          className="h-full min-h-0"
+        />
+      )}
+    </InfoPopoverShell>
   )
 }
 

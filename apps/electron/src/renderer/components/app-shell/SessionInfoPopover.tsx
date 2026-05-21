@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from '@/components/ui/drawer'
 import { Input } from '@/components/ui/input'
+import { Info } from 'lucide-react'
 import { useAppShellContext, useSession } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
 import { SessionFilesSection } from '../right-sidebar/SessionFilesSection'
@@ -18,7 +19,7 @@ interface SessionInfoPopoverProps {
   presentation?: 'popover' | 'drawer'
 }
 
-const DEFAULT_POPOVER_CONTENT_CLASS = 'w-[360px] h-[460px] min-w-[200px] max-w-[420px] overflow-hidden rounded-[8px] bg-background text-foreground shadow-modal-small p-0'
+export const INFO_POPOVER_CONTENT_CLASS = 'w-[360px] h-[460px] min-w-[200px] max-w-[420px] overflow-hidden rounded-[8px] bg-background text-foreground shadow-modal-small p-0'
 const DEFAULT_DRAWER_CONTENT_CLASS = [
   'data-[vaul-drawer-direction=bottom]:inset-x-2',
   'data-[vaul-drawer-direction=bottom]:bottom-2',
@@ -26,6 +27,72 @@ const DEFAULT_DRAWER_CONTENT_CLASS = [
   'data-[vaul-drawer-direction=bottom]:max-h-[min(82vh,42rem)]',
   'overflow-hidden rounded-[14px] border border-border/60 bg-background shadow-modal-small',
 ].join(' ')
+
+export function InfoPopoverTriggerButton({
+  label = 'Info',
+  icon = <Info className="h-3.5 w-3.5 shrink-0" />,
+  className,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { label?: string; icon?: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "h-[30px] pl-[12px] pr-[14px] text-xs font-medium rounded-[8px] flex items-center gap-1.5 shrink-0",
+        "outline-none select-none transition-colors shadow-minimal",
+        "hover:bg-foreground/5 data-[state=open]:bg-foreground/5",
+        "bg-[color-mix(in_srgb,var(--background)_97%,var(--foreground)_3%)]",
+        "text-foreground/80",
+        className,
+      )}
+      {...props}
+    >
+      {icon}
+      <span className="whitespace-nowrap">{label}</span>
+    </button>
+  )
+}
+
+export function InfoPopoverShell({
+  trigger,
+  children,
+  side = 'top',
+  align = 'end',
+  sideOffset = 6,
+  contentClassName,
+  onOpenChange,
+}: {
+  trigger: React.ReactElement
+  children: React.ReactNode
+  side?: 'top' | 'right' | 'bottom' | 'left'
+  align?: 'start' | 'center' | 'end'
+  sideOffset?: number
+  contentClassName?: string
+  onOpenChange?: (open: boolean) => void
+}) {
+  const [open, setOpen] = React.useState(false)
+
+  const handleOpenChange = React.useCallback((nextOpen: boolean) => {
+    setOpen(nextOpen)
+    onOpenChange?.(nextOpen)
+  }, [onOpenChange])
+
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      <PopoverContent
+        className={contentClassName ?? INFO_POPOVER_CONTENT_CLASS}
+        side={side}
+        align={align}
+        sideOffset={sideOffset}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onCloseAutoFocus={(e) => e.preventDefault()}
+      >
+        {children}
+      </PopoverContent>
+    </Popover>
+  )
+}
 
 export function SessionInfoPopover({
   sessionId,
@@ -80,7 +147,7 @@ export function SessionInfoPopover({
         {trigger}
       </PopoverTrigger>
       <PopoverContent
-        className={contentClassName ?? DEFAULT_POPOVER_CONTENT_CLASS}
+        className={contentClassName ?? INFO_POPOVER_CONTENT_CLASS}
         side={side}
         align={align}
         sideOffset={sideOffset}
