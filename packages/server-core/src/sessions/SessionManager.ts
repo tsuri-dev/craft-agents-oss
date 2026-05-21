@@ -3,7 +3,7 @@ import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput
 import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@craft-agent/server-core/runtime'
 import { basename, dirname, join } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { appendFile, readFile, writeFile, mkdir } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary } from '@craft-agent/shared/agent'
@@ -79,7 +79,7 @@ import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { collectDirectoryFiles, restoreFiles, type BundleFile } from '@craft-agent/shared/utils/bundle-files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SessionUsageEntry, type UsageStats, type UsageStatsRange, type UsageTotals, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
+import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SessionUsageEntry, type UsageStats, type UsageStatsRange, type UsageTotals, type RequirementBinding, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
@@ -166,6 +166,35 @@ export const AGENT_FLAGS = {
 } as const
 
 const TAPD_SOURCE_SLUG = 'tapd-mcp-http'
+const REQUIREMENT_BINDINGS_FILENAME = 'requirement-bindings.json'
+
+interface RequirementBindingStore {
+  version: 1
+  bindings: Record<string, RequirementBinding>
+}
+
+function getRequirementBindingsPath(workspaceRootPath: string): string {
+  return join(workspaceRootPath, REQUIREMENT_BINDINGS_FILENAME)
+}
+
+function requirementBindingKey(pluginId: string, sourceItemId: string): string {
+  return `${pluginId}:${sourceItemId}`
+}
+
+function readRequirementBindingStore(workspaceRootPath: string): RequirementBindingStore {
+  const filePath = getRequirementBindingsPath(workspaceRootPath)
+  if (!existsSync(filePath)) return { version: 1, bindings: {} }
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, 'utf-8')) as Partial<RequirementBindingStore>
+    return { version: 1, bindings: parsed.bindings ?? {} }
+  } catch {
+    return { version: 1, bindings: {} }
+  }
+}
+
+function writeRequirementBindingStore(workspaceRootPath: string, store: RequirementBindingStore): void {
+  writeFileSync(getRequirementBindingsPath(workspaceRootPath), JSON.stringify(store, null, 2))
+}
 
 function getTapdRequirementIdsFromLabels(labels?: string[]): string[] {
   const ids = (labels ?? [])
@@ -186,6 +215,30 @@ function hasTapdRequirementLabel(labels?: string[]): boolean {
 function filterTapdSourceForLinkedRequirementSession(sourceSlugs: string[] | undefined, labels?: string[]): string[] {
   const slugs = sourceSlugs ?? []
   return hasTapdRequirementLabel(labels) ? slugs.filter(slug => slug !== TAPD_SOURCE_SLUG) : slugs
+}
+
+function collectLinkedTapdRequirementBindings(workspaceRootPath: string, labels?: string[]): RequirementBinding[] {
+  const ids = new Set(getTapdRequirementIdsFromLabels(labels))
+  if (ids.size === 0) return []
+
+  const store = readRequirementBindingStore(workspaceRootPath)
+  return Object.values(store.bindings)
+    .filter(binding => binding.pluginId === 'tapd' && ids.has(binding.sourceItemId))
+    .sort((a, b) => a.sourceItemId.localeCompare(b.sourceItemId))
+}
+
+function mergeRequirementBindings(workspaceRootPath: string, bindings?: RequirementBinding[]): number {
+  if (!bindings?.length) return 0
+
+  const store = readRequirementBindingStore(workspaceRootPath)
+  let merged = 0
+  for (const binding of bindings) {
+    if (binding.pluginId !== 'tapd' || !binding.sourceItemId) continue
+    store.bindings[requirementBindingKey(binding.pluginId, binding.sourceItemId)] = binding
+    merged++
+  }
+  if (merged > 0) writeRequirementBindingStore(workspaceRootPath, store)
+  return merged
 }
 
 function collectLinkedTapdRequirementFiles(workspaceRootPath: string, labels?: string[]): BundleFile[] {
@@ -7966,6 +8019,7 @@ export class SessionManager implements ISessionManager {
     }
 
     const requirementFiles = collectLinkedTapdRequirementFiles(managed.workspace.rootPath, managed.labels)
+    const requirementBindings = collectLinkedTapdRequirementBindings(managed.workspace.rootPath, managed.labels)
 
     return {
       sourceSessionId: managed.id,
@@ -7974,6 +8028,7 @@ export class SessionManager implements ISessionManager {
       labels: managed.labels,
       permissionMode: managed.permissionMode,
       ...(requirementFiles.length > 0 ? { requirementFiles } : {}),
+      ...(requirementBindings.length > 0 ? { requirementBindings } : {}),
       summary,
     }
   }
@@ -7998,12 +8053,18 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Transferred session ${session.id} was not created`)
     }
 
-    if (payload.requirementFiles?.length) {
+    if (payload.requirementFiles?.length || payload.requirementBindings?.length) {
       const workspace = getWorkspaceByNameOrId(workspaceId)
       if (!workspace) throw new Error(`Workspace ${workspaceId} not found`)
-      const requirementsTapdDir = join(workspace.rootPath, 'requirements', 'tapd')
-      restoreFiles(requirementsTapdDir, payload.requirementFiles)
-      sessionLog.info(`[remote-transfer] Restored ${payload.requirementFiles.length} linked TAPD requirement file(s) to ${requirementsTapdDir}`)
+      if (payload.requirementFiles?.length) {
+        const requirementsTapdDir = join(workspace.rootPath, 'requirements', 'tapd')
+        restoreFiles(requirementsTapdDir, payload.requirementFiles)
+        sessionLog.info(`[remote-transfer] Restored ${payload.requirementFiles.length} linked TAPD requirement file(s) to ${requirementsTapdDir}`)
+      }
+      const mergedBindings = mergeRequirementBindings(workspace.rootPath, payload.requirementBindings)
+      if (mergedBindings > 0) {
+        sessionLog.info(`[remote-transfer] Merged ${mergedBindings} linked TAPD requirement binding(s) into ${getRequirementBindingsPath(workspace.rootPath)}`)
+      }
     }
 
     managed.transferredSessionSummary = payload.summary.trim()
@@ -8054,6 +8115,11 @@ export class SessionManager implements ISessionManager {
     if (requirementFiles.length > 0) {
       bundle.requirementFiles = requirementFiles
       sessionLog.info(`[dispatch] Included ${requirementFiles.length} linked TAPD requirement file(s) in session bundle ${sessionId}`)
+    }
+    const requirementBindings = collectLinkedTapdRequirementBindings(managed.workspace.rootPath, managed.labels)
+    if (requirementBindings.length > 0) {
+      bundle.requirementBindings = requirementBindings
+      sessionLog.info(`[dispatch] Included ${requirementBindings.length} linked TAPD requirement binding(s) in session bundle ${sessionId}`)
     }
 
     return bundle
@@ -8221,6 +8287,10 @@ export class SessionManager implements ISessionManager {
       const requirementsTapdDir = join(workspaceRootPath, 'requirements', 'tapd')
       restoreFiles(requirementsTapdDir, bundle.requirementFiles)
       sessionLog.info(`[import] Restored ${bundle.requirementFiles.length} linked TAPD requirement file(s) to ${requirementsTapdDir}`)
+    }
+    const mergedBindings = mergeRequirementBindings(workspaceRootPath, bundle.requirementBindings)
+    if (mergedBindings > 0) {
+      sessionLog.info(`[import] Merged ${mergedBindings} linked TAPD requirement binding(s) into ${getRequirementBindingsPath(workspaceRootPath)}`)
     }
 
     // Register in-memory — pass session metadata without messages to avoid

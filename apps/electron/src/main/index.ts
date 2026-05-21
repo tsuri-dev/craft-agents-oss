@@ -813,6 +813,12 @@ app.whenReady().then(async () => {
                 ;(bundle.session.header as any).transferredSessionSummaryApplied = false
                 console.log(`[Transfer] Summary generated: ${transferPayload.summary.length} chars`)
               }
+              if (transferPayload?.requirementFiles?.length && !bundle.requirementFiles?.length) {
+                bundle.requirementFiles = transferPayload.requirementFiles
+              }
+              if (transferPayload?.requirementBindings?.length && !bundle.requirementBindings?.length) {
+                bundle.requirementBindings = transferPayload.requirementBindings
+              }
             } catch (err) {
               console.warn('[Transfer] Source-server summary generation failed:', err)
             }
@@ -832,12 +838,18 @@ app.whenReady().then(async () => {
               ;(bundle.session.header as any).transferredSessionSummaryApplied = false
               console.log(`[Transfer] Summary generated: ${transferPayload.summary.length} chars`)
             }
+            if (transferPayload?.requirementFiles?.length && !bundle.requirementFiles?.length) {
+              bundle.requirementFiles = transferPayload.requirementFiles
+            }
+            if (transferPayload?.requirementBindings?.length && !bundle.requirementBindings?.length) {
+              bundle.requirementBindings = transferPayload.requirementBindings
+            }
           } catch (err) {
             console.warn('[Transfer] Summary generation failed:', err)
           }
         }
 
-        console.log(`[Transfer] Export complete: ${bundle.session?.messages?.length ?? 0} messages, ${bundle.files?.length ?? 0} files`)
+        console.log(`[Transfer] Export complete: ${bundle.session?.messages?.length ?? 0} messages, ${bundle.files?.length ?? 0} files, ${bundle.requirementFiles?.length ?? 0} requirement files, ${bundle.requirementBindings?.length ?? 0} requirement bindings`)
 
         const { url, token, remoteWorkspaceId } = targetWorkspace.remoteServer
         console.log(`[Transfer] Connecting to target remote server: ${url}`)

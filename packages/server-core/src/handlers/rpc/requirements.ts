@@ -400,6 +400,34 @@ function applyClientFilters(items: ExternalRequirementItem[], filters: Requireme
   })
 }
 
+function getCachedRequirementItems(workspaceRootPath: string): ExternalRequirementItem[] {
+  const bindings = readBindingStore(workspaceRootPath).bindings
+  return Object.values(bindings)
+    .filter(binding => binding.pluginId === TAPD_PLUGIN_ID && binding.itemSnapshot)
+    .map(binding => ({ ...binding.itemSnapshot!, binding }))
+    .sort((a, b) => {
+      const aTime = Number(a.binding?.updatedAt ?? 0)
+      const bTime = Number(b.binding?.updatedAt ?? 0)
+      return bTime - aTime
+    })
+}
+
+function buildCachedRequirementListResult(workspaceRootPath: string, filters: RequirementListFilters): RequirementListResult {
+  const items = applyClientFilters(getCachedRequirementItems(workspaceRootPath), filters)
+  const page = filters.page ?? 1
+  const limit = filters.limit ?? (items.length || 30)
+  const start = Math.max(0, (page - 1) * limit)
+  const pagedItems = items.slice(start, start + limit)
+  return {
+    items: pagedItems,
+    total: items.length,
+    page,
+    limit,
+    hasMore: start + limit < items.length,
+    stale: true,
+  }
+}
+
 function defaultGroupName(item: ExternalRequirementItem): string {
   const title = item.title.length > 80 ? `${item.title.slice(0, 77)}…` : item.title
   return `[TAPD-${item.sourceItemId}] ${title}`
@@ -604,10 +632,14 @@ export function registerRequirementsHandlers(server: RpcServer, deps: HandlerDep
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
     if (pluginId !== TAPD_PLUGIN_ID) throw new Error(`Unknown requirement plugin: ${pluginId}`)
 
+    if (filters.localOnly) {
+      return buildCachedRequirementListResult(workspace.rootPath, filters)
+    }
+
     const source = getTapdSource(workspace.rootPath)
-    if (!source) throw new Error('TAPD source is not configured')
+    if (!source) return buildCachedRequirementListResult(workspace.rootPath, filters)
     if (source.config.connectionStatus && source.config.connectionStatus !== 'connected') {
-      throw new Error(source.config.connectionError || `TAPD source is ${source.config.connectionStatus}`)
+      return buildCachedRequirementListResult(workspace.rootPath, filters)
     }
 
     const args = buildTapdArgs(filters)
@@ -642,11 +674,19 @@ export function registerRequirementsHandlers(server: RpcServer, deps: HandlerDep
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
     if (pluginId !== TAPD_PLUGIN_ID) throw new Error(`Unknown requirement plugin: ${pluginId}`)
+    const binding = readBindingStore(workspace.rootPath).bindings[bindingKey(pluginId, sourceItemId)]
+    if (filters.localOnly) {
+      if (binding?.itemSnapshot) return { item: { ...binding.itemSnapshot, binding } }
+      throw new Error(`No cached TAPD requirement found for ${sourceItemId}`)
+    }
+
     const source = getTapdSource(workspace.rootPath)
-    if (!source) throw new Error('TAPD source is not configured')
+    if (!source) {
+      if (binding?.itemSnapshot) return { item: { ...binding.itemSnapshot, binding } }
+      throw new Error('TAPD source is not configured')
+    }
     const payload = await callTapdTool(source, 'stories_get', buildTapdArgs(filters, sourceItemId))
     const row = extractStoryRows(payload)[0]
-    const binding = readBindingStore(workspace.rootPath).bindings[bindingKey(pluginId, sourceItemId)]
     const baseItem = normalizeTapdStory(row ?? { id: sourceItemId }, filters.workspaceId, binding)
     let contentImages: ExternalRequirementItem['contentImages'] = []
     let comments: ExternalRequirementItem['comments'] = []

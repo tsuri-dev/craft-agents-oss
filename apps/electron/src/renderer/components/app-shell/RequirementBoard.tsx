@@ -30,7 +30,7 @@ import { navigate, routes } from '@/lib/navigate'
 import { useNavigation } from '@/contexts/NavigationContext'
 import { addSessionAtom, sessionMetaMapAtom } from '@/atoms/sessions'
 import { sessionHasGroup } from '@/utils/session-group-filter'
-import { isTapdPluginInstalled, TAPD_PLUGIN_ID } from '@/utils/session-requirement-link'
+import { TAPD_PLUGIN_ID } from '@/utils/session-requirement-link'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { formatLabelEntry } from '@craft-agent/shared/labels'
 import type {
@@ -253,8 +253,11 @@ function PluginUnavailableState() {
 }
 
 export function RequirementBoard() {
-  const { activeWorkspaceId, enabledSources } = useAppShellContext()
-  const tapdInstalled = isTapdPluginInstalled(enabledSources)
+  const { activeWorkspaceId } = useAppShellContext()
+  // TAPD Requirements is a built-in plugin view. A live tapd-mcp-http source is
+  // only required for importing/refreshing from TAPD; synced local cache should
+  // remain visible even when the source is absent or disconnected in this workspace.
+  const tapdInstalled = true
   const [plugins, setPlugins] = React.useState<RequirementPluginDescriptor[]>([])
   const [cache, setCache] = React.useState<RequirementBoardCache>(() => readCache(activeWorkspaceId))
   const [error, setError] = React.useState<string | null>(null)
@@ -281,6 +284,35 @@ export function RequirementBoard() {
         }
       })
       .catch(err => { if (!stale) setError(err instanceof Error ? err.message : String(err)) })
+    return () => { stale = true }
+  }, [activeWorkspaceId, tapdInstalled])
+
+  React.useEffect(() => {
+    if (!activeWorkspaceId || !tapdInstalled) return
+    let stale = false
+    window.electronAPI.listRequirementItems(activeWorkspaceId, TAPD_PLUGIN_ID, { localOnly: true })
+      .then(result => {
+        if (stale || result.items.length === 0) return
+        const current = readCache(activeWorkspaceId)
+        const itemsById = { ...current.itemsById }
+        const listOrder = [...current.listOrder]
+        for (const item of result.items) {
+          itemsById[item.sourceItemId] = item
+          if (!listOrder.includes(item.sourceItemId)) listOrder.unshift(item.sourceItemId)
+        }
+        const next: RequirementBoardCache = {
+          ...current,
+          itemsById,
+          listOrder,
+          total: result.total,
+          lastSyncedAt: Date.now(),
+        }
+        writeCache(activeWorkspaceId, next)
+        setCache(next)
+      })
+      .catch(() => {
+        // Local cache hydration is best-effort; live import errors are surfaced separately.
+      })
     return () => { stale = true }
   }, [activeWorkspaceId, tapdInstalled])
 
@@ -843,9 +875,10 @@ function RequirementSessionLogRow({ session }: { session: { id: string; name?: s
 }
 
 export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }) {
-  const { activeWorkspaceId, onOpenUrl, enabledSources, onSessionLabelsChange, onSessionOptionsChange } = useAppShellContext()
+  const { activeWorkspaceId, onOpenUrl, onSessionLabelsChange, onSessionOptionsChange } = useAppShellContext()
   const { navigateToSession } = useNavigation()
-  const tapdInstalled = isTapdPluginInstalled(enabledSources)
+  // Keep synced cached requirements readable even when tapd-mcp-http is not enabled in this workspace.
+  const tapdInstalled = true
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   const addSession = useSetAtom(addSessionAtom)
   const [item, setItem] = React.useState<ExternalRequirementItem | null>(() => readCache(activeWorkspaceId).itemsById[sourceItemId] ?? null)
@@ -860,6 +893,22 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     const cached = tapdInstalled ? readCache(activeWorkspaceId).itemsById[sourceItemId] : undefined
     setItem(cached ?? null)
     setGroupName(cached ? cached.binding?.groupName ?? defaultGroupName(cached) : '')
+  }, [activeWorkspaceId, sourceItemId, tapdInstalled])
+
+  React.useEffect(() => {
+    if (!activeWorkspaceId || !tapdInstalled) return
+    let stale = false
+    window.electronAPI.getRequirementItemDetail(activeWorkspaceId, TAPD_PLUGIN_ID, sourceItemId, { localOnly: true })
+      .then(result => {
+        if (stale) return
+        setItem(result.item)
+        setGroupName(result.item.binding?.groupName ?? defaultGroupName(result.item))
+        upsertCachedItem(activeWorkspaceId, result.item)
+      })
+      .catch(() => {
+        // Missing local cache is fine; the live refresh action will surface TAPD/source errors.
+      })
+    return () => { stale = true }
   }, [activeWorkspaceId, sourceItemId, tapdInstalled])
 
   const refreshInfoFiles = React.useCallback(async (options?: { notifyOnError?: boolean }) => {
