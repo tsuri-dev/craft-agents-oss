@@ -730,13 +730,19 @@ function RequirementActivity({ item, onOpenUrl }: { item: ExternalRequirementIte
   )
 }
 
-function buildRequirementInfoFileTree(files: RequirementInfoFilesResult['files'] = []): SessionFile[] {
-  const roots: SessionFile[] = []
+function buildRequirementInfoFileTree(files: RequirementInfoFilesResult['files'] = [], infoDirPath?: string): SessionFile[] {
+  const root: SessionFile = {
+    name: 'info',
+    path: infoDirPath ?? '',
+    type: 'directory',
+    children: [],
+  }
   const directories = new Map<string, SessionFile>()
+  directories.set('', root)
 
   for (const file of files) {
     const parts = file.relativePath.split('/').filter(Boolean)
-    let currentChildren = roots
+    let currentChildren = root.children ?? []
     let currentPath = ''
 
     for (let i = 0; i < parts.length; i += 1) {
@@ -758,7 +764,7 @@ function buildRequirementInfoFileTree(files: RequirementInfoFilesResult['files']
       if (!directory) {
         directory = {
           name: part,
-          path: `${file.path.slice(0, file.path.length - file.relativePath.length)}${currentPath}`,
+          path: infoDirPath ? `${infoDirPath}/${currentPath}` : currentPath,
           type: 'directory',
           children: [],
         }
@@ -769,7 +775,7 @@ function buildRequirementInfoFileTree(files: RequirementInfoFilesResult['files']
     }
   }
 
-  return roots
+  return [root]
 }
 
 function RequirementInfoPopover({
@@ -783,16 +789,13 @@ function RequirementInfoPopover({
   infoFilesError: string | null
   onRefresh: (options?: { notifyOnError?: boolean }) => void
 }) {
-  const fileTree = React.useMemo(() => buildRequirementInfoFileTree(infoFiles?.files ?? []), [infoFiles?.files])
+  const fileTree = React.useMemo(() => buildRequirementInfoFileTree(infoFiles?.files ?? [], infoFiles?.infoDirPath), [infoFiles?.files, infoFiles?.infoDirPath])
 
   return (
     <InfoPopoverShell
       side="bottom"
       align="end"
       sideOffset={8}
-      onOpenChange={(open) => {
-        if (open) onRefresh()
-      }}
       trigger={(
         <InfoPopoverTriggerButton
           label="Info"
