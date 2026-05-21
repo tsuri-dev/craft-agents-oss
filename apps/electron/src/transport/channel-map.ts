@@ -28,6 +28,7 @@ export const CHANNEL_MAP = {
   cancelProcessing: invoke(RPC_CHANNELS.sessions.CANCEL),
   killShell: invoke(RPC_CHANNELS.sessions.KILL_SHELL),
   getTaskOutput: invoke(RPC_CHANNELS.tasks.GET_OUTPUT),
+  listAgentRuns: invoke(RPC_CHANNELS.agentRuns.LIST),
   respondToPermission: invoke(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION),
   respondToCredential: invoke(RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL),
   sessionCommand: invoke(RPC_CHANNELS.sessions.COMMAND),

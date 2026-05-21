@@ -71,6 +71,9 @@ export const RPC_CHANNELS = {
   tasks: {
     GET_OUTPUT: 'tasks:getOutput',
   },
+  agentRuns: {
+    LIST: 'agentRuns:list',
+  },
   workspaces: {
     GET: 'workspaces:get',
     CREATE: 'workspaces:create',

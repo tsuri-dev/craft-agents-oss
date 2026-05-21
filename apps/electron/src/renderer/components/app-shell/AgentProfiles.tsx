@@ -727,11 +727,34 @@ function AgentOverviewPaneMock({ agent }: { agent: AgentProfileMock }) {
 }
 
 function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
-  const activeRuns = React.useMemo(() => getActiveAgentRuns(agent.id), [agent.id])
-  const recentRuns = React.useMemo(() => getRecentFinishedAgentRuns(agent.id, 10), [agent.id])
+  const appShell = useOptionalAppShellContext()
+  const [workspaceRuns, setWorkspaceRuns] = React.useState<AgentRun[] | null>(null)
+
+  React.useEffect(() => {
+    let cancelled = false
+    const workspaceId = appShell?.activeWorkspaceId
+    if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.listAgentRuns) {
+      setWorkspaceRuns(null)
+      return
+    }
+
+    window.electronAPI.listAgentRuns(workspaceId, { agentProfileId: agent.id })
+      .then(runs => {
+        if (!cancelled) setWorkspaceRuns(runs.length > 0 ? runs : null)
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceRuns(null)
+      })
+
+    return () => { cancelled = true }
+  }, [agent.id, appShell?.activeWorkspaceId])
+
+  const runSource = workspaceRuns ?? undefined
+  const activeRuns = React.useMemo(() => getActiveAgentRuns(agent.id, runSource), [agent.id, runSource])
+  const recentRuns = React.useMemo(() => getRecentFinishedAgentRuns(agent.id, 10, runSource), [agent.id, runSource])
   const summary = React.useMemo(
-    () => summarizeAgentRunsLast30Days(agent.id, undefined, AGENT_RUN_MOCK_NOW),
-    [agent.id],
+    () => summarizeAgentRunsLast30Days(agent.id, runSource, AGENT_RUN_MOCK_NOW),
+    [agent.id, runSource],
   )
   const avgDuration = summary.avgDurationMs > 0 ? formatDurationMs(summary.avgDurationMs) : '—'
 
