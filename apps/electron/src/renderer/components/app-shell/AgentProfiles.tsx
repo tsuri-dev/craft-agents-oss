@@ -27,6 +27,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
@@ -41,6 +42,7 @@ import {
   type AgentRun,
   type AgentRunBucket,
 } from '../../../shared/agent-runs'
+import type { AgentProfileDetail } from '../../../shared/agent-profiles'
 
 export interface AgentProfileMock {
   id: string
@@ -458,6 +460,7 @@ export function AgentProfileDetailPage({
   onBack?: () => void
 }) {
   const agent = getMockAgentProfile(agentId) ?? MOCK_AGENT_PROFILES[0]
+  const profileState = useAgentProfileDetail(agent)
   const statusLabel = agent.availability === 'online' ? 'Online' : agent.availability === 'unstable' ? 'Unstable' : 'Offline'
 
   return (
@@ -487,14 +490,72 @@ export function AgentProfileDetailPage({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[320px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6">
-        <AgentDetailInspectorCard agent={agent} />
-        <AgentOverviewPaneMock agent={agent} />
+        <AgentDetailInspectorCard agent={agent} profile={profileState.profile} />
+        <AgentOverviewPaneMock agent={agent} profile={profileState.profile} onInstructionsSave={profileState.saveInstructions} />
       </div>
     </div>
   )
 }
 
-function AgentDetailInspectorCard({ agent }: { agent: AgentProfileMock }) {
+function createFallbackProfileDetail(agent: AgentProfileMock): AgentProfileDetail {
+  const now = Date.parse('2026-05-21T15:00:00+08:00')
+  return {
+    id: agent.id,
+    name: agent.name,
+    description: agent.description,
+    status: agent.status,
+    visibility: 'workspace',
+    connectionSlug: agent.connectionName.toLowerCase().replace(/\s+/g, '-'),
+    model: agent.model,
+    thinkingLevel: agent.thinkingLevel,
+    permissionMode: agent.permissionMode.toLowerCase() === 'safe' ? 'safe' : 'ask',
+    skillSlugs: [...agent.skillSlugs],
+    sourceSlugs: [...agent.sourceSlugs],
+    instructions: agent.instruction,
+    createdAt: now - 8 * 24 * 60 * 60 * 1000,
+    updatedAt: now - 8 * 24 * 60 * 60 * 1000,
+  }
+}
+
+function useAgentProfileDetail(agent: AgentProfileMock) {
+  const appShell = useOptionalAppShellContext()
+  const fallback = React.useMemo(() => createFallbackProfileDetail(agent), [agent])
+  const [profile, setProfile] = React.useState<AgentProfileDetail>(fallback)
+
+  React.useEffect(() => {
+    setProfile(fallback)
+  }, [fallback])
+
+  React.useEffect(() => {
+    let cancelled = false
+    const workspaceId = appShell?.activeWorkspaceId
+    if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.getAgentProfile) return
+
+    window.electronAPI.getAgentProfile(workspaceId, agent.id)
+      .then(detail => {
+        if (!cancelled) setProfile(detail)
+      })
+      .catch(() => {
+        if (!cancelled) setProfile(fallback)
+      })
+
+    return () => { cancelled = true }
+  }, [agent.id, appShell?.activeWorkspaceId, fallback])
+
+  const saveInstructions = React.useCallback(async (instructions: string) => {
+    const workspaceId = appShell?.activeWorkspaceId
+    if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.updateAgentProfile) {
+      setProfile(current => ({ ...current, instructions, updatedAt: Date.now() }))
+      return
+    }
+    const updated = await window.electronAPI.updateAgentProfile(workspaceId, agent.id, { instructions })
+    setProfile(updated)
+  }, [agent.id, appShell?.activeWorkspaceId])
+
+  return { profile, saveInstructions }
+}
+
+function AgentDetailInspectorCard({ agent, profile }: { agent: AgentProfileMock; profile: AgentProfileDetail }) {
   const Icon = agent.icon
   const appShell = useOptionalAppShellContext()
   const connectionOptions = React.useMemo(
@@ -533,8 +594,8 @@ function AgentDetailInspectorCard({ agent }: { agent: AgentProfileMock }) {
           <Icon className="h-7 w-7 text-muted-foreground" />
         </div>
         <div className="flex flex-col gap-1">
-          <h2 className="text-base font-semibold leading-tight">{agent.name}</h2>
-          <p className="text-xs leading-relaxed text-muted-foreground">{agent.description || 'No description'}</p>
+          <h2 className="text-base font-semibold leading-tight">{profile.name}</h2>
+          <p className="text-xs leading-relaxed text-muted-foreground">{profile.description || 'No description'}</p>
         </div>
         <AvailabilityBadge availability={agent.availability}>{capitalize(agent.availability)}</AvailabilityBadge>
       </div>
@@ -569,8 +630,8 @@ function AgentDetailInspectorCard({ agent }: { agent: AgentProfileMock }) {
       </AgentInspectorSection>
 
       <AgentInspectorSection label="Details">
-        <AgentPropRow label="Created">8d ago</AgentPropRow>
-        <AgentPropRow label="Updated">8d ago</AgentPropRow>
+        <AgentPropRow label="Created">{formatTimestamp(profile.createdAt)}</AgentPropRow>
+        <AgentPropRow label="Updated">{formatTimestamp(profile.updatedAt)}</AgentPropRow>
       </AgentInspectorSection>
 
       <div className="flex flex-col border-b border-border px-5 py-4">
@@ -689,7 +750,15 @@ const AGENT_DETAIL_TABS: Array<{ id: AgentDetailTab; label: string; icon: typeof
   { id: 'environment', label: 'Environment', icon: KeyRound },
 ]
 
-function AgentOverviewPaneMock({ agent }: { agent: AgentProfileMock }) {
+function AgentOverviewPaneMock({
+  agent,
+  profile,
+  onInstructionsSave,
+}: {
+  agent: AgentProfileMock
+  profile: AgentProfileDetail
+  onInstructionsSave: (instructions: string) => Promise<void>
+}) {
   const [activeTab, setActiveTab] = React.useState<AgentDetailTab>('activity')
 
   return (
@@ -715,7 +784,7 @@ function AgentOverviewPaneMock({ agent }: { agent: AgentProfileMock }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {activeTab === 'activity' && <AgentActivityTab agent={agent} />}
-        {activeTab === 'instructions' && <AgentInstructionsTab agent={agent} />}
+        {activeTab === 'instructions' && <AgentInstructionsTab profile={profile} onSave={onInstructionsSave} />}
         {activeTab === 'skills' && <AgentSkillsTab agent={agent} />}
         {activeTab === 'environment' && <AgentEnvironmentTab />}
       </div>
@@ -965,20 +1034,44 @@ function TaskStatusSection({ section }: { section: (typeof TASK_SECTIONS)[number
   )
 }
 
-function AgentInstructionsTab({ agent }: { agent: AgentProfileMock }) {
+function AgentInstructionsTab({ profile, onSave }: { profile: AgentProfileDetail; onSave: (instructions: string) => Promise<void> }) {
+  const [draft, setDraft] = React.useState(profile.instructions)
+  const [saving, setSaving] = React.useState(false)
+  const isDirty = draft !== profile.instructions
+
+  React.useEffect(() => {
+    setDraft(profile.instructions)
+  }, [profile.id, profile.instructions])
+
+  const handleSave = async () => {
+    if (!isDirty || saving) return
+    setSaving(true)
+    try {
+      await onSave(draft)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="flex h-full flex-col gap-4 p-6">
-      <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
-        Define this agent&apos;s identity and working style. Injected into the agent&apos;s context for every task.
+      <p className="max-w-3xl text-[13px] leading-6 font-normal text-muted-foreground">
+        Define this agent&apos;s identity and working style. Injected into the agent&apos;s context for every run.
         Markdown is supported.
       </p>
-      <div className="min-h-0 flex-1 rounded-lg border border-border bg-background px-5 py-4">
-        <p className="whitespace-pre-wrap text-[18px] leading-8 text-foreground">{agent.instruction}</p>
+      <div className="min-h-0 flex-1 rounded-lg border border-border bg-background px-5 py-4 transition-colors focus-within:border-foreground/30">
+        <Textarea
+          value={draft}
+          onChange={event => setDraft(event.target.value)}
+          placeholder="Describe this agent's role, working style, constraints, and handoff rules..."
+          className="h-full min-h-full resize-none border-0 bg-transparent px-0 py-0 text-[14px] font-normal leading-7 text-foreground/85 shadow-none focus-visible:border-transparent focus-visible:ring-0 md:text-[14px]"
+        />
       </div>
-      <div className="flex items-center justify-end">
-        <Button size="sm" className="gap-1.5">
+      <div className="flex items-center justify-end gap-3">
+        {isDirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
+        <Button size="sm" className="gap-1.5" onClick={handleSave} disabled={!isDirty || saving}>
           <Save className="h-3.5 w-3.5" />
-          Save
+          {saving ? 'Saving...' : 'Save'}
         </Button>
       </div>
     </div>
@@ -1089,6 +1182,11 @@ function getRunStatusPresentation(status: AgentRun['status']): { icon: typeof Ch
     case 'stopping':
       return { icon: Clock3, className: 'text-info' }
   }
+}
+
+function formatTimestamp(timestamp: number): string {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return '—'
+  return formatRelativeTime(new Date(timestamp).toISOString())
 }
 
 function formatDurationMs(ms: number): string {

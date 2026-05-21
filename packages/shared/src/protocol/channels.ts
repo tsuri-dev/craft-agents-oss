@@ -74,6 +74,11 @@ export const RPC_CHANNELS = {
   agentRuns: {
     LIST: 'agentRuns:list',
   },
+  agentProfiles: {
+    LIST: 'agentProfiles:list',
+    GET: 'agentProfiles:get',
+    UPDATE: 'agentProfiles:update',
+  },
   workspaces: {
     GET: 'workspaces:get',
     CREATE: 'workspaces:create',
