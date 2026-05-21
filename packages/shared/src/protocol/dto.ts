@@ -245,6 +245,8 @@ export interface RequirementBinding {
 }
 
 export interface RequirementListFilters {
+  /** Read only locally cached/bound requirement snapshots; do not call the live requirement source. */
+  localOnly?: boolean
   workspaceId?: string
   keyword?: string
   type?: string
@@ -433,6 +435,8 @@ export interface RemoteSessionTransferPayload {
     contentBase64: string
     size: number
   }>
+  /** Requirement binding records linked by labels, merged into the target workspace requirement-bindings.json. */
+  requirementBindings?: RequirementBinding[]
   summary: string
 }
 

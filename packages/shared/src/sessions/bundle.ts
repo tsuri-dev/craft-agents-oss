@@ -8,6 +8,7 @@
  */
 
 import { existsSync, readFileSync } from 'fs'
+import type { RequirementBinding } from '../protocol/dto.ts'
 import type { SessionHeader, StoredMessage, SessionConfig } from './types.ts'
 import type { StoredSession } from './types.ts'
 import { readSessionJsonl } from './jsonl.ts'
@@ -71,6 +72,8 @@ export interface SessionBundle {
   files: BundleFile[]
   /** Workspace-level TAPD requirement cache/info files linked by session labels. Relative to workspace requirements/tapd/. */
   requirementFiles?: BundleFile[]
+  /** Requirement binding records linked by session labels, merged into the target workspace requirement-bindings.json. */
+  requirementBindings?: RequirementBinding[]
   /** Branch info for fork operations (populated by the exporter when forking) */
   branchInfo?: BundleBranchInfo
 }
