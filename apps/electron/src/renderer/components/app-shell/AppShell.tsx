@@ -145,7 +145,7 @@ import type { SettingsSubpage, SshConnectionProfile, SshPrivateKeyRecord } from 
 import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
-import { AgentProfilesListPanel, MOCK_AGENT_PROFILES } from "./AgentProfiles"
+import { MOCK_AGENT_PROFILES } from "./AgentProfiles"
 import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
 import { useAutomations } from "@/hooks/useAutomations"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
@@ -1719,7 +1719,7 @@ function AppShellContent({
     return sources.some(source => source.config.slug === 'tapd-mcp-http' && source.config.enabled !== false)
   }, [sources])
 
-  const showNavigatorPanel = !isPluginsNavigation(navState)
+  const showNavigatorPanel = !isPluginsNavigation(navState) && !isAgentsNavigation(navState)
 
   // Filter session metadata based on sidebar mode and chat filter
   const filteredSessionMetas = useMemo(() => {
@@ -4178,12 +4178,6 @@ function AppShellContent({
                 onSkillClick={handleSkillSelect}
                 onDeleteSkill={handleDeleteSkill}
                 selectedSkillSlug={isSkillsNavigation(navState) && navState.details?.type === 'skill' ? navState.details.skillSlug : null}
-              />
-            )}
-            {isAgentsNavigation(navState) && (
-              <AgentProfilesListPanel
-                selectedAgentId={navState.details?.type === 'agent' ? navState.details.agentId : null}
-                onAgentClick={handleAgentSelect}
               />
             )}
             {isAutomationsNavigation(navState) && (
