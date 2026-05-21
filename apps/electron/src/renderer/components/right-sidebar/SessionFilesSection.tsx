@@ -71,10 +71,16 @@ const itemVariants: Variants = {
 export interface SessionFilesSectionProps {
   sessionId?: string
   className?: string
-  /** Absolute session folder path for header actions (e.g. View in Finder) */
+  /** Absolute folder path for header actions (e.g. View in Finder) */
   sessionFolderPath?: string
   /** Hide section header when embedded inside compact containers (e.g. popovers) */
   hideHeader?: boolean
+  /** Optional title override for non-session file scopes that reuse the same tree UI. */
+  title?: string
+  /** Optional empty-state override for non-session file scopes. */
+  emptyText?: string
+  /** Optional externally supplied file tree. When provided, no session file RPC/watch is used. */
+  filesOverride?: SessionFile[]
 }
 
 /**
@@ -420,7 +426,7 @@ function FileTreeItem({
 /**
  * Section displaying session files as a tree
  */
-export function SessionFilesSection({ sessionId, className, sessionFolderPath, hideHeader = false }: SessionFilesSectionProps) {
+export function SessionFilesSection({ sessionId, className, sessionFolderPath, hideHeader = false, title, emptyText, filesOverride }: SessionFilesSectionProps) {
   const { t } = useTranslation()
   const [files, setFiles] = useState<SessionFile[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -428,13 +434,15 @@ export function SessionFilesSection({ sessionId, className, sessionFolderPath, h
   const [hasSavedExpandedState, setHasSavedExpandedState] = useState(false)
   const mountedRef = useRef(true)
 
-  // Load expanded paths from storage when session changes.
+  const storageScope = sessionId ?? sessionFolderPath
+
+  // Load expanded paths from storage when the file scope changes.
   // If no value exists yet, we default to "expand all" after files load.
   useEffect(() => {
-    if (sessionId) {
-      const raw = storage.getRaw(storage.KEYS.sessionFilesExpandedFolders, sessionId)
+    if (storageScope) {
+      const raw = storage.getRaw(storage.KEYS.sessionFilesExpandedFolders, storageScope)
       if (raw !== null) {
-        const saved = storage.get<string[]>(storage.KEYS.sessionFilesExpandedFolders, [], sessionId)
+        const saved = storage.get<string[]>(storage.KEYS.sessionFilesExpandedFolders, [], storageScope)
         setExpandedPaths(new Set(saved))
         setHasSavedExpandedState(true)
       } else {
@@ -445,17 +453,37 @@ export function SessionFilesSection({ sessionId, className, sessionFolderPath, h
       setExpandedPaths(new Set())
       setHasSavedExpandedState(false)
     }
-  }, [sessionId])
+  }, [storageScope])
 
   // Save expanded paths to storage when they change
   const saveExpandedPaths = useCallback((paths: Set<string>) => {
-    if (sessionId) {
-      storage.set(storage.KEYS.sessionFilesExpandedFolders, Array.from(paths), sessionId)
+    if (storageScope) {
+      storage.set(storage.KEYS.sessionFilesExpandedFolders, Array.from(paths), storageScope)
     }
-  }, [sessionId])
+  }, [storageScope])
+
+  const applyFiles = useCallback((nextFiles: SessionFile[]) => {
+    setFiles(nextFiles)
+
+    // Default behavior: expand the entire folder tree when there's no saved state yet.
+    if (!hasSavedExpandedState) {
+      const allDirectoryPaths = new Set(collectDirectoryPaths(nextFiles))
+      if (allDirectoryPaths.size > 0) {
+        setExpandedPaths(allDirectoryPaths)
+        saveExpandedPaths(allDirectoryPaths)
+        setHasSavedExpandedState(true)
+      }
+    }
+  }, [hasSavedExpandedState, saveExpandedPaths])
 
   // Load files
   const loadFiles = useCallback(async () => {
+    if (filesOverride) {
+      applyFiles(filesOverride)
+      setIsLoading(false)
+      return
+    }
+
     if (!sessionId) {
       setFiles([])
       return
@@ -465,17 +493,7 @@ export function SessionFilesSection({ sessionId, className, sessionFolderPath, h
     try {
       const sessionFiles = await window.electronAPI.getSessionFiles(sessionId)
       if (mountedRef.current) {
-        setFiles(sessionFiles)
-
-        // Default behavior: expand the entire folder tree when there's no saved state yet.
-        if (!hasSavedExpandedState) {
-          const allDirectoryPaths = new Set(collectDirectoryPaths(sessionFiles))
-          if (allDirectoryPaths.size > 0) {
-            setExpandedPaths(allDirectoryPaths)
-            saveExpandedPaths(allDirectoryPaths)
-            setHasSavedExpandedState(true)
-          }
-        }
+        applyFiles(sessionFiles)
       }
     } catch (error) {
       console.error('Failed to load session files:', error)
@@ -487,14 +505,14 @@ export function SessionFilesSection({ sessionId, className, sessionFolderPath, h
         setIsLoading(false)
       }
     }
-  }, [sessionId, hasSavedExpandedState, saveExpandedPaths])
+  }, [sessionId, filesOverride, applyFiles])
 
   // Initial load and file watcher setup
   useEffect(() => {
     mountedRef.current = true
     loadFiles()
 
-    if (sessionId) {
+    if (sessionId && !filesOverride) {
       // Start watching for file changes
       void window.electronAPI.watchSessionFiles(sessionId)
 
@@ -567,7 +585,7 @@ export function SessionFilesSection({ sessionId, className, sessionFolderPath, h
     })
   }, [saveExpandedPaths])
 
-  if (!sessionId) {
+  if (!sessionId && !filesOverride) {
     return null
   }
 
@@ -576,7 +594,7 @@ export function SessionFilesSection({ sessionId, className, sessionFolderPath, h
       {/* Header - matches sidebar styling with select-none, extra top padding for visual balance */}
       {!hideHeader && (
         <div className="flex items-center justify-between px-4 pt-4 pb-2 shrink-0 select-none">
-          <span className="text-xs font-medium text-muted-foreground">{t("chat.sessionFiles")}</span>
+          <span className="text-xs font-medium text-muted-foreground">{title ?? t("chat.sessionFiles")}</span>
           {sessionFolderPath && (
             <button
               type="button"
@@ -595,7 +613,7 @@ export function SessionFilesSection({ sessionId, className, sessionFolderPath, h
         {files.length === 0 ? (
           <div className="px-4 text-muted-foreground select-none">
             <p className="text-xs">
-              {isLoading ? t('chat.sessionFilesLoading') : t('chat.sessionFilesEmpty')}
+              {isLoading ? t('chat.sessionFilesLoading') : (emptyText ?? t('chat.sessionFilesEmpty'))}
             </p>
           </div>
         ) : (

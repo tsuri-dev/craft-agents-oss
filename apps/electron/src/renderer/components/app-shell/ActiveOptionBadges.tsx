@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { cn } from '@/lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { SlashCommandMenu, DEFAULT_SLASH_COMMAND_GROUPS, type SlashCommandId } from '@/components/ui/slash-command-menu'
-import { ChevronDown, Info } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
 import { PERMISSION_MODE_CONFIG, type PermissionMode } from '@craft-agent/shared/agent/modes'
 import type { BackgroundTask } from './ActiveTasksBar'
 import { LabelIcon, LabelValueTypeIcon } from '@/components/ui/label-icon'
@@ -17,7 +17,7 @@ import type { SessionStatus } from '@/config/session-status-config'
 import { getState } from '@/config/session-status-config'
 import { SessionStatusMenu } from '@/components/ui/session-status-menu'
 import { MetadataBadge } from '@/components/ui/metadata-badge'
-import { SessionInfoPopover } from './SessionInfoPopover'
+import { InfoPopoverTriggerButton, SessionInfoPopover } from './SessionInfoPopover'
 
 // ============================================================================
 // Permission Mode Icon Component
@@ -392,7 +392,6 @@ function StateBadge({
 
 function FilesPopoverButton({ sessionId, sessionFolderPath }: { sessionId?: string; sessionFolderPath?: string }) {
   const { t } = useTranslation()
-  const [open, setOpen] = React.useState(false)
 
   if (!sessionId) return null
 
@@ -400,21 +399,7 @@ function FilesPopoverButton({ sessionId, sessionFolderPath }: { sessionId?: stri
     <SessionInfoPopover
       sessionId={sessionId}
       sessionFolderPath={sessionFolderPath}
-      trigger={(
-        <button
-          type="button"
-          className={cn(
-            "h-[30px] pl-[12px] pr-[14px] text-xs font-medium rounded-[8px] flex items-center gap-1.5 shrink-0",
-            "outline-none select-none transition-colors shadow-minimal",
-            "hover:bg-foreground/5 data-[state=open]:bg-foreground/5",
-            "bg-[color-mix(in_srgb,var(--background)_97%,var(--foreground)_3%)]",
-            "text-foreground/80",
-          )}
-        >
-          <Info className="h-3.5 w-3.5 shrink-0" />
-          <span className="whitespace-nowrap">{t("common.info")}</span>
-        </button>
-      )}
+      trigger={<InfoPopoverTriggerButton label={t("common.info")} />}
     />
   )
 }
