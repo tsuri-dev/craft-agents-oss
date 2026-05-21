@@ -35,7 +35,7 @@ export interface ParsedRoute {
 // Compound Route Types (new format)
 // =============================================================================
 
-export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'automations' | 'plugins' | 'settings'
+export type NavigatorType = 'sessions' | 'sources' | 'skills' | 'automations' | 'agents' | 'plugins' | 'settings'
 
 export interface ParsedCompoundRoute {
   /** The navigator type */
@@ -62,7 +62,7 @@ export interface ParsedCompoundRoute {
  * Known prefixes that indicate a compound route
  */
 const COMPOUND_ROUTE_PREFIXES = [
-  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'automations', 'plugins', 'settings'
+  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'sources', 'skills', 'automations', 'agents', 'plugins', 'settings'
 ]
 
 /**
@@ -199,6 +199,15 @@ export function parseCompoundRoute(route: string): ParsedCompoundRoute | null {
   }
 
 
+  // Agents navigator
+  if (first === 'agents') {
+    if (segments.length === 1) return { navigator: 'agents', details: null }
+    if (segments[1] === 'agent' && segments[2]) {
+      return { navigator: 'agents', details: { type: 'agent', id: decodeURIComponent(segments[2]) } }
+    }
+    return null
+  }
+
   // Plugins navigator
   if (first === 'plugins') {
     if (segments.length === 1) return { navigator: 'plugins', details: null }
@@ -305,6 +314,11 @@ export function buildCompoundRoute(parsed: ParsedCompoundRoute): string {
     return `${base}/automation/${parsed.details.id}`
   }
 
+
+  if (parsed.navigator === 'agents') {
+    if (!parsed.details) return 'agents'
+    return `agents/agent/${encodeURIComponent(parsed.details.id)}`
+  }
 
   if (parsed.navigator === 'plugins') {
     if (!parsed.details) return 'plugins'
@@ -575,6 +589,14 @@ function convertCompoundToNavigationState(compound: ParsedCompoundRoute): Naviga
   }
 
 
+  // Agents
+  if (compound.navigator === 'agents') {
+    return {
+      navigator: 'agents',
+      details: compound.details ? { type: 'agent', agentId: compound.details.id } : null,
+    }
+  }
+
   // Plugins
   if (compound.navigator === 'plugins') {
     return {
@@ -665,6 +687,19 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
         }
       }
       return { navigator: 'automations', details: null }
+    case 'agents':
+      return { navigator: 'agents', details: null }
+    case 'agent-info':
+      if (parsed.id) {
+        return {
+          navigator: 'agents',
+          details: {
+            type: 'agent',
+            agentId: parsed.id,
+          },
+        }
+      }
+      return { navigator: 'agents', details: null }
     case 'plugins':
       return { navigator: 'plugins', details: null }
     case 'session':
@@ -775,6 +810,13 @@ function navigationStateToCompoundRoute(state: NavigationState): ParsedCompoundR
     }
   }
 
+
+  if (state.navigator === 'agents') {
+    return {
+      navigator: 'agents',
+      details: state.details ? { type: 'agent', id: state.details.agentId } : null,
+    }
+  }
 
   if (state.navigator === 'plugins') {
     return {
