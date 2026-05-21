@@ -72,6 +72,8 @@ import type { LlmConnection, LlmConnectionWithStatus, LlmAuthType, LlmProviderTy
 export type { LlmConnection, LlmConnectionWithStatus, LlmAuthType, LlmProviderType, NetworkProxySettings };
 import type { AgentRun } from '@craft-agent/shared/agent-runs';
 export type { AgentRun };
+import type { AgentProfile, AgentProfileDetail, AgentProfileUpdateInput } from '@craft-agent/shared/agent-profiles';
+export type { AgentProfile, AgentProfileDetail, AgentProfileUpdateInput };
 
 // =============================================================================
 // GUI-only types (not used by server/handler code)
@@ -248,6 +250,9 @@ export interface ElectronAPI {
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
   getTaskOutput(taskId: string): Promise<string | null>
+  listAgentProfiles(workspaceId: string): Promise<AgentProfile[]>
+  getAgentProfile(workspaceId: string, agentProfileId: string): Promise<AgentProfileDetail>
+  updateAgentProfile(workspaceId: string, agentProfileId: string, input: AgentProfileUpdateInput): Promise<AgentProfileDetail>
   listAgentRuns(workspaceId: string, input?: { agentProfileId?: string }): Promise<AgentRun[]>
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
