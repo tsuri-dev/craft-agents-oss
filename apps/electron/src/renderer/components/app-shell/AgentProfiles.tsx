@@ -16,7 +16,6 @@ import {
   Hash,
   Info,
   KeyRound,
-  ListChecks,
   Monitor,
   MoreHorizontal,
   Plus,
@@ -681,11 +680,10 @@ function AgentInspectorSelect({
   )
 }
 
-type AgentDetailTab = 'activity' | 'tasks' | 'instructions' | 'skills' | 'environment'
+type AgentDetailTab = 'activity' | 'instructions' | 'skills' | 'environment'
 
 const AGENT_DETAIL_TABS: Array<{ id: AgentDetailTab; label: string; icon: typeof Bot }> = [
   { id: 'activity', label: 'Activity', icon: Activity },
-  { id: 'tasks', label: 'Tasks', icon: ListChecks },
   { id: 'instructions', label: 'Instructions', icon: FileText },
   { id: 'skills', label: 'Skills', icon: BookOpenText },
   { id: 'environment', label: 'Environment', icon: KeyRound },
@@ -717,7 +715,6 @@ function AgentOverviewPaneMock({ agent }: { agent: AgentProfileMock }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {activeTab === 'activity' && <AgentActivityTab agent={agent} />}
-        {activeTab === 'tasks' && <AgentTasksTab />}
         {activeTab === 'instructions' && <AgentInstructionsTab agent={agent} />}
         {activeTab === 'skills' && <AgentSkillsTab agent={agent} />}
         {activeTab === 'environment' && <AgentEnvironmentTab />}
