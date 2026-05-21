@@ -69,6 +69,8 @@ export interface SessionBundle {
   }
   /** All files from the session directory (attachments, plans, data, downloads, etc.) */
   files: BundleFile[]
+  /** Workspace-level TAPD requirement cache/info files linked by session labels. Relative to workspace requirements/tapd/. */
+  requirementFiles?: BundleFile[]
   /** Branch info for fork operations (populated by the exporter when forking) */
   branchInfo?: BundleBranchInfo
 }
