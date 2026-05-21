@@ -24,12 +24,13 @@ import { Panel } from './Panel'
 import { MultiSelectPanel } from './MultiSelectPanel'
 import { SessionBoard } from './SessionBoard'
 import { RequirementBoard, RequirementDetailPage } from './RequirementBoard'
-import { AgentProfileDetailPage } from './AgentProfiles'
+import { AgentProfileDetailPage, AgentProfilesOverviewPage } from './AgentProfiles'
 import { PluginIntroPage, PluginsHub } from './PluginsHub'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { sessionMetaMapAtom, type SessionMeta } from '@/atoms/sessions'
 import { StoplightProvider } from '@/context/StoplightContext'
 import {
+  routes,
   useNavigationState,
   useNavigation,
   isSessionsNavigation,
@@ -80,7 +81,7 @@ export function MainContentPanel({
 }: MainContentPanelProps) {
   const { t } = useTranslation()
   const globalNavState = useNavigationState()
-  const { navigateToSession } = useNavigation()
+  const { navigate, navigateToSession } = useNavigation()
   const navState = navStateOverride ?? globalNavState
   const {
     activeWorkspaceId,
@@ -480,7 +481,9 @@ export function MainContentPanel({
   if (isAgentsNavigation(navState)) {
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
-        <AgentProfileDetailPage agentId={navState.details?.type === 'agent' ? navState.details.agentId : null} />
+        {navState.details?.type === 'agent'
+          ? <AgentProfileDetailPage agentId={navState.details.agentId} />
+          : <AgentProfilesOverviewPage onAgentClick={(agentId) => navigate(routes.view.agents(agentId))} />}
       </Panel>
     )
   }

@@ -1,6 +1,7 @@
 import * as React from 'react'
 import {
   Activity,
+  ArrowUpDown,
   Bot,
   Brain,
   CheckCircle2,
@@ -10,6 +11,8 @@ import {
   GitPullRequest,
   Layers3,
   MessageSquare,
+  Monitor,
+  MoreHorizontal,
   Plus,
   Search,
   Settings2,
@@ -35,6 +38,9 @@ export interface AgentProfileMock {
   permissionMode: string
   skillSlugs: string[]
   sourceSlugs: string[]
+  runtime: string
+  availability: 'online' | 'unstable' | 'offline'
+  workload: string
   recentRuns: number
   lastRun: string
 }
@@ -53,6 +59,9 @@ export const MOCK_AGENT_PROFILES: AgentProfileMock[] = [
     permissionMode: 'Ask',
     skillSlugs: ['save-to-tapd-info', 'verification-before-completion'],
     sourceSlugs: ['qqnews-context-wiki'],
+    runtime: 'Codex (CORINLI-MC6)',
+    availability: 'online',
+    workload: 'Idle',
     recentRuns: 12,
     lastRun: 'Today',
   },
@@ -69,6 +78,9 @@ export const MOCK_AGENT_PROFILES: AgentProfileMock[] = [
     permissionMode: 'Safe',
     skillSlugs: ['receiving-code-review', 'verification-before-completion'],
     sourceSlugs: [],
+    runtime: 'Claude Code (local)',
+    availability: 'online',
+    workload: 'Idle',
     recentRuns: 8,
     lastRun: 'Yesterday',
   },
@@ -85,6 +97,9 @@ export const MOCK_AGENT_PROFILES: AgentProfileMock[] = [
     permissionMode: 'Ask',
     skillSlugs: ['save-to-tapd-info'],
     sourceSlugs: [],
+    runtime: 'Codex (CORINLI-MC6)',
+    availability: 'unstable',
+    workload: 'Queued 1',
     recentRuns: 3,
     lastRun: 'This week',
   },
@@ -93,6 +108,202 @@ export const MOCK_AGENT_PROFILES: AgentProfileMock[] = [
 export function getMockAgentProfile(agentId?: string | null): AgentProfileMock | null {
   if (!agentId) return null
   return MOCK_AGENT_PROFILES.find(agent => agent.id === agentId) ?? null
+}
+
+export function AgentProfilesOverviewPage({ onAgentClick }: { onAgentClick: (agentId: string) => void }) {
+  const [query, setQuery] = React.useState('')
+  const [scope, setScope] = React.useState<'mine' | 'all'>('mine')
+  const [availability, setAvailability] = React.useState<'all' | AgentProfileMock['availability']>('all')
+
+  const filtered = React.useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return MOCK_AGENT_PROFILES.filter(agent => {
+      if (availability !== 'all' && agent.availability !== availability) return false
+      if (!q) return true
+      return agent.name.toLowerCase().includes(q) || agent.description.toLowerCase().includes(q)
+    })
+  }, [query, availability])
+
+  const counts = React.useMemo(() => ({
+    all: MOCK_AGENT_PROFILES.length,
+    online: MOCK_AGENT_PROFILES.filter(agent => agent.availability === 'online').length,
+    unstable: MOCK_AGENT_PROFILES.filter(agent => agent.availability === 'unstable').length,
+    offline: MOCK_AGENT_PROFILES.filter(agent => agent.availability === 'offline').length,
+  }), [])
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
+      <div className="shrink-0 border-b border-foreground/[0.08] px-7 py-5">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <Bot className="h-4 w-4 text-muted-foreground" />
+            <h1 className="text-[22px] font-semibold tracking-[-0.018em]">Agents</h1>
+            <span className="text-[13px] tabular-nums text-muted-foreground">{MOCK_AGENT_PROFILES.length}</span>
+            <span className="hidden truncate text-[13px] text-muted-foreground md:inline">
+              Reusable agent presets for delegated work. Learn more →
+            </span>
+          </div>
+          <Button size="sm" className="h-8 gap-1.5 rounded-[9px]" disabled>
+            <Plus className="h-3.5 w-3.5" />
+            New agent
+          </Button>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto px-7 py-7">
+        <div className="overflow-hidden rounded-[14px] border border-foreground/[0.12] bg-foreground/[0.012]">
+          <div className="flex flex-wrap items-center gap-3 border-b border-foreground/[0.1] px-5 py-4">
+            <div className="flex h-10 min-w-[260px] flex-1 items-center gap-2 rounded-[10px] border border-foreground/[0.12] bg-background px-3 focus-within:border-foreground/25">
+              <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={event => setQuery(event.target.value)}
+                placeholder="Search agents..."
+                className="h-9 border-0 bg-transparent px-0 text-[14px] shadow-none focus-visible:ring-0"
+              />
+            </div>
+            <SegmentedControl
+              items={[
+                { id: 'mine', label: 'Mine', count: MOCK_AGENT_PROFILES.length },
+                { id: 'all', label: 'All', count: MOCK_AGENT_PROFILES.length },
+              ]}
+              value={scope}
+              onChange={value => setScope(value as 'mine' | 'all')}
+            />
+            <div className="ml-auto flex items-center gap-5 text-[13px] text-muted-foreground">
+              <span className="tabular-nums">{filtered.length} of {MOCK_AGENT_PROFILES.length}</span>
+              <span className="flex items-center gap-1.5">
+                <ArrowUpDown className="h-3.5 w-3.5" />
+                Recent activity
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 border-b border-foreground/[0.1] px-5 py-3">
+            <FilterChip active={availability === 'all'} onClick={() => setAvailability('all')}>All {counts.all}</FilterChip>
+            <FilterChip active={availability === 'online'} dot="bg-success" onClick={() => setAvailability('online')}>Online {counts.online}</FilterChip>
+            <FilterChip active={availability === 'unstable'} dot="bg-warning" onClick={() => setAvailability('unstable')}>Unstable {counts.unstable}</FilterChip>
+            <FilterChip active={availability === 'offline'} dot="bg-muted-foreground/50" onClick={() => setAvailability('offline')}>Offline {counts.offline}</FilterChip>
+          </div>
+
+          <div className="grid grid-cols-[minmax(260px,1.7fr)_minmax(120px,0.7fr)_minmax(120px,0.7fr)_minmax(220px,1.2fr)_minmax(150px,0.9fr)_80px_64px] border-b border-foreground/[0.08] bg-foreground/[0.035] px-5 py-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            <div>Agent</div>
+            <div>Status</div>
+            <div>Workload</div>
+            <div>Runtime</div>
+            <div>Activity (7d)</div>
+            <div>Runs</div>
+            <div />
+          </div>
+
+          <div className="divide-y divide-foreground/[0.08]">
+            {filtered.map(agent => (
+              <AgentTableRow key={agent.id} agent={agent} onClick={() => onAgentClick(agent.id)} />
+            ))}
+            {filtered.length === 0 && (
+              <div className="px-5 py-12 text-center text-sm text-muted-foreground">No agents match this filter.</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SegmentedControl({
+  items,
+  value,
+  onChange,
+}: {
+  items: Array<{ id: string; label: string; count: number }>
+  value: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="flex h-9 rounded-[10px] bg-foreground/[0.065] p-0.5 ring-1 ring-foreground/[0.08]">
+      {items.map(item => (
+        <button
+          key={item.id}
+          type="button"
+          onClick={() => onChange(item.id)}
+          className={cn(
+            'rounded-[8px] px-3 text-[13px] font-medium transition-colors',
+            value === item.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+          )}
+        >
+          {item.label} <span className="ml-1 text-muted-foreground">{item.count}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function FilterChip({
+  active,
+  dot,
+  children,
+  onClick,
+}: {
+  active: boolean
+  dot?: string
+  children: React.ReactNode
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'flex h-8 items-center gap-1.5 rounded-[9px] border px-3 text-[13px] transition-colors',
+        active ? 'border-foreground/[0.18] bg-foreground/[0.065] text-foreground' : 'border-foreground/[0.1] text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground',
+      )}
+    >
+      {dot && <span className={cn('h-2 w-2 rounded-full', dot)} />}
+      {children}
+    </button>
+  )
+}
+
+function AgentTableRow({ agent, onClick }: { agent: AgentProfileMock; onClick: () => void }) {
+  const Icon = agent.icon
+  const statusColor = agent.availability === 'online' ? 'text-success' : agent.availability === 'unstable' ? 'text-warning' : 'text-muted-foreground'
+  const statusDot = agent.availability === 'online' ? 'bg-success' : agent.availability === 'unstable' ? 'bg-warning' : 'bg-muted-foreground/50'
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="grid w-full grid-cols-[minmax(260px,1.7fr)_minmax(120px,0.7fr)_minmax(120px,0.7fr)_minmax(220px,1.2fr)_minmax(150px,0.9fr)_80px_64px] items-center px-5 py-4 text-left transition-colors hover:bg-foreground/[0.03]"
+    >
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-[11px] bg-foreground/[0.07]">
+          <Icon className="h-4 w-4 text-foreground/80" />
+          <span className={cn('absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-background', statusDot)} />
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-[15px] font-semibold text-foreground">{agent.name}</span>
+            <span className="rounded-md bg-foreground/[0.07] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">You</span>
+          </div>
+          <div className="mt-0.5 truncate text-[13px] text-muted-foreground">{agent.description || <span className="italic">No description</span>}</div>
+        </div>
+      </div>
+      <div className={cn('flex items-center gap-2 text-[13px] font-medium capitalize', statusColor)}>
+        <span className={cn('h-2 w-2 rounded-full', statusDot)} />
+        {agent.availability}
+      </div>
+      <div className="text-[13px] text-muted-foreground">{agent.workload}</div>
+      <div className="flex min-w-0 items-center gap-2 text-[13px] text-muted-foreground">
+        <Monitor className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate">{agent.runtime}</span>
+      </div>
+      <div className="h-px w-24 bg-foreground/[0.18]" />
+      <div className="text-[13px] tabular-nums text-muted-foreground">{agent.recentRuns}</div>
+      <div className="flex justify-end text-muted-foreground">
+        <MoreHorizontal className="h-4 w-4" />
+      </div>
+    </button>
+  )
 }
 
 export function AgentProfilesListPanel({
