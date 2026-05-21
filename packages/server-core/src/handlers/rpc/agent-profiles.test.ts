@@ -25,6 +25,10 @@ describe('agent-profiles file store', () => {
         name: 'Orion 2',
         model: 'claude-sonnet-4-5-20250929',
         thinkingLevel: 'high',
+        environmentVariables: {
+          TAPD_WORKSPACE_ID: '1010161',
+          MCP_LOG_LEVEL: 'debug',
+        },
       },
       instructions: 'Use local context first. Save durable handoff notes.',
     })
@@ -32,6 +36,7 @@ describe('agent-profiles file store', () => {
     expect(updated.name).toBe('Orion 2')
     expect(updated.model).toBe('claude-sonnet-4-5-20250929')
     expect(updated.thinkingLevel).toBe('high')
+    expect(updated.environmentVariables).toEqual({ TAPD_WORKSPACE_ID: '1010161', MCP_LOG_LEVEL: 'debug' })
     expect(updated.instructionsPath).toBeTruthy()
     expect(updated.profilePath).toBeTruthy()
     expect(existsSync(updated.instructionsPath!)).toBe(true)
@@ -40,6 +45,7 @@ describe('agent-profiles file store', () => {
     const persisted = readAgentProfileDetail(workspace, 'qqnews-implementation')
     expect(persisted?.name).toBe('Orion 2')
     expect(persisted?.instructions).toBe('Use local context first. Save durable handoff notes.')
+    expect(persisted?.environmentVariables.TAPD_WORKSPACE_ID).toBe('1010161')
   })
 
   it('keeps invalid updates from corrupting constrained fields', () => {

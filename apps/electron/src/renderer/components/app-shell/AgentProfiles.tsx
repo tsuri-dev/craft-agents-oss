@@ -10,12 +10,15 @@ import {
   CircleX,
   Clock3,
   Code2,
+  Eye,
+  EyeOff,
   FileText,
   Filter,
   GitPullRequest,
   Hash,
   Info,
   KeyRound,
+  Loader2,
   Monitor,
   MoreHorizontal,
   Plus,
@@ -23,12 +26,13 @@ import {
   Search,
   SlidersHorizontal,
   Square,
+  Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { TiptapMarkdownEditor } from '@craft-agent/ui'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
 import { getModelDisplayName } from '@config/models'
@@ -42,7 +46,7 @@ import {
   type AgentRun,
   type AgentRunBucket,
 } from '../../../shared/agent-runs'
-import type { AgentProfileDetail } from '../../../shared/agent-profiles'
+import type { AgentProfileDetail, AgentProfileUpdateInput } from '../../../shared/agent-profiles'
 
 export interface AgentProfileMock {
   id: string
@@ -97,6 +101,29 @@ const THINKING_OPTIONS: Array<{ value: ThinkingLevel; label: string }> = [
   { value: 'xhigh', label: 'Extra High' },
   { value: 'max', label: 'Max' },
 ]
+
+const INSTRUCTIONS_PLACEHOLDER = `Define this agent's role, expertise, and working style.
+
+# Example
+You are a frontend engineer specializing in React and TypeScript.
+
+## Working Style
+- Write small, focused changes
+- Verify behavior before reporting completion
+- Save durable handoff notes when useful
+
+## Constraints
+- Do not modify shared contracts without explicit approval
+- Ask one focused question when blocked by missing context`
+
+type EnvEntry = {
+  id: number
+  key: string
+  value: string
+  visible: boolean
+}
+
+let nextEnvEntryId = 0
 
 export const MOCK_AGENT_PROFILES: AgentProfileMock[] = [
   {
@@ -491,7 +518,12 @@ export function AgentProfileDetailPage({
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[320px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6">
         <AgentDetailInspectorCard agent={agent} profile={profileState.profile} />
-        <AgentOverviewPaneMock agent={agent} profile={profileState.profile} onInstructionsSave={profileState.saveInstructions} />
+        <AgentOverviewPaneMock
+          agent={agent}
+          profile={profileState.profile}
+          onInstructionsSave={profileState.saveInstructions}
+          onEnvironmentSave={profileState.saveEnvironmentVariables}
+        />
       </div>
     </div>
   )
@@ -511,6 +543,7 @@ function createFallbackProfileDetail(agent: AgentProfileMock): AgentProfileDetai
     permissionMode: agent.permissionMode.toLowerCase() === 'safe' ? 'safe' : 'ask',
     skillSlugs: [...agent.skillSlugs],
     sourceSlugs: [...agent.sourceSlugs],
+    environmentVariables: {},
     instructions: agent.instruction,
     createdAt: now - 8 * 24 * 60 * 60 * 1000,
     updatedAt: now - 8 * 24 * 60 * 60 * 1000,
@@ -542,17 +575,31 @@ function useAgentProfileDetail(agent: AgentProfileMock) {
     return () => { cancelled = true }
   }, [agent.id, appShell?.activeWorkspaceId, fallback])
 
-  const saveInstructions = React.useCallback(async (instructions: string) => {
+  const updateProfile = React.useCallback(async (input: AgentProfileUpdateInput) => {
     const workspaceId = appShell?.activeWorkspaceId
     if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.updateAgentProfile) {
-      setProfile(current => ({ ...current, instructions, updatedAt: Date.now() }))
+      setProfile(current => ({
+        ...current,
+        ...input.profile,
+        instructions: input.instructions ?? current.instructions,
+        environmentVariables: input.profile?.environmentVariables ?? current.environmentVariables,
+        updatedAt: Date.now(),
+      }))
       return
     }
-    const updated = await window.electronAPI.updateAgentProfile(workspaceId, agent.id, { instructions })
+    const updated = await window.electronAPI.updateAgentProfile(workspaceId, agent.id, input)
     setProfile(updated)
   }, [agent.id, appShell?.activeWorkspaceId])
 
-  return { profile, saveInstructions }
+  const saveInstructions = React.useCallback(async (instructions: string) => {
+    await updateProfile({ instructions })
+  }, [updateProfile])
+
+  const saveEnvironmentVariables = React.useCallback(async (environmentVariables: Record<string, string>) => {
+    await updateProfile({ profile: { environmentVariables } })
+  }, [updateProfile])
+
+  return { profile, saveInstructions, saveEnvironmentVariables }
 }
 
 function AgentDetailInspectorCard({ agent, profile }: { agent: AgentProfileMock; profile: AgentProfileDetail }) {
@@ -754,10 +801,12 @@ function AgentOverviewPaneMock({
   agent,
   profile,
   onInstructionsSave,
+  onEnvironmentSave,
 }: {
   agent: AgentProfileMock
   profile: AgentProfileDetail
   onInstructionsSave: (instructions: string) => Promise<void>
+  onEnvironmentSave: (environmentVariables: Record<string, string>) => Promise<void>
 }) {
   const [activeTab, setActiveTab] = React.useState<AgentDetailTab>('activity')
 
@@ -786,7 +835,7 @@ function AgentOverviewPaneMock({
         {activeTab === 'activity' && <AgentActivityTab agent={agent} />}
         {activeTab === 'instructions' && <AgentInstructionsTab profile={profile} onSave={onInstructionsSave} />}
         {activeTab === 'skills' && <AgentSkillsTab agent={agent} />}
-        {activeTab === 'environment' && <AgentEnvironmentTab />}
+        {activeTab === 'environment' && <AgentEnvironmentTab profile={profile} onSave={onEnvironmentSave} />}
       </div>
     </section>
   )
@@ -1055,23 +1104,24 @@ function AgentInstructionsTab({ profile, onSave }: { profile: AgentProfileDetail
 
   return (
     <div className="flex h-full flex-col gap-4 p-6">
-      <p className="max-w-3xl text-[13px] leading-6 font-normal text-muted-foreground">
+      <p className="max-w-3xl text-xs leading-5 text-muted-foreground">
         Define this agent&apos;s identity and working style. Injected into the agent&apos;s context for every run.
         Markdown is supported.
       </p>
-      <div className="min-h-0 flex-1 rounded-lg border border-border bg-background px-5 py-4 transition-colors focus-within:border-foreground/30">
-        <Textarea
-          value={draft}
-          onChange={event => setDraft(event.target.value)}
-          placeholder="Describe this agent's role, working style, constraints, and handoff rules..."
-          className="h-full min-h-full resize-none border-0 bg-transparent px-0 py-0 text-[14px] font-normal leading-7 text-foreground/85 shadow-none focus-visible:border-transparent focus-visible:ring-0 md:text-[14px]"
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-md border border-border bg-background px-4 py-3 transition-colors focus-within:border-foreground/30">
+        <TiptapMarkdownEditor
+          key={profile.id}
+          content={draft}
+          onUpdate={setDraft}
+          placeholder={INSTRUCTIONS_PLACEHOLDER}
+          className="min-h-full text-sm font-normal leading-6 text-foreground/90 [&_.tiptap-prose]:min-h-[360px] [&_.tiptap-prose]:text-sm [&_.tiptap-prose]:leading-6"
         />
       </div>
       <div className="flex items-center justify-end gap-3">
         {isDirty && <span className="text-xs text-muted-foreground">Unsaved changes</span>}
         <Button size="sm" className="gap-1.5" onClick={handleSave} disabled={!isDirty || saving}>
-          <Save className="h-3.5 w-3.5" />
-          {saving ? 'Saving...' : 'Save'}
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+          Save
         </Button>
       </div>
     </div>
@@ -1122,25 +1172,157 @@ function AgentSkillsTab({ agent }: { agent: AgentProfileMock }) {
   )
 }
 
-function AgentEnvironmentTab() {
+function envMapToEntries(env: Record<string, string>): EnvEntry[] {
+  return Object.entries(env).map(([key, value]) => ({
+    id: nextEnvEntryId++,
+    key,
+    value,
+    visible: false,
+  }))
+}
+
+function entriesToEnvMap(entries: EnvEntry[]): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const entry of entries) {
+    const key = entry.key.trim()
+    if (key) map[key] = entry.value
+  }
+  return map
+}
+
+function stableEnvMapString(env: Record<string, string>): string {
+  return JSON.stringify(Object.entries(env).sort(([a], [b]) => a.localeCompare(b)))
+}
+
+function AgentEnvironmentTab({ profile, onSave }: { profile: AgentProfileDetail; onSave: (environmentVariables: Record<string, string>) => Promise<void> }) {
+  const [envEntries, setEnvEntries] = React.useState<EnvEntry[]>(() => envMapToEntries(profile.environmentVariables))
+  const [saving, setSaving] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const currentEnvMap = React.useMemo(() => entriesToEnvMap(envEntries), [envEntries])
+  const isDirty = stableEnvMapString(currentEnvMap) !== stableEnvMapString(profile.environmentVariables)
+
+  React.useEffect(() => {
+    setEnvEntries(envMapToEntries(profile.environmentVariables))
+    setError(null)
+  }, [profile.id, profile.environmentVariables])
+
+  const addEntry = () => {
+    setEnvEntries(entries => [...entries, { id: nextEnvEntryId++, key: '', value: '', visible: true }])
+  }
+
+  const updateEntry = (index: number, field: 'key' | 'value', value: string) => {
+    setEnvEntries(entries => entries.map((entry, i) => i === index ? { ...entry, [field]: value } : entry))
+    setError(null)
+  }
+
+  const removeEntry = (index: number) => {
+    setEnvEntries(entries => entries.filter((_, i) => i !== index))
+    setError(null)
+  }
+
+  const toggleEntryVisibility = (index: number) => {
+    setEnvEntries(entries => entries.map((entry, i) => i === index ? { ...entry, visible: !entry.visible } : entry))
+  }
+
+  const handleSave = async () => {
+    if (!isDirty || saving) return
+    const keys = envEntries.map(entry => entry.key.trim()).filter(Boolean)
+    if (new Set(keys).size !== keys.length) {
+      setError('Duplicate environment variable keys')
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+    try {
+      await onSave(currentEnvMap)
+    } catch {
+      setError('Failed to save environment variables')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
-    <div className="flex h-full flex-col p-6">
+    <div className="flex h-full flex-col gap-4 p-6">
       <div className="flex items-start justify-between gap-3">
-        <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
-          Injected into the agent process at launch (e.g.{' '}
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px]">ANTHROPIC_API_KEY</code>,{' '}
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px]">ANTHROPIC_BASE_URL</code>).
+        <p className="max-w-3xl text-xs leading-5 text-muted-foreground">
+          Runtime variables injected into child agent runs and MCP subprocesses. Use non-secret values such as{' '}
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">TAPD_WORKSPACE_ID</code>,{' '}
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">MCP_LOG_LEVEL</code>, or{' '}
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">HTTPS_PROXY</code>.
         </p>
-        <div className="flex shrink-0 flex-col items-end gap-3">
-          <Button variant="outline" size="sm" className="gap-1.5">
-            <Plus className="h-3.5 w-3.5" />
-            Add
-          </Button>
-          <Button size="sm" className="gap-1.5">
-            <Save className="h-3.5 w-3.5" />
-            Save
-          </Button>
-        </div>
+        <Button type="button" variant="outline" size="sm" onClick={addEntry} className="shrink-0 gap-1.5">
+          <Plus className="h-3.5 w-3.5" />
+          Add
+        </Button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-background p-3">
+        {envEntries.length === 0 ? (
+          <div className="flex min-h-[220px] flex-col items-center justify-center rounded-md border border-dashed border-border py-12 text-center">
+            <KeyRound className="h-8 w-8 text-muted-foreground/40" />
+            <p className="mt-3 text-sm text-muted-foreground">No environment variables configured</p>
+            <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
+              Add variables when an agent profile needs MCP-specific runtime context. Secrets should move to a dedicated credential store later.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="grid grid-cols-[minmax(160px,0.42fr)_minmax(220px,1fr)_32px] gap-2 px-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+              <span>Variable</span>
+              <span>Value</span>
+              <span />
+            </div>
+            {envEntries.map((entry, index) => (
+              <div key={entry.id} className="grid grid-cols-[minmax(160px,0.42fr)_minmax(220px,1fr)_32px] items-center gap-2 rounded-md border border-border/80 bg-muted/20 p-2">
+                <Input
+                  value={entry.key}
+                  onChange={event => updateEntry(index, 'key', event.target.value)}
+                  placeholder="KEY"
+                  className="h-8 font-mono text-xs"
+                />
+                <div className="relative min-w-0">
+                  <Input
+                    type={entry.visible ? 'text' : 'password'}
+                    value={entry.value}
+                    onChange={event => updateEntry(index, 'value', event.target.value)}
+                    placeholder="value"
+                    className="h-8 pr-8 font-mono text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleEntryVisibility(index)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+                    aria-label={entry.visible ? 'Hide value' : 'Show value'}
+                  >
+                    {entry.visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeEntry(index)}
+                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                  aria-label="Remove variable"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <span className={cn('text-xs', error ? 'text-destructive' : 'text-muted-foreground')}>
+          {error ?? (isDirty ? 'Unsaved changes' : 'Saved to profile.json')}
+        </span>
+        <Button size="sm" className="gap-1.5" onClick={handleSave} disabled={!isDirty || saving}>
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+          Save
+        </Button>
       </div>
     </div>
   )
