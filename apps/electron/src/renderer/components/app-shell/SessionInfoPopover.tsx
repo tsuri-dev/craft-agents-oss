@@ -28,14 +28,18 @@ const DEFAULT_DRAWER_CONTENT_CLASS = [
   'overflow-hidden rounded-[14px] border border-border/60 bg-background shadow-modal-small',
 ].join(' ')
 
-export function InfoPopoverTriggerButton({
+export const InfoPopoverTriggerButton = React.forwardRef<
+  HTMLButtonElement,
+  React.ButtonHTMLAttributes<HTMLButtonElement> & { label?: string; icon?: React.ReactNode }
+>(function InfoPopoverTriggerButton({
   label = 'Info',
   icon = <Info className="h-3.5 w-3.5 shrink-0" />,
   className,
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { label?: string; icon?: React.ReactNode }) {
+}, ref) {
   return (
     <button
+      ref={ref}
       type="button"
       className={cn(
         "h-[30px] pl-[12px] pr-[14px] text-xs font-medium rounded-[8px] flex items-center gap-1.5 shrink-0",
@@ -51,7 +55,7 @@ export function InfoPopoverTriggerButton({
       <span className="whitespace-nowrap">{label}</span>
     </button>
   )
-}
+})
 
 export function InfoPopoverShell({
   trigger,
