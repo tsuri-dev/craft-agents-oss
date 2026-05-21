@@ -16,6 +16,7 @@ export interface AgentProfile {
   permissionMode: PermissionMode
   skillSlugs: string[]
   sourceSlugs: string[]
+  environmentVariables: Record<string, string>
   createdAt: number
   updatedAt: number
 }
@@ -38,6 +39,7 @@ export interface AgentProfileUpdateInput {
     | 'permissionMode'
     | 'skillSlugs'
     | 'sourceSlugs'
+    | 'environmentVariables'
   >>
   instructions?: string
 }
@@ -57,6 +59,7 @@ export const DEFAULT_AGENT_PROFILE_DETAILS: AgentProfileDetail[] = [
     permissionMode: 'ask',
     skillSlugs: [],
     sourceSlugs: [],
+    environmentVariables: {},
     instructions: 'You are a Planning Agent. Turn loose ideas and open issues into scoped, ready-to-execute work: break them down into subtasks, write acceptance criteria, and propose owners and sequencing. Prefer clarity over speed. When blocked by missing context, ask one specific question rather than guessing.',
     createdAt: NOW - 8 * 24 * 60 * 60 * 1000,
     updatedAt: NOW - 8 * 24 * 60 * 60 * 1000,
@@ -73,6 +76,7 @@ export const DEFAULT_AGENT_PROFILE_DETAILS: AgentProfileDetail[] = [
     permissionMode: 'safe',
     skillSlugs: ['receiving-code-review', 'verification-before-completion'],
     sourceSlugs: [],
+    environmentVariables: {},
     instructions: 'Focus on correctness, regressions, maintainability, and test coverage. Do not rewrite code unless explicitly asked.',
     createdAt: NOW - 7 * 24 * 60 * 60 * 1000,
     updatedAt: NOW - 24 * 60 * 60 * 1000,
@@ -89,6 +93,7 @@ export const DEFAULT_AGENT_PROFILE_DETAILS: AgentProfileDetail[] = [
     permissionMode: 'ask',
     skillSlugs: ['save-to-tapd-info'],
     sourceSlugs: [],
+    environmentVariables: {},
     instructions: 'Extract decisions, unresolved questions, changed files, commands, and next steps. Prefer writing artifacts instead of long chat replies.',
     createdAt: NOW - 6 * 24 * 60 * 60 * 1000,
     updatedAt: NOW - 2 * 24 * 60 * 60 * 1000,
@@ -109,5 +114,6 @@ export function cloneAgentProfileDetail(profile: AgentProfileDetail): AgentProfi
     ...profile,
     skillSlugs: [...profile.skillSlugs],
     sourceSlugs: [...profile.sourceSlugs],
+    environmentVariables: { ...profile.environmentVariables },
   }
 }

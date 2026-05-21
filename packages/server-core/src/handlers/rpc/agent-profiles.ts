@@ -133,6 +133,7 @@ function normalizeProfile(candidate: AgentProfileDetail | (Partial<AgentProfile>
     permissionMode: VALID_PERMISSION_MODES.has(candidate.permissionMode as string) ? candidate.permissionMode as AgentProfile['permissionMode'] : fallback.permissionMode,
     skillSlugs: Array.isArray(candidate.skillSlugs) ? candidate.skillSlugs.filter(isNonEmptyString) : [...fallback.skillSlugs],
     sourceSlugs: Array.isArray(candidate.sourceSlugs) ? candidate.sourceSlugs.filter(isNonEmptyString) : [...fallback.sourceSlugs],
+    environmentVariables: normalizeEnvironmentVariables(candidate.environmentVariables, fallback.environmentVariables),
     instructions: typeof candidate.instructions === 'string' ? candidate.instructions : fallback.instructions,
     createdAt: typeof candidate.createdAt === 'number' ? candidate.createdAt : fallback.createdAt,
     updatedAt: typeof candidate.updatedAt === 'number' ? candidate.updatedAt : fallback.updatedAt,
@@ -151,6 +152,7 @@ function createBlankProfile(agentProfileId: string): AgentProfileDetail {
     permissionMode: 'ask',
     skillSlugs: [],
     sourceSlugs: [],
+    environmentVariables: {},
     instructions: '',
     createdAt: now,
     updatedAt: now,
@@ -189,6 +191,17 @@ function safeIsDirectory(path: string): boolean {
   } catch {
     return false
   }
+}
+
+function normalizeEnvironmentVariables(candidate: unknown, fallback: Record<string, string>): Record<string, string> {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return { ...fallback }
+  const result: Record<string, string> = {}
+  for (const [key, value] of Object.entries(candidate)) {
+    const trimmedKey = key.trim()
+    if (!trimmedKey) continue
+    result[trimmedKey] = typeof value === 'string' ? value : String(value ?? '')
+  }
+  return result
 }
 
 function isNonEmptyString(value: unknown): value is string {
