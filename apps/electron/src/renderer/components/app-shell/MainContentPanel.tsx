@@ -482,7 +482,7 @@ export function MainContentPanel({
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
         {navState.details?.type === 'agent'
-          ? <AgentProfileDetailPage agentId={navState.details.agentId} />
+          ? <AgentProfileDetailPage agentId={navState.details.agentId} onBack={() => navigate(routes.view.agents())} />
           : <AgentProfilesOverviewPage onAgentClick={(agentId) => navigate(routes.view.agents(agentId))} />}
       </Panel>
     )
