@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleX,
+  Clock3,
   Code2,
   FileText,
   Filter,
@@ -32,6 +33,15 @@ import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
 import { getModelDisplayName } from '@config/models'
 import { DEFAULT_THINKING_LEVEL, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
+import {
+  AGENT_RUN_MOCK_NOW,
+  getActiveAgentRuns,
+  getRecentFinishedAgentRuns,
+  getRunDurationMs,
+  summarizeAgentRunsLast30Days,
+  type AgentRun,
+  type AgentRunBucket,
+} from '../../../shared/agent-runs'
 
 export interface AgentProfileMock {
   id: string
@@ -104,7 +114,7 @@ export const MOCK_AGENT_PROFILES: AgentProfileMock[] = [
     connectionName: 'Claude Code',
     availability: 'online',
     workload: 'Idle',
-    recentRuns: 5,
+    recentRuns: 12,
     lastRun: '8d ago',
   },
   {
@@ -123,7 +133,7 @@ export const MOCK_AGENT_PROFILES: AgentProfileMock[] = [
     connectionName: 'Claude Code',
     availability: 'online',
     workload: 'Idle',
-    recentRuns: 8,
+    recentRuns: 1,
     lastRun: 'Yesterday',
   },
   {
@@ -142,7 +152,7 @@ export const MOCK_AGENT_PROFILES: AgentProfileMock[] = [
     connectionName: 'Codex',
     availability: 'unstable',
     workload: 'Queued 1',
-    recentRuns: 3,
+    recentRuns: 1,
     lastRun: 'This week',
   },
 ]
@@ -717,30 +727,56 @@ function AgentOverviewPaneMock({ agent }: { agent: AgentProfileMock }) {
 }
 
 function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
-  const recentWork = getRecentWork(agent)
+  const activeRuns = React.useMemo(() => getActiveAgentRuns(agent.id), [agent.id])
+  const recentRuns = React.useMemo(() => getRecentFinishedAgentRuns(agent.id, 10), [agent.id])
+  const summary = React.useMemo(
+    () => summarizeAgentRunsLast30Days(agent.id, undefined, AGENT_RUN_MOCK_NOW),
+    [agent.id],
+  )
+  const avgDuration = summary.avgDurationMs > 0 ? formatDurationMs(summary.avgDurationMs) : '—'
+
   return (
     <div className="flex flex-col gap-4 p-6">
-      <AgentActivitySection title="Now" subtitle="No active work">
-        <p className="text-xs italic text-muted-foreground/60">This agent isn&apos;t running anything right now.</p>
+      <AgentActivitySection
+        title="Now"
+        subtitle={activeRuns.length === 0 ? 'No active work' : `${activeRuns.length} active run${activeRuns.length === 1 ? '' : 's'}`}
+      >
+        {activeRuns.length === 0 ? (
+          <p className="text-xs italic text-muted-foreground/60">This agent isn&apos;t running anything right now.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {activeRuns.map(run => <ActiveAgentRunRow key={run.id} run={run} />)}
+          </div>
+        )}
       </AgentActivitySection>
 
       <AgentActivitySection title="Last 30 days" subtitle="Performance">
         <div className="flex items-end justify-between gap-5">
           <div className="min-w-0">
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold leading-none tabular-nums">{Math.max(agent.recentRuns, 1)}</span>
-              <span className="text-sm text-muted-foreground">runs</span>
+              <span className="text-3xl font-bold leading-none tabular-nums">{summary.totalRuns}</span>
+              <span className="text-sm text-muted-foreground">run{summary.totalRuns === 1 ? '' : 's'}</span>
             </div>
-            <div className="mt-1 text-xs text-muted-foreground">100% success <Sep /> avg 1m 11s</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {summary.successPct}% success
+              <Sep />
+              avg {avgDuration}
+              {summary.totalFailed > 0 && <><Sep /><span className="text-destructive">{summary.totalFailed} failed</span></>}
+              {summary.totalCancelled > 0 && <><Sep /><span>{summary.totalCancelled} cancelled</span></>}
+            </div>
           </div>
-          <MiniSparkline />
+          <AgentRunSparkline buckets={summary.buckets} />
         </div>
       </AgentActivitySection>
 
-      <AgentActivitySection title="Recent work" subtitle={`${recentWork.length} latest`}>
-        <div className="space-y-1.5">
-          {recentWork.map(work => <RecentWorkRow key={work.id} work={work} />)}
-        </div>
+      <AgentActivitySection title="Recent work" subtitle={`${recentRuns.length} latest`}>
+        {recentRuns.length === 0 ? (
+          <p className="text-xs italic text-muted-foreground/60">This agent hasn&apos;t finished any runs yet.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {recentRuns.map(run => <RecentAgentRunRow key={run.id} run={run} />)}
+          </div>
+        )}
       </AgentActivitySection>
     </div>
   )
@@ -758,36 +794,76 @@ function AgentActivitySection({ title, subtitle, children }: { title: string; su
   )
 }
 
-function RecentWorkRow({ work }: { work: { id: string; title: string; meta: string; status: 'completed' | 'failed' } }) {
-  const completed = work.status === 'completed'
+function ActiveAgentRunRow({ run }: { run: AgentRun }) {
   return (
-    <div className="group flex items-center gap-3 rounded-md border border-border px-3 py-2.5 transition-colors hover:bg-muted/50">
-      {completed ? (
-        <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
-      ) : (
-        <CircleX className="h-4 w-4 shrink-0 text-muted-foreground" />
-      )}
+    <div className="group flex items-center gap-3 rounded-md border border-info/30 bg-info/5 px-3 py-2.5">
+      <Activity className="h-4 w-4 shrink-0 animate-pulse text-info" />
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <Hash className="h-3 w-3 shrink-0 text-muted-foreground/70" />
-          <span className="truncate text-sm">{work.title}</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-info">{run.status}</span>
+          <span className="truncate text-sm">{run.triggerSummary}</span>
         </div>
-        <div className="mt-0.5 text-xs text-muted-foreground">{work.meta}</div>
+        <AgentRunMeta run={run} active />
+      </div>
+      <div className="hidden shrink-0 items-center gap-2 text-xs text-muted-foreground sm:flex">
+        <span>{run.toolCount ?? 0} tools</span>
+        <Sep />
+        <span>{formatDurationMs(getRunDurationMs(run, AGENT_RUN_MOCK_NOW))}</span>
       </div>
     </div>
   )
 }
 
-function MiniSparkline() {
+function RecentAgentRunRow({ run }: { run: AgentRun }) {
+  const status = getRunStatusPresentation(run.status)
+  const Icon = status.icon
+  return (
+    <div className="group flex items-center gap-3 rounded-md border border-border px-3 py-2.5 transition-colors hover:bg-muted/50">
+      <Icon className={cn('h-4 w-4 shrink-0', status.className)} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <Hash className="h-3 w-3 shrink-0 text-muted-foreground/70" />
+          <span className="truncate text-sm">{run.triggerSummary}</span>
+        </div>
+        <AgentRunMeta run={run} />
+      </div>
+      <div className="hidden shrink-0 items-center gap-2 text-xs text-muted-foreground md:flex">
+        <span>{run.artifactCount ?? 0} artifacts</span>
+        <Sep />
+        <span>{formatDurationMs(getRunDurationMs(run))}</span>
+      </div>
+    </div>
+  )
+}
+
+function AgentRunMeta({ run, active = false }: { run: AgentRun; active?: boolean }) {
+  return (
+    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+      <span className="capitalize">{run.triggerType}</span>
+      <Sep />
+      <span className="truncate">parent {run.parentSessionId}</span>
+      {run.childSessionId && <><Sep /><span className="truncate">child {run.childSessionId}</span></>}
+      <Sep />
+      <span>{active ? formatRelativeTime(run.startedAt ?? run.createdAt) : formatRelativeTime(run.completedAt ?? run.createdAt)}</span>
+      {run.failureReason && <><Sep /><span className="text-destructive">{run.failureReason}</span></>}
+    </div>
+  )
+}
+
+function AgentRunSparkline({ buckets }: { buckets: AgentRunBucket[] }) {
+  const maxValue = Math.max(1, ...buckets.map(bucket => bucket.completed + bucket.failed + bucket.cancelled))
   return (
     <div className="flex h-12 w-32 shrink-0 items-end justify-end gap-1 border-b border-foreground/[0.18] pr-2">
-      {[0, 0, 0, 1, 0, 3, 0, 0, 7].map((height, index) => (
-        <span
-          key={index}
-          className={cn('w-1 rounded-t-sm', height > 0 ? 'bg-accent' : 'bg-transparent')}
-          style={{ height: `${Math.max(height * 5, 2)}px` }}
-        />
-      ))}
+      {buckets.map(bucket => {
+        const total = bucket.completed + bucket.failed + bucket.cancelled
+        return (
+          <span
+            key={bucket.date}
+            className={cn('w-1 rounded-t-sm', total > 0 ? (bucket.failed > 0 ? 'bg-destructive' : bucket.cancelled > 0 ? 'bg-muted-foreground/60' : 'bg-accent') : 'bg-transparent')}
+            style={{ height: `${total > 0 ? Math.max(4, (total / maxValue) * 34) : 2}px` }}
+          />
+        )
+      })}
     </div>
   )
 }
@@ -980,13 +1056,40 @@ function capitalize(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
-function getRecentWork(agent: AgentProfileMock) {
-  const prefix = agent.id === 'reviewer' ? 'CR' : agent.id === 'handoff' ? 'HD' : 'CTA'
-  return [
-    { id: '1', status: 'failed' as const, title: `${prefix}-1 1: 体验合规｜鸿蒙客户端&鸿蒙插件全部广告场景支持...`, meta: '8d ago · 58s' },
-    { id: '2', status: 'completed' as const, title: `${prefix}-2 Test`, meta: '8d ago · 1m 23s' },
-    { id: '3', status: 'completed' as const, title: `${prefix}-1 1: 体验合规｜鸿蒙客户端&鸿蒙插件全部广告场景支持...`, meta: '8d ago · 1m 42s' },
-    { id: '4', status: 'completed' as const, title: `${prefix}-2 Test`, meta: '8d ago · 51s' },
-    { id: '5', status: 'completed' as const, title: `${prefix}-1 1: 体验合规｜鸿蒙客户端&鸿蒙插件全部广告场景支持...`, meta: '8d ago · 1m 04s' },
-  ]
+function getRunStatusPresentation(status: AgentRun['status']): { icon: typeof CheckCircle2; className: string } {
+  switch (status) {
+    case 'completed':
+      return { icon: CheckCircle2, className: 'text-success' }
+    case 'failed':
+      return { icon: CircleX, className: 'text-destructive' }
+    case 'cancelled':
+      return { icon: CircleX, className: 'text-muted-foreground' }
+    case 'queued':
+    case 'running':
+    case 'stopping':
+      return { icon: Clock3, className: 'text-info' }
+  }
+}
+
+function formatDurationMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '—'
+  if (ms < 60_000) return `${Math.max(1, Math.round(ms / 1000))}s`
+  if (ms < 60 * 60_000) {
+    const minutes = Math.floor(ms / 60_000)
+    const seconds = Math.round((ms % 60_000) / 1000)
+    return `${minutes}m ${String(seconds).padStart(2, '0')}s`
+  }
+  const hours = Math.floor(ms / (60 * 60_000))
+  const minutes = Math.floor((ms % (60 * 60_000)) / 60_000)
+  return `${hours}h ${minutes}m`
+}
+
+function formatRelativeTime(value: string): string {
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) return '—'
+  const deltaMs = Math.max(0, AGENT_RUN_MOCK_NOW - timestamp)
+  if (deltaMs < 60_000) return 'just now'
+  if (deltaMs < 60 * 60_000) return `${Math.floor(deltaMs / 60_000)}m ago`
+  if (deltaMs < 24 * 60 * 60_000) return `${Math.floor(deltaMs / (60 * 60_000))}h ago`
+  return `${Math.floor(deltaMs / (24 * 60 * 60_000))}d ago`
 }
