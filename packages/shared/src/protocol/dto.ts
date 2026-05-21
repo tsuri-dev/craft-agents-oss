@@ -427,6 +427,12 @@ export interface RemoteSessionTransferPayload {
   sessionStatus?: SessionStatus
   labels?: string[]
   permissionMode?: PermissionMode
+  /** Workspace-level TAPD requirement cache/info files linked by labels. Relative to workspace requirements/tapd/. */
+  requirementFiles?: Array<{
+    relativePath: string
+    contentBase64: string
+    size: number
+  }>
   summary: string
 }
 

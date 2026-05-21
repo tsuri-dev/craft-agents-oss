@@ -76,7 +76,7 @@ import { getValidClaudeOAuthToken } from '@craft-agent/shared/auth'
 import { resolveAuthEnvVars } from '@craft-agent/shared/config'
 import { toolMetadataStore, getLastApiError } from '@craft-agent/shared/interceptor'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
-import { restoreFiles } from '@craft-agent/shared/utils/bundle-files'
+import { collectDirectoryFiles, restoreFiles, type BundleFile } from '@craft-agent/shared/utils/bundle-files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SessionUsageEntry, type UsageStats, type UsageStatsRange, type UsageTotals, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
@@ -167,13 +167,55 @@ export const AGENT_FLAGS = {
 
 const TAPD_SOURCE_SLUG = 'tapd-mcp-http'
 
+function getTapdRequirementIdsFromLabels(labels?: string[]): string[] {
+  const ids = (labels ?? [])
+    .filter(label => label.startsWith('tapd::'))
+    .map(label => label.slice('tapd::'.length).trim())
+    .filter(Boolean)
+  return Array.from(new Set(ids))
+}
+
+function sanitizeTapdRequirementFileName(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/g, '_') || 'unknown'
+}
+
 function hasTapdRequirementLabel(labels?: string[]): boolean {
-  return (labels ?? []).some(label => label.startsWith('tapd::') && label.slice('tapd::'.length).trim().length > 0)
+  return getTapdRequirementIdsFromLabels(labels).length > 0
 }
 
 function filterTapdSourceForLinkedRequirementSession(sourceSlugs: string[] | undefined, labels?: string[]): string[] {
   const slugs = sourceSlugs ?? []
   return hasTapdRequirementLabel(labels) ? slugs.filter(slug => slug !== TAPD_SOURCE_SLUG) : slugs
+}
+
+function collectLinkedTapdRequirementFiles(workspaceRootPath: string, labels?: string[]): BundleFile[] {
+  const tapdRoot = join(workspaceRootPath, 'requirements', 'tapd')
+  const files: BundleFile[] = []
+
+  for (const id of getTapdRequirementIdsFromLabels(labels)) {
+    const safeId = sanitizeTapdRequirementFileName(id)
+    const snapshotPath = join(tapdRoot, `${safeId}.md`)
+    if (existsSync(snapshotPath)) {
+      files.push(...collectDirectoryFiles(tapdRoot, { skipDirs: new Set() }).filter(file => file.relativePath === `${safeId}.md`))
+    }
+
+    const infoDir = join(tapdRoot, safeId, 'info')
+    if (existsSync(infoDir)) {
+      files.push(...collectDirectoryFiles(join(tapdRoot, safeId), { skipDirs: new Set() }).filter(file => file.relativePath === 'info' || file.relativePath.startsWith('info/')).map(file => ({
+        ...file,
+        relativePath: `${safeId}/${file.relativePath}`,
+      })))
+    }
+  }
+
+  const seen = new Set<string>()
+  return files
+    .filter(file => {
+      if (seen.has(file.relativePath)) return false
+      seen.add(file.relativePath)
+      return true
+    })
+    .sort((a, b) => a.relativePath.localeCompare(b.relativePath))
 }
 
 const MAX_ADMIN_REMEMBER_MINUTES = 60
@@ -7923,12 +7965,15 @@ export class SessionManager implements ISessionManager {
       return null
     }
 
+    const requirementFiles = collectLinkedTapdRequirementFiles(managed.workspace.rootPath, managed.labels)
+
     return {
       sourceSessionId: managed.id,
       name: managed.name,
       sessionStatus: managed.sessionStatus,
       labels: managed.labels,
       permissionMode: managed.permissionMode,
+      ...(requirementFiles.length > 0 ? { requirementFiles } : {}),
       summary,
     }
   }
@@ -7951,6 +7996,14 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(session.id)
     if (!managed) {
       throw new Error(`Transferred session ${session.id} was not created`)
+    }
+
+    if (payload.requirementFiles?.length) {
+      const workspace = getWorkspaceByNameOrId(workspaceId)
+      if (!workspace) throw new Error(`Workspace ${workspaceId} not found`)
+      const requirementsTapdDir = join(workspace.rootPath, 'requirements', 'tapd')
+      restoreFiles(requirementsTapdDir, payload.requirementFiles)
+      sessionLog.info(`[remote-transfer] Restored ${payload.requirementFiles.length} linked TAPD requirement file(s) to ${requirementsTapdDir}`)
     }
 
     managed.transferredSessionSummary = payload.summary.trim()
@@ -7995,6 +8048,12 @@ export class SessionManager implements ISessionManager {
     if (!bundle) {
       sessionLog.error(`[dispatch] Failed to serialize session ${sessionId}`)
       return null
+    }
+
+    const requirementFiles = collectLinkedTapdRequirementFiles(managed.workspace.rootPath, managed.labels)
+    if (requirementFiles.length > 0) {
+      bundle.requirementFiles = requirementFiles
+      sessionLog.info(`[dispatch] Included ${requirementFiles.length} linked TAPD requirement file(s) in session bundle ${sessionId}`)
     }
 
     return bundle
@@ -8157,6 +8216,12 @@ export class SessionManager implements ISessionManager {
     // Write all bundle files (attachments, plans, data, downloads, etc.)
     // Uses restoreFiles() for path traversal, size, and base64 validation.
     restoreFiles(sessionDir, bundle.files)
+
+    if (bundle.requirementFiles?.length) {
+      const requirementsTapdDir = join(workspaceRootPath, 'requirements', 'tapd')
+      restoreFiles(requirementsTapdDir, bundle.requirementFiles)
+      sessionLog.info(`[import] Restored ${bundle.requirementFiles.length} linked TAPD requirement file(s) to ${requirementsTapdDir}`)
+    }
 
     // Register in-memory — pass session metadata without messages to avoid
     // StoredMessage[] vs Message[] type mismatch, then convert messages separately
