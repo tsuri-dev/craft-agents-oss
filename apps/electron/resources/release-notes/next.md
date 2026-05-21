@@ -4,6 +4,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Agent Profiles UI shell** — Added an initial Agents sidebar destination with static profile rows and a profile detail preview for future reusable agent presets. This is UI-only for now and lays out the planned instruction, skills, sources, defaults, activity, and artifact-handoff surfaces before execution and persistence are wired.
 - **Plugins hub and TAPD plugin board** — Added a Codex-style Plugins sidebar entry with a plugin hub, installed plugin children, and TAPD as the first plugin. Opening TAPD shows a link-import requirement board that fetches individual TAPD requirements from pasted links and saves them locally, opens requirements in a dedicated two-column detail page with safe Markdown/HTML rendering for TAPD descriptions and description images, links or unlinks requirements to session groups from a right-side business properties panel, creates seeded sessions from requirement context, and adds a lightweight requirement shortcut to linked sessions.
 
 ## Improvements

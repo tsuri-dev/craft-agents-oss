@@ -137,6 +137,7 @@ import {
   isSettingsNavigation,
   isSkillsNavigation,
   isAutomationsNavigation,
+  isAgentsNavigation,
   isPluginsNavigation,
   type SessionFilter,
 } from "@/contexts/NavigationContext"
@@ -144,6 +145,7 @@ import type { SettingsSubpage, SshConnectionProfile, SshPrivateKeyRecord } from 
 import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
+import { AgentProfilesListPanel, MOCK_AGENT_PROFILES } from "./AgentProfiles"
 import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
 import { useAutomations } from "@/hooks/useAutomations"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
@@ -2062,6 +2064,13 @@ function AppShellContent({
     navigate(routes.view.automationsAgentic())
   }, [])
 
+  const handleAgentsClick = useCallback(() => {
+    navigate(routes.view.agents())
+  }, [])
+
+  const handleAgentSelect = useCallback((agentId: string) => {
+    navigate(routes.view.agents(agentId))
+  }, [])
 
   const handlePluginsClick = useCallback(() => {
     navigate(routes.view.plugins())
@@ -2294,6 +2303,7 @@ function AppShellContent({
 
     // 3. Plugins, Sources, Skills, Automations, Settings
     result.push({ id: 'nav:plugins', type: 'nav', action: handlePluginsClick })
+    result.push({ id: 'nav:agents', type: 'nav', action: handleAgentsClick })
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
@@ -2304,7 +2314,7 @@ function AppShellContent({
     result.push({ id: 'nav:whats-new', type: 'nav', action: handleWhatsNewClick })
 
     return result
-  }, [handleAllSessionsClick, handleSessionStatusClick, effectiveSessionStatuses, handleProjectsClick, projectFilterOptions, handleProjectClick, handleLabelClick, labelTree, handleFlaggedClick, handleArchivedClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handlePluginsClick, tapdPluginInstalled, handleSettingsClick, handleWhatsNewClick])
+  }, [handleAllSessionsClick, handleSessionStatusClick, effectiveSessionStatuses, handleProjectsClick, projectFilterOptions, handleProjectClick, handleLabelClick, labelTree, handleFlaggedClick, handleArchivedClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleAgentsClick, handlePluginsClick, tapdPluginInstalled, handleSettingsClick, handleWhatsNewClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -2452,6 +2462,7 @@ function AppShellContent({
     // Settings navigator
     if (isSettingsNavigation(navState)) return t("sidebar.settings")
 
+    if (isAgentsNavigation(navState)) return 'Agents'
 
     if (isPluginsNavigation(navState)) return navState.details?.pluginId === 'tapd' ? 'TAPD' : 'Plugins'
 
@@ -2927,6 +2938,14 @@ function AppShellContent({
                           onClick: () => navigate(routes.view.plugins('tapd', 'board')),
                         },
                       ] : [],
+                    },
+                    {
+                      id: "nav:agents",
+                      title: "Agents",
+                      label: String(MOCK_AGENT_PROFILES.length),
+                      icon: Bot,
+                      variant: isAgentsNavigation(navState) ? "default" : "ghost",
+                      onClick: handleAgentsClick,
                     },
                     // --- Sources & Skills Section ---
                     {
@@ -4159,6 +4178,12 @@ function AppShellContent({
                 onSkillClick={handleSkillSelect}
                 onDeleteSkill={handleDeleteSkill}
                 selectedSkillSlug={isSkillsNavigation(navState) && navState.details?.type === 'skill' ? navState.details.skillSlug : null}
+              />
+            )}
+            {isAgentsNavigation(navState) && (
+              <AgentProfilesListPanel
+                selectedAgentId={navState.details?.type === 'agent' ? navState.details.agentId : null}
+                onAgentClick={handleAgentSelect}
               />
             )}
             {isAutomationsNavigation(navState) && (

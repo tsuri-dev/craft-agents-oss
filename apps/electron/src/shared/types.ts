@@ -896,6 +896,15 @@ export interface AutomationsNavigationState {
 }
 
 /**
+ * Agents navigation state
+ */
+export interface AgentsNavigationState {
+  navigator: 'agents'
+  details: { type: 'agent'; agentId: string } | null
+  rightSidebar?: RightSidebarPanel
+}
+
+/**
  * Plugins navigation state
  */
 export interface PluginsNavigationState {
@@ -918,6 +927,7 @@ export type NavigationState =
   | SettingsNavigationState
   | SkillsNavigationState
   | AutomationsNavigationState
+  | AgentsNavigationState
   | PluginsNavigationState
 
 export const isSessionsNavigation = (
@@ -939,6 +949,10 @@ export const isSkillsNavigation = (
 export const isAutomationsNavigation = (
   state: NavigationState
 ): state is AutomationsNavigationState => state.navigator === 'automations'
+
+export const isAgentsNavigation = (
+  state: NavigationState
+): state is AgentsNavigationState => state.navigator === 'agents'
 
 export const isPluginsNavigation = (
   state: NavigationState
@@ -968,6 +982,12 @@ export const getNavigationStateKey = (state: NavigationState): string => {
       return `automations/automation/${state.details.automationId}`
     }
     return 'automations'
+  }
+  if (state.navigator === 'agents') {
+    if (state.details?.type === 'agent') {
+      return `agents/agent/${state.details.agentId}`
+    }
+    return 'agents'
   }
   if (state.navigator === 'plugins') {
     if (!state.details) return 'plugins'
@@ -1023,6 +1043,16 @@ export const parseNavigationStateKey = (key: string): NavigationState | null => 
       return { navigator: 'automations', details: { type: 'automation', automationId } }
     }
     return { navigator: 'automations', details: null }
+  }
+
+  // Handle agents
+  if (key === 'agents') return { navigator: 'agents', details: null }
+  if (key.startsWith('agents/agent/')) {
+    const agentId = key.slice(13)
+    if (agentId) {
+      return { navigator: 'agents', details: { type: 'agent', agentId } }
+    }
+    return { navigator: 'agents', details: null }
   }
 
   // Handle plugins

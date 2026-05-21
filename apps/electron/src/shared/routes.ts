@@ -177,6 +177,12 @@ export const routes = {
     automationsAgentic: (automationId?: string) =>
       automationId ? `automations/agentic/automation/${automationId}` as const : 'automations/agentic' as const,
 
+    /** Agents view (agents navigator). Pass an agent ID for a profile detail view. */
+    agents: (agentId?: string) => {
+      if (!agentId) return 'agents' as const
+      return `agents/agent/${encodeURIComponent(agentId)}` as const
+    },
+
     /** Plugins hub and installed plugin detail view */
     plugins: (pluginId?: string, page?: 'intro' | 'board' | 'requirement', sourceItemId?: string) => {
       if (!pluginId) return 'plugins' as const
