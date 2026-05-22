@@ -1288,6 +1288,7 @@ export default function App() {
         ? extractBadges(message, skills, sources, windowWorkspaceSlug, agentProfiles)
         : []
       const badges: ContentBadge[] = [...(externalBadges || []), ...mentionBadges]
+      const delegatesToAgentProfile = badges.some(badge => badge.type === 'agent')
 
       // Step 4.1: Detect SDK slash commands (e.g., /compact) and create command badges
       // This makes /compact render as an inline badge rather than raw text
@@ -1338,13 +1339,15 @@ export default function App() {
         attachments: storedAttachments,
         badges: badges.length > 0 ? badges : undefined,
         isPending: true,  // Optimistic - will be confirmed by backend
-        isQueued: sendingMidStream,
+        isQueued: sendingMidStream && !delegatesToAgentProfile,
       }
 
-      // Optimistic UI update - add user message and set processing state
+      // Optimistic UI update - add user message. Agent Profile mentions are
+      // delegated to independent child sessions, so they should not mark the
+      // parent session as processing or queued.
       updateSessionById(sessionId, (s) => ({
         messages: [...s.messages, userMessage],
-        isProcessing: true,
+        isProcessing: delegatesToAgentProfile ? s.isProcessing : true,
         lastMessageAt: Date.now()
       }))
 

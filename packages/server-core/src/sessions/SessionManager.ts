@@ -95,6 +95,7 @@ import { ensureLabelsExist } from '@craft-agent/shared/labels/crud'
 import { loadStatusConfig } from '@craft-agent/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot } from '@craft-agent/shared/automations'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
+import { readAgentProfileDetail } from '../handlers/rpc/agent-profiles'
 
 // Import from server-core domain utilities
 import { sanitizeForTitle, shouldActivateBrowserOverlay, normalizeBrowserToolName, rollbackFailedBranchCreation, releaseBrowserOwnershipOnForcedStop } from '@craft-agent/server-core/domain'
@@ -5661,6 +5662,96 @@ export class SessionManager implements ISessionManager {
     sessionLog.info(`Deleted session ${sessionId}`)
   }
 
+  private extractAgentProfileMentionIds(message: string, options?: SendMessageOptions): string[] {
+    const ids = new Set<string>()
+    const pattern = /\[agent:([\w-]+)\]/g
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(message)) !== null) {
+      ids.add(match[1]!)
+    }
+
+    for (const badge of options?.badges ?? []) {
+      if (badge.type !== 'agent') continue
+      const raw = badge.rawText ?? ''
+      const rawMatch = raw.match(/^\[agent:([\w-]+)\]$/)
+      if (rawMatch?.[1]) ids.add(rawMatch[1])
+    }
+
+    return Array.from(ids)
+  }
+
+  private stripAgentMentionsForChildPrompt(message: string): string {
+    const stripped = message
+      .replace(/\[agent:[\w-]+\]\s*/g, '')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+    return stripped || 'Please handle the delegated request.'
+  }
+
+  private buildAgentProfilePrompt(profileName: string, instructions: string | undefined, userPrompt: string): string {
+    const trimmedInstructions = instructions?.trim()
+    if (!trimmedInstructions) return userPrompt
+
+    return `<agent-profile name="${profileName.replace(/"/g, '&quot;')}">\n${trimmedInstructions}\n</agent-profile>\n\n${userPrompt}`
+  }
+
+  private async spawnAgentProfileMentionSessions(
+    parent: ManagedSession,
+    parentMessage: string,
+    attachments?: FileAttachment[],
+  ): Promise<void> {
+    const agentProfileIds = this.extractAgentProfileMentionIds(parentMessage)
+    if (agentProfileIds.length === 0) return
+
+    const delegatedPrompt = this.stripAgentMentionsForChildPrompt(parentMessage)
+    const promptSnippet = sanitizeForTitle(delegatedPrompt).slice(0, 48)
+    const workspaceId = parent.workspace.id
+
+    for (const agentProfileId of agentProfileIds) {
+      const profile = readAgentProfileDetail(parent.workspace.rootPath, agentProfileId)
+      if (!profile) {
+        sessionLog.warn(`Agent Profile mention not found: ${agentProfileId}`)
+        this.sendEvent({
+          type: 'info',
+          sessionId: parent.id,
+          message: `Agent Profile not found: ${agentProfileId}`,
+          level: 'warning',
+        }, parent.workspace.id)
+        continue
+      }
+
+      try {
+        const session = await this.createSession(workspaceId, {
+          name: `${profile.name}: ${promptSnippet || 'Delegated request'}`,
+          llmConnection: profile.connectionSlug ?? parent.llmConnection,
+          model: profile.model ?? parent.model,
+          thinkingLevel: profile.thinkingLevel ?? parent.thinkingLevel,
+          permissionMode: profile.permissionMode ?? parent.permissionMode,
+          enabledSourceSlugs: profile.sourceSlugs,
+          workingDirectory: parent.workingDirectory,
+          labels: parent.labels,
+        })
+
+        this.sendEvent({ type: 'session_created', sessionId: session.id }, workspaceId)
+
+        const childPrompt = this.buildAgentProfilePrompt(profile.name, profile.instructions, delegatedPrompt)
+        this.sendMessage(session.id, childPrompt, attachments, undefined, {
+          skillSlugs: profile.skillSlugs.length > 0 ? profile.skillSlugs : undefined,
+        }).catch(err => {
+          sessionLog.error(`Failed to send delegated @agent message to child session ${session.id}:`, err)
+        })
+      } catch (err) {
+        sessionLog.error(`Failed to spawn child session for Agent Profile ${agentProfileId}:`, err)
+        this.sendEvent({
+          type: 'error',
+          sessionId: parent.id,
+          error: `Failed to start agent ${profile.name}: ${err instanceof Error ? err.message : String(err)}`,
+        }, parent.workspace.id)
+      }
+    }
+  }
+
   async sendMessage(
     sessionId: string,
     message: string,
@@ -5700,6 +5791,40 @@ export class SessionManager implements ISessionManager {
 
     // Ensure messages are loaded before we try to add new ones
     await this.ensureMessagesLoaded(managed)
+
+    const delegatedAgentProfileIds = this.extractAgentProfileMentionIds(message, options)
+    if (delegatedAgentProfileIds.length > 0) {
+      const userMessage: Message = {
+        id: generateMessageId(),
+        role: 'user',
+        content: message,
+        timestamp: this.monotonic(),
+        attachments: storedAttachments,
+        badges: options?.badges,
+      }
+      managed.messages.push(userMessage)
+      managed.lastMessageRole = 'user'
+      managed.lastMessageAt = Date.now()
+
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      onAck?.(userMessage.id)
+
+      this.sendEvent({
+        type: 'user_message',
+        sessionId,
+        message: userMessage,
+        status: 'accepted',
+        optimisticMessageId: options?.optimisticMessageId,
+      }, managed.workspace.id)
+
+      // Fire and forget: Agent Profile mentions run in independent child
+      // sessions and must not mark/queue/interfere with the parent session.
+      this.spawnAgentProfileMentionSessions(managed, message, attachments).catch(err => {
+        sessionLog.error(`Failed to delegate @agent message from session ${sessionId}:`, err)
+      })
+      return
+    }
 
     // If currently processing, behavior depends on the connection's
     // `midStreamBehavior` (resolved via {@link resolveMidStreamBehavior},
