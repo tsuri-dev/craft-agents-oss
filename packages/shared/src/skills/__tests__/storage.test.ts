@@ -23,6 +23,7 @@ import {
   loadSkill,
   skillExists,
   listSkillSlugs,
+  importWorkspaceSkillFromContent,
   deleteSkill,
 } from '../storage.ts';
 
@@ -574,6 +575,40 @@ describe('listSkillSlugs', () => {
   it('should return empty array for non-existent workspace', () => {
     const slugs = listSkillSlugs(join(tempDir, 'nonexistent'));
     expect(slugs).toEqual([]);
+  });
+});
+
+// ============================================================
+// Tests: importWorkspaceSkillFromContent
+// ============================================================
+
+describe('importWorkspaceSkillFromContent', () => {
+  it('should import a valid SKILL.md into workspace skills', () => {
+    const skill = importWorkspaceSkillFromContent(workspaceRoot, {
+      fileName: 'review-helper.md',
+      content: `---\nname: "Review Helper"\ndescription: "Reviews diffs"\n---\n\n# Review\n\nCheck correctness.`,
+    });
+
+    expect(skill.slug).toBe('review-helper');
+    expect(skill.metadata.name).toBe('Review Helper');
+    expect(skill.content).toContain('Check correctness');
+    expect(skillExists(workspaceRoot, 'review-helper')).toBe(true);
+  });
+
+  it('should wrap plain markdown with generated frontmatter and dedupe slugs', () => {
+    const first = importWorkspaceSkillFromContent(workspaceRoot, {
+      fileName: 'handoff.md',
+      content: '# Handoff Writer\n\nSummarize decisions.',
+    });
+    const second = importWorkspaceSkillFromContent(workspaceRoot, {
+      fileName: 'handoff.md',
+      content: '# Handoff Writer\n\nSummarize artifacts.',
+    });
+
+    expect(first.slug).toBe('handoff');
+    expect(second.slug).toBe('handoff-2');
+    expect(first.metadata.name).toBe('Handoff Writer');
+    expect(second.metadata.description).toBe('Imported from handoff.md');
   });
 });
 

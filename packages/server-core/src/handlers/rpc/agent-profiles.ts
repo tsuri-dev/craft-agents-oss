@@ -9,6 +9,7 @@ import {
   cloneAgentProfileDetail,
   getDefaultAgentProfileDetail,
   type AgentProfile,
+  type AgentProfileCreateInput,
   type AgentProfileDetail,
   type AgentProfileStatus,
   type AgentProfileUpdateInput,
@@ -18,6 +19,7 @@ import { isValidThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.agentProfiles.LIST,
   RPC_CHANNELS.agentProfiles.GET,
+  RPC_CHANNELS.agentProfiles.CREATE,
   RPC_CHANNELS.agentProfiles.UPDATE,
 ] as const
 
@@ -39,6 +41,12 @@ export function registerAgentProfilesHandlers(server: RpcServer, _deps: HandlerD
     const profile = readAgentProfileDetail(workspace.rootPath, agentProfileId)
     if (!profile) throw new Error(`Agent profile not found: ${agentProfileId}`)
     return profile
+  })
+
+  server.handle(RPC_CHANNELS.agentProfiles.CREATE, async (_ctx, workspaceId: string, input: AgentProfileCreateInput) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+    return createAgentProfile(workspace.rootPath, input)
   })
 
   server.handle(RPC_CHANNELS.agentProfiles.UPDATE, async (_ctx, workspaceId: string, agentProfileId: string, input: AgentProfileUpdateInput) => {
@@ -93,6 +101,26 @@ export function readAgentProfileDetail(workspaceRootPath: string, agentProfileId
     profilePath,
     instructionsPath,
   }
+}
+
+export function createAgentProfile(workspaceRootPath: string, input: AgentProfileCreateInput): AgentProfileDetail {
+  const id = uniqueAgentProfileId(workspaceRootPath, slugifyAgentProfileId(input.name || 'agent'))
+  return updateAgentProfile(workspaceRootPath, id, {
+    profile: {
+      name: input.name,
+      description: input.description ?? '',
+      status: 'draft',
+      visibility: 'workspace',
+      connectionSlug: input.connectionSlug,
+      model: input.model,
+      thinkingLevel: input.thinkingLevel ?? 'medium',
+      permissionMode: input.permissionMode ?? 'ask',
+      skillSlugs: input.skillSlugs ?? [],
+      sourceSlugs: input.sourceSlugs ?? [],
+      environmentVariables: input.environmentVariables ?? {},
+    },
+    instructions: input.instructions ?? '',
+  })
 }
 
 export function updateAgentProfile(workspaceRootPath: string, agentProfileId: string, input: AgentProfileUpdateInput): AgentProfileDetail {
@@ -174,6 +202,24 @@ function getAgentProfileDir(workspaceRootPath: string, agentProfileId: string): 
 
 function sanitizeFileName(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, '_') || 'agent'
+}
+
+function slugifyAgentProfileId(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'agent'
+}
+
+function uniqueAgentProfileId(workspaceRootPath: string, baseId: string): string {
+  let id = baseId
+  let suffix = 2
+  while (readAgentProfileDetail(workspaceRootPath, id)) {
+    id = `${baseId}-${suffix}`
+    suffix += 1
+  }
+  return id
 }
 
 function safeReadDir(path: string): string[] {

@@ -755,19 +755,28 @@ export function registerRequirementsHandlers(server: RpcServer, deps: HandlerDep
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
     const groupName = input.groupName.trim() || defaultGroupName(input.item)
+    const sessionName = input.sessionName?.trim() || groupName
+    const agentProfile = input.agentProfileId
+      ? (await import('./agent-profiles')).readAgentProfileDetail(workspace.rootPath, input.agentProfileId)
+      : null
     upsertBinding(workspace.rootPath, { pluginId: input.pluginId, item: input.item, groupName })
     const session = await deps.sessionManager.createSession(workspaceId, {
-      name: groupName,
+      name: sessionName,
       labels: buildRequirementLabels(input.item, groupName),
       // TAPD-created sessions are work sessions, not read-only exploration sessions.
       // Pin them to Ask so the visible mode and the agent prompt agree even when
-      // the workspace default is Explore/safe.
-      permissionMode: 'ask',
+      // the workspace default is Explore/safe. If an Agent Profile is selected,
+      // use its concrete runtime settings for the session shell.
+      permissionMode: agentProfile?.permissionMode ?? 'ask',
+      thinkingLevel: agentProfile?.thinkingLevel,
+      model: agentProfile?.model,
+      llmConnection: agentProfile?.connectionSlug,
       // The TAPD requirement snapshot is stored once at workspace scope and the
       // session references it through its tapd::<id> label. Do not enable
-      // tapd-mcp-http by default here; the session can read the shared snapshot
-      // file instead of carrying TAPD MCP tool schemas/context.
-      enabledSourceSlugs: [],
+      // tapd-mcp-http by default here unless the selected profile explicitly asks
+      // for sources; the session can read the shared snapshot file instead of
+      // carrying TAPD MCP tool schemas/context.
+      enabledSourceSlugs: agentProfile?.sourceSlugs ?? [],
     })
     return { sessionId: session.id, session }
   })

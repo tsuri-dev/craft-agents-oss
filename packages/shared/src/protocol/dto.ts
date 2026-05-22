@@ -302,6 +302,8 @@ export interface RequirementCreateSessionInput {
   pluginId: string
   item: ExternalRequirementItem
   groupName: string
+  sessionName?: string
+  agentProfileId?: string
 }
 
 export interface RequirementCreateSessionResult {

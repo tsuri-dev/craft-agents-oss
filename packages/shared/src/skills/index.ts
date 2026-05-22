@@ -14,6 +14,7 @@ export {
   invalidateSkillsCache,
   loadSkillBySlug,
   getSkillIconPath,
+  importWorkspaceSkillFromContent,
   deleteSkill,
   skillExists,
   listSkillSlugs,

@@ -32,6 +32,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { TiptapMarkdownEditor } from '@craft-agent/ui'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
@@ -46,7 +47,8 @@ import {
   type AgentRun,
   type AgentRunBucket,
 } from '../../../shared/agent-runs'
-import type { AgentProfileDetail, AgentProfileUpdateInput } from '../../../shared/agent-profiles'
+import type { AgentProfile, AgentProfileCreateInput, AgentProfileDetail, AgentProfileUpdateInput } from '../../../shared/agent-profiles'
+import type { LoadedSkill } from '../../../shared/types'
 
 export interface AgentProfileMock {
   id: string
@@ -190,26 +192,108 @@ export function getMockAgentProfile(agentId?: string | null): AgentProfileMock |
   return MOCK_AGENT_PROFILES.find(agent => agent.id === agentId) ?? null
 }
 
+function createFallbackAgentProfile(agentId?: string | null): AgentProfileMock {
+  const base = getMockAgentProfile(agentId) ?? MOCK_AGENT_PROFILES[0]!
+  if (!agentId || base.id === agentId) return base
+  return {
+    ...base,
+    id: agentId,
+    name: agentId,
+    description: '',
+    instruction: '',
+    icon: Bot,
+    tone: 'Workspace agent',
+    status: 'draft',
+    model: 'Connection default',
+    skillSlugs: [],
+    sourceSlugs: [],
+    availability: 'offline',
+    workload: 'Idle',
+    recentRuns: 0,
+    lastRun: 'Never',
+  }
+}
+
+function agentProfileToView(profile: AgentProfile, connectionOptions: AgentConnectionOption[]): AgentProfileMock {
+  const base = getMockAgentProfile(profile.id) ?? createFallbackAgentProfile(profile.id)
+  const connection = profile.connectionSlug
+    ? connectionOptions.find(option => option.slug === profile.connectionSlug)
+    : undefined
+  return {
+    ...base,
+    id: profile.id,
+    name: profile.name,
+    description: profile.description ?? '',
+    status: profile.status,
+    model: profile.model ? getModelDisplayName(profile.model) : 'Connection default',
+    thinkingLevel: profile.thinkingLevel,
+    permissionMode: profile.permissionMode === 'safe' ? 'Safe' : profile.permissionMode === 'allow-all' ? 'Execute' : 'Ask',
+    skillSlugs: [...profile.skillSlugs],
+    sourceSlugs: [...profile.sourceSlugs],
+    connectionName: connection?.name ?? profile.connectionSlug ?? base.connectionName,
+  }
+}
+
+function useAgentProfileViews(): AgentProfileMock[] {
+  const appShell = useOptionalAppShellContext()
+  const connectionOptions = React.useMemo(
+    () => buildAgentConnectionOptions(appShell?.llmConnections),
+    [appShell?.llmConnections],
+  )
+  const [workspaceProfiles, setWorkspaceProfiles] = React.useState<AgentProfile[] | null>(null)
+
+  React.useEffect(() => {
+    let cancelled = false
+    const workspaceId = appShell?.activeWorkspaceId
+    if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.listAgentProfiles) {
+      setWorkspaceProfiles(null)
+      return
+    }
+
+    window.electronAPI.listAgentProfiles(workspaceId)
+      .then(profiles => {
+        if (!cancelled) setWorkspaceProfiles(profiles)
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceProfiles(null)
+      })
+
+    return () => { cancelled = true }
+  }, [appShell?.activeWorkspaceId])
+
+  return React.useMemo(
+    () => workspaceProfiles?.map(profile => agentProfileToView(profile, connectionOptions)) ?? MOCK_AGENT_PROFILES,
+    [workspaceProfiles, connectionOptions],
+  )
+}
+
 export function AgentProfilesOverviewPage({ onAgentClick }: { onAgentClick: (agentId: string) => void }) {
+  const appShell = useOptionalAppShellContext()
+  const agents = useAgentProfileViews()
+  const connectionOptions = React.useMemo(
+    () => buildAgentConnectionOptions(appShell?.llmConnections),
+    [appShell?.llmConnections],
+  )
   const [query, setQuery] = React.useState('')
+  const [showCreate, setShowCreate] = React.useState(false)
   const [scope, setScope] = React.useState<'mine' | 'all'>('mine')
   const [availability, setAvailability] = React.useState<'all' | AgentProfileMock['availability']>('all')
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase()
-    return MOCK_AGENT_PROFILES.filter(agent => {
+    return agents.filter(agent => {
       if (availability !== 'all' && agent.availability !== availability) return false
       if (!q) return true
       return agent.name.toLowerCase().includes(q) || agent.description.toLowerCase().includes(q)
     })
-  }, [query, availability])
+  }, [agents, query, availability])
 
   const counts = React.useMemo(() => ({
-    all: MOCK_AGENT_PROFILES.length,
-    online: MOCK_AGENT_PROFILES.filter(agent => agent.availability === 'online').length,
-    unstable: MOCK_AGENT_PROFILES.filter(agent => agent.availability === 'unstable').length,
-    offline: MOCK_AGENT_PROFILES.filter(agent => agent.availability === 'offline').length,
-  }), [])
+    all: agents.length,
+    online: agents.filter(agent => agent.availability === 'online').length,
+    unstable: agents.filter(agent => agent.availability === 'unstable').length,
+    offline: agents.filter(agent => agent.availability === 'offline').length,
+  }), [agents])
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -217,12 +301,12 @@ export function AgentProfilesOverviewPage({ onAgentClick }: { onAgentClick: (age
         <div className="flex min-w-0 items-center gap-2">
           <Bot className="h-4 w-4 text-muted-foreground" />
           <h1 className="text-sm font-medium">Agents</h1>
-          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">{MOCK_AGENT_PROFILES.length}</span>
+          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">{agents.length}</span>
           <span className="ml-2 hidden truncate text-xs text-muted-foreground md:inline">
             Reusable agent presets for delegated work. Learn more →
           </span>
         </div>
-        <Button size="sm" disabled>
+        <Button size="sm" onClick={() => setShowCreate(true)}>
           <Plus className="h-3 w-3" />
           New agent
         </Button>
@@ -242,14 +326,14 @@ export function AgentProfilesOverviewPage({ onAgentClick }: { onAgentClick: (age
             </div>
             <SegmentedControl
               items={[
-                { id: 'mine', label: 'Mine', count: MOCK_AGENT_PROFILES.length },
-                { id: 'all', label: 'All', count: MOCK_AGENT_PROFILES.length },
+                { id: 'mine', label: 'Mine', count: agents.length },
+                { id: 'all', label: 'All', count: agents.length },
               ]}
               value={scope}
               onChange={value => setScope(value as 'mine' | 'all')}
             />
             <div className="ml-auto flex items-center gap-3">
-              <span className="font-mono text-xs tabular-nums text-muted-foreground/70">{filtered.length} of {MOCK_AGENT_PROFILES.length}</span>
+              <span className="font-mono text-xs tabular-nums text-muted-foreground/70">{filtered.length} of {agents.length}</span>
               <span className="flex h-8 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground">
                 <ArrowUpDown className="h-3 w-3" />
                 Recent activity
@@ -284,7 +368,183 @@ export function AgentProfilesOverviewPage({ onAgentClick }: { onAgentClick: (age
           </div>
         </div>
       </div>
+
+      {showCreate && (
+        <CreateAgentProfileDialog
+          connectionOptions={connectionOptions}
+          defaultConnectionSlug={appShell?.workspaceDefaultLlmConnection}
+          onClose={() => setShowCreate(false)}
+          onCreated={(profileId) => {
+            setShowCreate(false)
+            onAgentClick(profileId)
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+function CreateAgentProfileDialog({
+  connectionOptions,
+  defaultConnectionSlug,
+  onClose,
+  onCreated,
+}: {
+  connectionOptions: AgentConnectionOption[]
+  defaultConnectionSlug?: string
+  onClose: () => void
+  onCreated: (profileId: string) => void
+}) {
+  const appShell = useOptionalAppShellContext()
+  const [name, setName] = React.useState('')
+  const [description, setDescription] = React.useState('')
+  const [connectionSlug, setConnectionSlug] = React.useState(() => {
+    if (defaultConnectionSlug && connectionOptions.some(option => option.slug === defaultConnectionSlug)) return defaultConnectionSlug
+    return connectionOptions[0]?.slug ?? FALLBACK_AGENT_CONNECTIONS[0]!.slug
+  })
+  const selectedConnection = connectionOptions.find(option => option.slug === connectionSlug) ?? connectionOptions[0] ?? FALLBACK_AGENT_CONNECTIONS[0]!
+  const modelOptions = selectedConnection.models.length > 0
+    ? selectedConnection.models
+    : [selectedConnection.defaultModel ?? 'connection-default']
+  const [model, setModel] = React.useState(modelOptions[0] ?? 'connection-default')
+  const [thinkingLevel, setThinkingLevel] = React.useState<ThinkingLevel>('medium')
+  const [creating, setCreating] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    if (!connectionOptions.some(option => option.slug === connectionSlug)) {
+      setConnectionSlug(connectionOptions[0]?.slug ?? FALLBACK_AGENT_CONNECTIONS[0]!.slug)
+    }
+  }, [connectionOptions, connectionSlug])
+
+  React.useEffect(() => {
+    if (!modelOptions.includes(model)) setModel(modelOptions[0] ?? 'connection-default')
+  }, [modelOptions, model])
+
+  const handleCreate = async () => {
+    const trimmedName = name.trim()
+    if (!trimmedName || creating) return
+    const workspaceId = appShell?.activeWorkspaceId
+    if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.createAgentProfile) {
+      setError('Workspace is not ready')
+      return
+    }
+
+    const input: AgentProfileCreateInput = {
+      name: trimmedName,
+      description: description.trim(),
+      connectionSlug,
+      model: model === 'connection-default' ? undefined : model,
+      thinkingLevel,
+      permissionMode: 'ask',
+      instructions: `You are ${trimmedName}. Describe your role, working style, and constraints here.`,
+    }
+
+    setCreating(true)
+    setError(null)
+    try {
+      const created = await window.electronAPI.createAgentProfile(workspaceId, input)
+      onCreated(created.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create agent')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Create Agent</DialogTitle>
+          <DialogDescription>
+            Create a reusable workspace agent profile. Visibility is fixed to workspace.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs text-muted-foreground">Name</label>
+            <Input
+              autoFocus
+              value={name}
+              onChange={event => setName(event.target.value)}
+              placeholder="e.g. Research Agent"
+              className="mt-1"
+              onKeyDown={event => { if (event.key === 'Enter') void handleCreate() }}
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-muted-foreground">Description</label>
+            <Input
+              value={description}
+              onChange={event => setDescription(event.target.value)}
+              placeholder="What does this agent help with?"
+              className="mt-1"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground">Connection</label>
+              <Select value={connectionSlug} onValueChange={setConnectionSlug}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {connectionOptions.map(option => (
+                    <SelectItem key={option.slug} value={option.slug}>{option.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Thinking</label>
+              <Select value={thinkingLevel} onValueChange={value => setThinkingLevel(normalizeAgentThinking(value))}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {THINKING_OPTIONS.map(option => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-muted-foreground">Model</label>
+            <Select value={model} onValueChange={setModel}>
+              <SelectTrigger className="mt-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {modelOptions.map(modelId => (
+                  <SelectItem key={modelId} value={modelId}>{modelId === 'connection-default' ? 'Connection default' : getModelDisplayName(modelId)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+            <div className="text-xs font-medium text-foreground">Visibility</div>
+            <div className="mt-1 text-xs text-muted-foreground">Workspace — visible and reusable by this workspace.</div>
+          </div>
+
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleCreate} disabled={creating || !name.trim()}>
+            {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+            Create
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -392,17 +652,18 @@ export function AgentProfilesListPanel({
   selectedAgentId: string | null
   onAgentClick: (agentId: string) => void
 }) {
+  const agents = useAgentProfileViews()
   const [query, setQuery] = React.useState('')
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return MOCK_AGENT_PROFILES
-    return MOCK_AGENT_PROFILES.filter(agent =>
+    if (!q) return agents
+    return agents.filter(agent =>
       agent.name.toLowerCase().includes(q) ||
       agent.description.toLowerCase().includes(q) ||
       agent.skillSlugs.some(skill => skill.toLowerCase().includes(q)) ||
       agent.sourceSlugs.some(source => source.toLowerCase().includes(q)),
     )
-  }, [query])
+  }, [agents, query])
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -486,7 +747,7 @@ export function AgentProfileDetailPage({
   agentId?: string | null
   onBack?: () => void
 }) {
-  const agent = getMockAgentProfile(agentId) ?? MOCK_AGENT_PROFILES[0]
+  const agent = React.useMemo(() => createFallbackAgentProfile(agentId), [agentId])
   const profileState = useAgentProfileDetail(agent)
   const statusLabel = agent.availability === 'online' ? 'Online' : agent.availability === 'unstable' ? 'Unstable' : 'Offline'
 
@@ -504,7 +765,7 @@ export function AgentProfileDetailPage({
             Agents
           </button>
           <span className="text-muted-foreground/40">/</span>
-          <h1 className="truncate text-sm font-medium">{agent.name}</h1>
+          <h1 className="truncate text-sm font-medium">{profileState.profile.name}</h1>
           <AvailabilityBadge availability={agent.availability}>{statusLabel}</AvailabilityBadge>
         </div>
         <button
@@ -517,12 +778,13 @@ export function AgentProfileDetailPage({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[320px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6">
-        <AgentDetailInspectorCard agent={agent} profile={profileState.profile} />
+        <AgentDetailInspectorCard agent={agent} profile={profileState.profile} onProfileUpdate={profileState.saveProfilePatch} />
         <AgentOverviewPaneMock
           agent={agent}
           profile={profileState.profile}
           onInstructionsSave={profileState.saveInstructions}
           onEnvironmentSave={profileState.saveEnvironmentVariables}
+          onProfileUpdate={profileState.saveProfilePatch}
         />
       </div>
     </div>
@@ -577,16 +839,16 @@ function useAgentProfileDetail(agent: AgentProfileMock) {
 
   const updateProfile = React.useCallback(async (input: AgentProfileUpdateInput) => {
     const workspaceId = appShell?.activeWorkspaceId
-    if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.updateAgentProfile) {
-      setProfile(current => ({
-        ...current,
-        ...input.profile,
-        instructions: input.instructions ?? current.instructions,
-        environmentVariables: input.profile?.environmentVariables ?? current.environmentVariables,
-        updatedAt: Date.now(),
-      }))
-      return
-    }
+    setProfile(current => ({
+      ...current,
+      ...input.profile,
+      instructions: input.instructions ?? current.instructions,
+      environmentVariables: input.profile?.environmentVariables ?? current.environmentVariables,
+      updatedAt: Date.now(),
+    }))
+
+    if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.updateAgentProfile) return
+
     const updated = await window.electronAPI.updateAgentProfile(workspaceId, agent.id, input)
     setProfile(updated)
   }, [agent.id, appShell?.activeWorkspaceId])
@@ -599,10 +861,22 @@ function useAgentProfileDetail(agent: AgentProfileMock) {
     await updateProfile({ profile: { environmentVariables } })
   }, [updateProfile])
 
-  return { profile, saveInstructions, saveEnvironmentVariables }
+  const saveProfilePatch = React.useCallback(async (patch: NonNullable<AgentProfileUpdateInput['profile']>) => {
+    await updateProfile({ profile: patch })
+  }, [updateProfile])
+
+  return { profile, saveInstructions, saveEnvironmentVariables, saveProfilePatch }
 }
 
-function AgentDetailInspectorCard({ agent, profile }: { agent: AgentProfileMock; profile: AgentProfileDetail }) {
+function AgentDetailInspectorCard({
+  agent,
+  profile,
+  onProfileUpdate,
+}: {
+  agent: AgentProfileMock
+  profile: AgentProfileDetail
+  onProfileUpdate: (patch: NonNullable<AgentProfileUpdateInput['profile']>) => Promise<void>
+}) {
   const Icon = agent.icon
   const appShell = useOptionalAppShellContext()
   const connectionOptions = React.useMemo(
@@ -614,13 +888,19 @@ function AgentDetailInspectorCard({ agent, profile }: { agent: AgentProfileMock;
     if (workspaceDefault && connectionOptions.some(connection => connection.slug === workspaceDefault)) return workspaceDefault
     return connectionOptions[0]?.slug ?? FALLBACK_AGENT_CONNECTIONS[0]!.slug
   }, [appShell?.workspaceDefaultLlmConnection, connectionOptions])
-  const [connectionSlug, setConnectionSlug] = React.useState(defaultConnectionSlug)
+  const [connectionSlug, setConnectionSlug] = React.useState(profile.connectionSlug ?? defaultConnectionSlug)
   const selectedConnection = connectionOptions.find(connection => connection.slug === connectionSlug) ?? connectionOptions[0] ?? FALLBACK_AGENT_CONNECTIONS[0]!
   const availableModels = selectedConnection.models.length > 0
     ? selectedConnection.models
     : [selectedConnection.defaultModel ?? 'connection-default']
-  const [model, setModel] = React.useState(() => availableModels[0] ?? agent.model)
-  const [thinking, setThinking] = React.useState<ThinkingLevel>(normalizeAgentThinking(agent.thinkingLevel))
+  const [model, setModel] = React.useState(() => profile.model ?? availableModels[0] ?? agent.model)
+  const [thinking, setThinking] = React.useState<ThinkingLevel>(normalizeAgentThinking(profile.thinkingLevel))
+
+  React.useEffect(() => {
+    setConnectionSlug(profile.connectionSlug ?? defaultConnectionSlug)
+    setModel(profile.model ?? availableModels[0] ?? agent.model)
+    setThinking(normalizeAgentThinking(profile.thinkingLevel))
+  }, [profile.id, profile.connectionSlug, profile.model, profile.thinkingLevel, defaultConnectionSlug])
 
   React.useEffect(() => {
     if (!connectionOptions.some(connection => connection.slug === connectionSlug)) {
@@ -652,7 +932,13 @@ function AgentDetailInspectorCard({ agent, profile }: { agent: AgentProfileMock;
           <AgentInspectorSelect
             ariaLabel="Agent connection"
             value={selectedConnection.slug}
-            onValueChange={setConnectionSlug}
+            onValueChange={(value) => {
+              setConnectionSlug(value)
+              const nextConnection = connectionOptions.find(connection => connection.slug === value)
+              const nextModel = nextConnection?.defaultModel ?? nextConnection?.models[0] ?? undefined
+              setModel(nextModel ?? 'connection-default')
+              void onProfileUpdate({ connectionSlug: value, model: nextModel })
+            }}
             options={connectionOptions.map(connection => ({ value: connection.slug, label: connection.name }))}
           />
           <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', selectedConnection.isAuthenticated === false ? 'bg-warning' : 'bg-success')} />
@@ -661,7 +947,10 @@ function AgentDetailInspectorCard({ agent, profile }: { agent: AgentProfileMock;
           <AgentInspectorSelect
             ariaLabel="Agent model"
             value={model}
-            onValueChange={setModel}
+            onValueChange={(value) => {
+              setModel(value)
+              void onProfileUpdate({ model: value === 'connection-default' ? undefined : value })
+            }}
             options={availableModels.map(modelId => ({ value: modelId, label: modelId === 'connection-default' ? 'Connection default' : getModelDisplayName(modelId) }))}
           />
         </AgentPropRow>
@@ -669,7 +958,11 @@ function AgentDetailInspectorCard({ agent, profile }: { agent: AgentProfileMock;
           <AgentInspectorSelect
             ariaLabel="Agent thinking"
             value={thinking}
-            onValueChange={value => setThinking(normalizeAgentThinking(value))}
+            onValueChange={value => {
+              const nextThinking = normalizeAgentThinking(value)
+              setThinking(nextThinking)
+              void onProfileUpdate({ thinkingLevel: nextThinking })
+            }}
             options={THINKING_OPTIONS}
           />
         </AgentPropRow>
@@ -802,11 +1095,13 @@ function AgentOverviewPaneMock({
   profile,
   onInstructionsSave,
   onEnvironmentSave,
+  onProfileUpdate,
 }: {
   agent: AgentProfileMock
   profile: AgentProfileDetail
   onInstructionsSave: (instructions: string) => Promise<void>
   onEnvironmentSave: (environmentVariables: Record<string, string>) => Promise<void>
+  onProfileUpdate: (patch: NonNullable<AgentProfileUpdateInput['profile']>) => Promise<void>
 }) {
   const [activeTab, setActiveTab] = React.useState<AgentDetailTab>('activity')
 
@@ -834,7 +1129,7 @@ function AgentOverviewPaneMock({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {activeTab === 'activity' && <AgentActivityTab agent={agent} />}
         {activeTab === 'instructions' && <AgentInstructionsTab profile={profile} onSave={onInstructionsSave} />}
-        {activeTab === 'skills' && <AgentSkillsTab agent={agent} />}
+        {activeTab === 'skills' && <AgentSkillsTab profile={profile} onProfileUpdate={onProfileUpdate} />}
         {activeTab === 'environment' && <AgentEnvironmentTab profile={profile} onSave={onEnvironmentSave} />}
       </div>
     </section>
@@ -1128,15 +1423,92 @@ function AgentInstructionsTab({ profile, onSave }: { profile: AgentProfileDetail
   )
 }
 
-function AgentSkillsTab({ agent }: { agent: AgentProfileMock }) {
-  const skills = agent.skillSlugs
+function AgentSkillsTab({
+  profile,
+  onProfileUpdate,
+}: {
+  profile: AgentProfileDetail
+  onProfileUpdate: (patch: NonNullable<AgentProfileUpdateInput['profile']>) => Promise<void>
+}) {
+  const appShell = useOptionalAppShellContext()
+  const [showAdd, setShowAdd] = React.useState(false)
+  const [localSkills, setLocalSkills] = React.useState<LoadedSkill[]>([])
+  const [importing, setImporting] = React.useState(false)
+  const [dropActive, setDropActive] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const workspaceSkills = React.useMemo(() => {
+    const all = [...(appShell?.skills ?? []), ...localSkills]
+    const bySlug = new Map<string, LoadedSkill>()
+    for (const skill of all) {
+      if (skill.source === 'workspace') bySlug.set(skill.slug, skill)
+    }
+    return Array.from(bySlug.values()).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name))
+  }, [appShell?.skills, localSkills])
+  const assignedSkillSet = React.useMemo(() => new Set(profile.skillSlugs), [profile.skillSlugs])
+  const assignedSkills = profile.skillSlugs.map(slug => workspaceSkills.find(skill => skill.slug === slug) ?? null)
+  const availableSkills = workspaceSkills.filter(skill => !assignedSkillSet.has(skill.slug))
+
+  const saveSkillSlugs = React.useCallback(async (skillSlugs: string[]) => {
+    await onProfileUpdate({ skillSlugs: Array.from(new Set(skillSlugs)) })
+  }, [onProfileUpdate])
+
+  const attachSkill = React.useCallback(async (slug: string) => {
+    if (assignedSkillSet.has(slug)) return
+    await saveSkillSlugs([...profile.skillSlugs, slug])
+  }, [assignedSkillSet, profile.skillSlugs, saveSkillSlugs])
+
+  const detachSkill = React.useCallback(async (slug: string) => {
+    await saveSkillSlugs(profile.skillSlugs.filter(item => item !== slug))
+  }, [profile.skillSlugs, saveSkillSlugs])
+
+  const importFile = React.useCallback(async (file: File) => {
+    const workspaceId = appShell?.activeWorkspaceId
+    if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.importSkillFromContent) {
+      setError('Workspace is not ready')
+      return
+    }
+    setImporting(true)
+    setError(null)
+    try {
+      const content = await file.text()
+      const imported = await window.electronAPI.importSkillFromContent(workspaceId, { content, fileName: file.name })
+      setLocalSkills(current => [...current.filter(skill => skill.slug !== imported.slug), imported])
+      await saveSkillSlugs([...profile.skillSlugs, imported.slug])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to import skill')
+    } finally {
+      setImporting(false)
+      setDropActive(false)
+    }
+  }, [appShell?.activeWorkspaceId, profile.skillSlugs, saveSkillSlugs])
+
+  const handleDrop = React.useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const file = Array.from(event.dataTransfer.files).find(candidate => /(^SKILL\.md$|\.md$|\.markdown$)/i.test(candidate.name))
+    if (!file) {
+      setError('Drop a SKILL.md or Markdown file')
+      setDropActive(false)
+      return
+    }
+    void importFile(file)
+  }, [importFile])
+
   return (
-    <div className="space-y-4 p-6">
+    <div
+      className="space-y-4 p-6"
+      onDragOver={event => {
+        event.preventDefault()
+        setDropActive(true)
+      }}
+      onDragLeave={() => setDropActive(false)}
+      onDrop={handleDrop}
+    >
       <div className="flex items-start justify-between gap-3">
-        <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
-          Workspace skills assigned to this agent. Local skills are always available automatically.
+        <p className="max-w-3xl text-xs leading-5 text-muted-foreground">
+          Workspace skills assigned to this agent. Drop a <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">SKILL.md</code> file here to install it into the workspace and attach it.
         </p>
-        <Button variant="outline" size="sm" className="shrink-0 gap-1.5">
+        <Button variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={() => setShowAdd(true)} disabled={availableSkills.length === 0}>
           <Plus className="h-3 w-3" />
           Add skill
         </Button>
@@ -1144,31 +1516,111 @@ function AgentSkillsTab({ agent }: { agent: AgentProfileMock }) {
 
       <div className="flex items-start gap-2 rounded-md border border-info/30 bg-info/5 px-3 py-2.5">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" />
-        <p className="text-xs text-muted-foreground">Importing creates a workspace copy that your team can edit and reuse.</p>
+        <p className="text-xs text-muted-foreground">Importing creates a workspace copy that your team can edit and reuse. Agent runs will receive these skill slugs when child execution is wired.</p>
       </div>
 
-      {skills.length === 0 ? (
-        <div className="flex min-h-[240px] flex-col items-center justify-center rounded-lg border border-dashed border-border py-12 text-center">
+      <div className={cn('rounded-lg border border-dashed px-4 py-5 transition-colors', dropActive ? 'border-accent bg-accent/5' : 'border-border bg-muted/20')}>
+        <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+          {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+          {importing ? 'Importing skill…' : 'Drop SKILL.md or Markdown here to install and attach'}
+        </div>
+      </div>
+
+      {error && <p className="text-xs text-destructive">{error}</p>}
+
+      {profile.skillSlugs.length === 0 ? (
+        <div className="flex min-h-[220px] flex-col items-center justify-center rounded-lg border border-dashed border-border py-12 text-center">
           <FileText className="h-8 w-8 text-muted-foreground/40" />
           <p className="mt-3 text-sm text-muted-foreground">No skills assigned</p>
           <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">
             Add workspace skills to share team knowledge with this agent.
           </p>
+          {availableSkills.length > 0 && (
+            <Button onClick={() => setShowAdd(true)} size="sm" className="mt-3 gap-1.5">
+              <Plus className="h-3 w-3" />
+              Add skill
+            </Button>
+          )}
         </div>
       ) : (
         <ul className="space-y-1.5">
-          {skills.map(skill => (
-            <li key={skill} className="flex items-center gap-2.5 rounded-md border border-border px-3 py-2">
-              <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">{skill}</div>
-                <div className="truncate text-xs text-muted-foreground">Workspace skill</div>
-              </div>
-            </li>
-          ))}
+          {profile.skillSlugs.map((slug, index) => {
+            const skill = assignedSkills[index]
+            return (
+              <li key={slug} className="flex items-center gap-2.5 rounded-md border border-border px-3 py-2">
+                <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">{skill?.metadata.name ?? slug}</div>
+                  <div className="truncate text-xs text-muted-foreground">{skill?.metadata.description ?? 'Workspace skill'}</div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => void detachSkill(slug)}
+                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                  aria-label="Remove skill"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </li>
+            )
+          })}
         </ul>
       )}
+
+      <SkillAddDialog
+        open={showAdd}
+        onOpenChange={setShowAdd}
+        skills={availableSkills}
+        onAdd={(slug) => {
+          void attachSkill(slug)
+          setShowAdd(false)
+        }}
+      />
     </div>
+  )
+}
+
+function SkillAddDialog({
+  open,
+  onOpenChange,
+  skills,
+  onAdd,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  skills: LoadedSkill[]
+  onAdd: (slug: string) => void
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-sm">Add skill</DialogTitle>
+          <DialogDescription className="text-xs">Select a workspace skill to assign to this agent.</DialogDescription>
+        </DialogHeader>
+        <div className="max-h-64 space-y-1 overflow-y-auto">
+          {skills.map(skill => (
+            <button
+              key={skill.slug}
+              type="button"
+              onClick={() => onAdd(skill.slug)}
+              className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-accent/50"
+            >
+              <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">{skill.metadata.name}</div>
+                <div className="truncate text-xs text-muted-foreground">{skill.metadata.description}</div>
+              </div>
+            </button>
+          ))}
+          {skills.length === 0 && <p className="py-6 text-center text-xs text-muted-foreground">All workspace skills are already assigned.</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

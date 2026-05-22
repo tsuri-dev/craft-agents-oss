@@ -1,6 +1,7 @@
 import { join } from 'path'
 import { existsSync, readdirSync, statSync } from 'fs'
 import { RPC_CHANNELS, type SkillFile } from '@craft-agent/shared/protocol'
+import type { ImportWorkspaceSkillInput } from '@craft-agent/shared/skills'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -8,6 +9,7 @@ import type { HandlerDeps } from '../handler-deps'
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.skills.GET,
   RPC_CHANNELS.skills.GET_FILES,
+  RPC_CHANNELS.skills.IMPORT,
   RPC_CHANNELS.skills.DELETE,
   RPC_CHANNELS.skills.OPEN_EDITOR,
   RPC_CHANNELS.skills.OPEN_FINDER,
@@ -80,6 +82,17 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     }
 
     return scanDirectory(skillDir)
+  })
+
+  // Import a dropped SKILL.md/Markdown file into workspace skills
+  server.handle(RPC_CHANNELS.skills.IMPORT, async (_ctx, workspaceId: string, input: ImportWorkspaceSkillInput) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error('Workspace not found')
+
+    const { importWorkspaceSkillFromContent } = await import('@craft-agent/shared/skills')
+    const skill = importWorkspaceSkillFromContent(workspace.rootPath, input)
+    deps.platform.logger?.info(`Imported skill: ${skill.slug}`)
+    return skill
   })
 
   // Delete a skill from a workspace

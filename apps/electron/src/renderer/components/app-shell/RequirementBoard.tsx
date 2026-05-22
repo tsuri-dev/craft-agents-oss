@@ -22,6 +22,8 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
 import { SessionFilesSection } from '../right-sidebar/SessionFilesSection'
 import { InfoPopoverShell, InfoPopoverTriggerButton } from './SessionInfoPopover'
@@ -41,6 +43,7 @@ import type {
   RequirementListFilters,
   SessionFile,
   RequirementPluginDescriptor,
+  AgentProfile,
 } from '../../../shared/types'
 
 const TAPD_CACHE_STORAGE_VERSION = 1
@@ -875,7 +878,7 @@ function RequirementSessionLogRow({ session }: { session: { id: string; name?: s
 }
 
 export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }) {
-  const { activeWorkspaceId, onOpenUrl, onSessionLabelsChange, onSessionOptionsChange } = useAppShellContext()
+  const { activeWorkspaceId, onOpenUrl, onSessionLabelsChange, onSessionOptionsChange, onInputChange } = useAppShellContext()
   const { navigateToSession } = useNavigation()
   // Keep synced cached requirements readable even when tapd-mcp-http is not enabled in this workspace.
   const tapdInstalled = true
@@ -888,6 +891,7 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
   const [editingGroup, setEditingGroup] = React.useState(false)
   const [infoFiles, setInfoFiles] = React.useState<RequirementInfoFilesResult | null>(null)
   const [infoFilesError, setInfoFilesError] = React.useState<string | null>(null)
+  const [creatingSession, setCreatingSession] = React.useState(false)
 
   React.useEffect(() => {
     const cached = tapdInstalled ? readCache(activeWorkspaceId).itemsById[sourceItemId] : undefined
@@ -1022,13 +1026,27 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     navigate(routes.view.allSessions())
   }, [groupSessionCount, item?.binding])
 
-  const handleCreateSession = React.useCallback(async () => {
+  const openCreateSessionDialog = React.useCallback(() => {
+    if (!item?.binding) {
+      toast.error('Link a Session Group first', { description: 'Create or bind a group before creating a session from this requirement.' })
+      return
+    }
+    setCreatingSession(true)
+  }, [item?.binding])
+
+  const handleCreateSession = React.useCallback(async (options: { sessionName: string; agent?: AgentProfile | null }) => {
     if (!activeWorkspaceId || !item) return
     if (!item.binding) {
       toast.error('Link a Session Group first', { description: 'Create or bind a group before creating a session from this requirement.' })
       return
     }
-    const result = await window.electronAPI.createRequirementSessionForItem(activeWorkspaceId, { pluginId: TAPD_PLUGIN_ID, item, groupName: item.binding.groupName })
+    const result = await window.electronAPI.createRequirementSessionForItem(activeWorkspaceId, {
+      pluginId: TAPD_PLUGIN_ID,
+      item,
+      groupName: item.binding.groupName,
+      sessionName: options.sessionName,
+      agentProfileId: options.agent?.id,
+    })
     // The generic session_created broadcast can arrive slightly after this RPC
     // returns. Add the session to local atoms immediately so navigation's
     // auto-selection validator can find it and the requirement detail sidebar
@@ -1038,10 +1056,17 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     // by the backend. Otherwise this direct RPC path falls back to the renderer
     // default ('ask') before the session_created broadcast arrives, which can
     // make the UI and injected <session_state> disagree.
-    onSessionOptionsChange(result.sessionId, { permissionMode: result.session.permissionMode ?? 'ask' })
+    onSessionOptionsChange(result.sessionId, {
+      permissionMode: result.session.permissionMode ?? 'ask',
+      thinkingLevel: options.agent?.thinkingLevel,
+    })
+    if (options.agent) {
+      onInputChange(result.sessionId, `@${options.agent.name} `)
+    }
     toast.success('Session created for requirement')
+    setCreatingSession(false)
     navigateToSession(result.sessionId)
-  }, [activeWorkspaceId, addSession, item, navigateToSession, onSessionOptionsChange])
+  }, [activeWorkspaceId, addSession, item, navigateToSession, onInputChange, onSessionOptionsChange])
 
   if (!tapdInstalled) return <PluginUnavailableState />
 
@@ -1199,7 +1224,7 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
                       >
                         Sessions ({groupSessionCount})
                       </button>
-                      <Button size="sm" variant="secondary" className="h-7 rounded-[7px] px-2 text-[12px]" onClick={handleCreateSession}>New session</Button>
+                      <Button size="sm" variant="secondary" className="h-7 rounded-[7px] px-2 text-[12px]" onClick={openCreateSessionDialog}>New session</Button>
                     </div>
 
                     {groupSessionCount > 0 ? (
@@ -1245,6 +1270,122 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
           <div className={cn('text-[13px]', TAPD_DETAIL_THEME.weak)}>Refresh the item to load TAPD properties.</div>
         )}
       </aside>
+
+      {creatingSession && item?.binding && (
+        <RequirementCreateSessionDialog
+          item={item}
+          defaultName={item.binding.groupName}
+          onClose={() => setCreatingSession(false)}
+          onCreate={handleCreateSession}
+        />
+      )}
     </div>
+  )
+}
+
+function RequirementCreateSessionDialog({
+  item,
+  defaultName,
+  onClose,
+  onCreate,
+}: {
+  item: ExternalRequirementItem
+  defaultName: string
+  onClose: () => void
+  onCreate: (options: { sessionName: string; agent?: AgentProfile | null }) => Promise<void>
+}) {
+  const { activeWorkspaceId } = useAppShellContext()
+  const [name, setName] = React.useState(defaultName)
+  const [agents, setAgents] = React.useState<AgentProfile[]>([])
+  const [agentId, setAgentId] = React.useState('none')
+  const [creating, setCreating] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    setName(defaultName)
+  }, [defaultName])
+
+  React.useEffect(() => {
+    let cancelled = false
+    if (!activeWorkspaceId || typeof window === 'undefined' || !window.electronAPI?.listAgentProfiles) return
+    window.electronAPI.listAgentProfiles(activeWorkspaceId)
+      .then(profiles => {
+        if (!cancelled) setAgents(profiles)
+      })
+      .catch(() => {
+        if (!cancelled) setAgents([])
+      })
+    return () => { cancelled = true }
+  }, [activeWorkspaceId])
+
+  const selectedAgent = agentId === 'none' ? null : agents.find(agent => agent.id === agentId) ?? null
+
+  const handleSubmit = async () => {
+    if (!name.trim() || creating) return
+    setCreating(true)
+    setError(null)
+    try {
+      await onCreate({ sessionName: name.trim(), agent: selectedAgent })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create session')
+      setCreating(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open && !creating) onClose() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>New requirement session</DialogTitle>
+          <DialogDescription>
+            Start from TAPD-{item.sourceItemId}. Select an agent to prefill the new chat input with an @mention.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs text-muted-foreground">Name</label>
+            <Input
+              autoFocus
+              value={name}
+              onChange={event => setName(event.target.value)}
+              placeholder="Session name"
+              className="mt-1"
+              onKeyDown={event => { if (event.key === 'Enter') void handleSubmit() }}
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-muted-foreground">Agent</label>
+            <Select value={agentId} onValueChange={setAgentId}>
+              <SelectTrigger className="mt-1">
+                <SelectValue placeholder="No agent" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No agent</SelectItem>
+                {agents.map(agent => (
+                  <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedAgent && (
+              <p className="mt-2 rounded-md bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
+                The new chat input will start with <span className="font-mono text-foreground/80">@{selectedAgent.name}</span>. You can continue typing your question there.
+              </p>
+            )}
+          </div>
+
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={creating}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={creating || !name.trim()}>
+            {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+            Create
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
