@@ -276,8 +276,13 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.transfer.COMMIT,
   RPC_CHANNELS.transfer.ABORT,
 
-  // tasks — workspace content
+  // tasks / agents — workspace content
   RPC_CHANNELS.tasks.GET_OUTPUT,
+  RPC_CHANNELS.agentRuns.LIST,
+  RPC_CHANNELS.agentProfiles.LIST,
+  RPC_CHANNELS.agentProfiles.GET,
+  RPC_CHANNELS.agentProfiles.CREATE,
+  RPC_CHANNELS.agentProfiles.UPDATE,
 
   // file — workspace files (not openDialog which is native)
   RPC_CHANNELS.file.READ,
