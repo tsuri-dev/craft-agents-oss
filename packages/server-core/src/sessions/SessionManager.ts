@@ -80,6 +80,7 @@ import { collectDirectoryFiles, restoreFiles, type BundleFile } from '@craft-age
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SessionUsageEntry, type UsageStats, type UsageStatsRange, type UsageTotals, type RequirementBinding, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
+import type { AgentRun, AgentRunStatus } from '@craft-agent/shared/agent-runs'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
@@ -1288,6 +1289,8 @@ export class SessionManager implements ISessionManager {
    * subprocess can race the resulting `chat` against the still-pending update.
    */
   private agentRefreshLocks: Map<string, Promise<void>> = new Map()
+  /** Runtime index for AgentRun manifests created by @agent delegation. */
+  private agentRunManifestByChildSessionId: Map<string, string> = new Map()
   /** Monotonic clock to ensure strictly increasing message timestamps */
   private lastTimestamp = 0
 
@@ -5696,6 +5699,100 @@ export class SessionManager implements ISessionManager {
     return `<agent-profile name="${profileName.replace(/"/g, '&quot;')}">\n${trimmedInstructions}\n</agent-profile>\n\n${userPrompt}`
   }
 
+  private async writeAgentRunManifest(run: AgentRun): Promise<void> {
+    if (!run.manifestPath) return
+    await mkdir(dirname(run.manifestPath), { recursive: true })
+    await writeFile(run.manifestPath, JSON.stringify(run, null, 2) + '\n', 'utf-8')
+  }
+
+  private async appendAgentRunLog(transcriptPath: string | undefined, event: Record<string, unknown>): Promise<void> {
+    if (!transcriptPath) return
+    await mkdir(dirname(transcriptPath), { recursive: true })
+    await appendFile(transcriptPath, JSON.stringify({ timestamp: new Date().toISOString(), ...event }) + '\n', 'utf-8')
+  }
+
+  private async createAgentRunManifest(input: {
+    parent: ManagedSession
+    agentProfileId: string
+    childSessionId: string
+    triggerSummary: string
+  }): Promise<AgentRun> {
+    const runId = `run-${input.agentProfileId}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`
+    const runDir = join(getSessionStoragePath(input.parent.workspace.rootPath, input.parent.id), 'agent-runs', runId)
+    const manifestPath = join(runDir, 'manifest.json')
+    const transcriptPath = join(runDir, 'transcript.jsonl')
+    const now = new Date().toISOString()
+    const run: AgentRun = {
+      id: runId,
+      agentProfileId: input.agentProfileId,
+      parentSessionId: input.parent.id,
+      childSessionId: input.childSessionId,
+      triggerType: 'mention',
+      triggerSummary: input.triggerSummary,
+      status: 'running',
+      createdAt: now,
+      startedAt: now,
+      toolCount: 0,
+      artifactCount: 0,
+      manifestPath,
+      transcriptPath,
+    }
+
+    this.agentRunManifestByChildSessionId.set(input.childSessionId, manifestPath)
+    await this.writeAgentRunManifest(run)
+    await this.appendAgentRunLog(transcriptPath, {
+      type: 'agent_run_started',
+      runId,
+      agentProfileId: input.agentProfileId,
+      parentSessionId: input.parent.id,
+      childSessionId: input.childSessionId,
+      triggerSummary: input.triggerSummary,
+    })
+
+    return run
+  }
+
+  private async updateAgentRunForChildSession(childSessionId: string, status: AgentRunStatus, failureReason?: string): Promise<void> {
+    const manifestPath = this.agentRunManifestByChildSessionId.get(childSessionId)
+    if (!manifestPath || !existsSync(manifestPath)) return
+
+    try {
+      const run = JSON.parse(readFileSync(manifestPath, 'utf-8')) as AgentRun
+      const child = this.sessions.get(childSessionId)
+      const now = new Date().toISOString()
+      const toolCount = child?.messages.filter(message => message.role === 'tool').length ?? run.toolCount
+      const lastAssistant = child?.messages.slice().reverse().find(message => message.role === 'assistant' && !message.isIntermediate)
+      const summaryPath = run.summaryPath ?? join(dirname(manifestPath), 'summary.md')
+      const isFinished = status !== 'stopping' && status !== 'running' && status !== 'queued'
+      const shouldWriteSummary = !!lastAssistant && isFinished
+
+      const updated: AgentRun = {
+        ...run,
+        status,
+        failureReason,
+        completedAt: isFinished ? now : run.completedAt,
+        toolCount,
+        summaryPath: shouldWriteSummary ? summaryPath : run.summaryPath,
+      }
+
+      if (shouldWriteSummary) {
+        await writeFile(summaryPath, lastAssistant.content || '', 'utf-8')
+      }
+
+      await this.writeAgentRunManifest(updated)
+      await this.appendAgentRunLog(updated.transcriptPath, {
+        type: status === 'stopping' ? 'agent_run_stopping' : 'agent_run_finished',
+        runId: updated.id,
+        childSessionId,
+        status,
+        failureReason,
+        toolCount,
+      })
+    } catch (err) {
+      sessionLog.warn(`Failed to update AgentRun manifest for child session ${childSessionId}:`, err)
+    }
+  }
+
   private async spawnAgentProfileMentionSessions(
     parent: ManagedSession,
     parentMessage: string,
@@ -5733,13 +5830,27 @@ export class SessionManager implements ISessionManager {
           labels: parent.labels,
         })
 
+        const run = await this.createAgentRunManifest({
+          parent,
+          agentProfileId: profile.id,
+          childSessionId: session.id,
+          triggerSummary: delegatedPrompt,
+        })
+
         this.sendEvent({ type: 'session_created', sessionId: session.id }, workspaceId)
 
         const childPrompt = this.buildAgentProfilePrompt(profile.name, profile.instructions, delegatedPrompt)
         this.sendMessage(session.id, childPrompt, attachments, undefined, {
           skillSlugs: profile.skillSlugs.length > 0 ? profile.skillSlugs : undefined,
+        }).then(() => {
+          void this.appendAgentRunLog(run.transcriptPath, {
+            type: 'agent_run_prompt_accepted',
+            runId: run.id,
+            childSessionId: session.id,
+          })
         }).catch(err => {
           sessionLog.error(`Failed to send delegated @agent message to child session ${session.id}:`, err)
+          void this.updateAgentRunForChildSession(session.id, 'failed', err instanceof Error ? err.message : String(err))
         })
       } catch (err) {
         sessionLog.error(`Failed to spawn child session for Agent Profile ${agentProfileId}:`, err)
@@ -6401,6 +6512,7 @@ export class SessionManager implements ISessionManager {
     }
 
     sessionLog.info('Cancelling processing for session:', sessionId, silent ? '(silent)' : '')
+    await this.updateAgentRunForChildSession(sessionId, 'stopping')
 
     // Collect queued message text for input restoration before clearing
     const queuedTexts = managed.messageQueue.map(q => q.message)
@@ -6593,6 +6705,14 @@ export class SessionManager implements ISessionManager {
     if (this.browserPaneManager) {
       await this.browserPaneManager.clearVisualsForSession(sessionId)
     }
+
+    const agentRunStatus: AgentRunStatus = reason === 'complete' ? 'completed' : reason === 'interrupted' ? 'cancelled' : 'failed'
+    const agentRunFailureReason = reason === 'error'
+      ? 'Child session failed'
+      : reason === 'timeout'
+        ? 'Child session stop timed out'
+        : undefined
+    await this.updateAgentRunForChildSession(sessionId, agentRunStatus, agentRunFailureReason)
 
     // 2. Handle unread state based on whether user is viewing this session
     //    This is the explicit state machine for NEW badge:
