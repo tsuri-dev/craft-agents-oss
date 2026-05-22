@@ -3,13 +3,31 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { listAgentProfiles, readAgentProfileDetail, updateAgentProfile } from './agent-profiles'
+import { createAgentProfile, listAgentProfiles, readAgentProfileDetail, updateAgentProfile } from './agent-profiles'
 
 function tempWorkspace(): string {
   return mkdtempSync(join(tmpdir(), 'craft-agent-profiles-'))
 }
 
 describe('agent-profiles file store', () => {
+  it('creates a unique workspace profile from create input', () => {
+    const workspace = tempWorkspace()
+    const created = createAgentProfile(workspace, {
+      name: 'Research Agent',
+      description: 'Finds references and summarizes tradeoffs',
+      connectionSlug: 'claude-code',
+      model: 'claude-sonnet-4-5-20250929',
+      instructions: 'Use primary sources and cite uncertainty.',
+    })
+    const duplicate = createAgentProfile(workspace, { name: 'Research Agent' })
+
+    expect(created.id).toBe('research-agent')
+    expect(duplicate.id).toBe('research-agent-2')
+    expect(created.description).toBe('Finds references and summarizes tradeoffs')
+    expect(created.instructions).toBe('Use primary sources and cite uncertainty.')
+    expect(readAgentProfileDetail(workspace, created.id)?.name).toBe('Research Agent')
+  })
+
   it('returns default profiles when workspace has no files', () => {
     const workspace = tempWorkspace()
     const profiles = listAgentProfiles(workspace)

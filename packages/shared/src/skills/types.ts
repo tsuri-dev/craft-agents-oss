@@ -43,6 +43,15 @@ export const AGENTS_PLUGIN_NAME = '.agents';
 /**
  * A loaded skill with parsed content
  */
+export interface ImportWorkspaceSkillInput {
+  /** Raw SKILL.md or markdown content. Missing frontmatter is wrapped with generated metadata. */
+  content: string;
+  /** Original dropped file name, used to derive a slug/name when needed. */
+  fileName?: string;
+  /** Optional preferred slug; sanitized and de-duped before writing. */
+  slug?: string;
+}
+
 export interface LoadedSkill {
   /** Directory name (slug) */
   slug: string;

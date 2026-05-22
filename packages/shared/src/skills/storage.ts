@@ -7,15 +7,17 @@
 
 import {
   existsSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import matter from 'gray-matter';
-import type { LoadedSkill, SkillMetadata, SkillSource } from './types.ts';
+import type { ImportWorkspaceSkillInput, LoadedSkill, SkillMetadata, SkillSource } from './types.ts';
 import { getWorkspaceSkillsPath } from '../workspaces/storage.ts';
 import {
   validateIconValue,
@@ -294,6 +296,98 @@ export function getSkillIconPath(workspaceRoot: string, slug: string): string | 
   }
 
   return findIconFile(skillDir) || null;
+}
+
+// ============================================================
+// Write Operations
+// ============================================================
+
+/**
+ * Import raw skill markdown into workspace storage.
+ * Accepts a full SKILL.md file, or wraps a plain markdown file with generated
+ * name/description frontmatter so it becomes a valid workspace skill.
+ */
+export function importWorkspaceSkillFromContent(
+  workspaceRoot: string,
+  input: ImportWorkspaceSkillInput
+): LoadedSkill {
+  const normalized = normalizeImportedSkillMarkdown(input.content, input.fileName);
+  const baseSlug = normalizeSkillSlug(input.slug || normalized.slugHint || input.fileName || normalized.name || 'skill');
+  const slug = uniqueSkillSlug(workspaceRoot, baseSlug);
+  const skillsDir = getWorkspaceSkillsPath(workspaceRoot);
+  const skillDir = join(skillsDir, slug);
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(join(skillDir, 'SKILL.md'), normalized.content.endsWith('\n') ? normalized.content : `${normalized.content}\n`, 'utf-8');
+  invalidateSkillsCache();
+
+  const loaded = loadSkill(workspaceRoot, slug);
+  if (!loaded) {
+    throw new Error('Imported skill could not be loaded. Check SKILL.md frontmatter.');
+  }
+  return loaded;
+}
+
+function normalizeImportedSkillMarkdown(content: string, fileName?: string): { content: string; name: string; slugHint: string } {
+  const trimmed = content.trim();
+  const parsed = matter(trimmed);
+  const rawName = typeof parsed.data.name === 'string' && parsed.data.name.trim()
+    ? parsed.data.name.trim()
+    : titleFromMarkdown(parsed.content) || titleFromFileName(fileName) || 'Imported Skill';
+  const rawDescription = typeof parsed.data.description === 'string' && parsed.data.description.trim()
+    ? parsed.data.description.trim()
+    : `Imported from ${fileName || 'dropped markdown'}`;
+
+  if (parsed.data.name && parsed.data.description && parsed.content.trim()) {
+    return { content: trimmed, name: rawName, slugHint: titleFromFileName(fileName) || rawName };
+  }
+
+  const body = parsed.content.trim() || trimmed || '# Instructions\n\nDescribe how this skill should guide the agent.';
+  const escapedName = escapeYamlString(rawName);
+  const escapedDescription = escapeYamlString(rawDescription);
+  return {
+    content: `---\nname: "${escapedName}"\ndescription: "${escapedDescription}"\n---\n\n${body}\n`,
+    name: rawName,
+    slugHint: titleFromFileName(fileName) || rawName,
+  };
+}
+
+function uniqueSkillSlug(workspaceRoot: string, baseSlug: string): string {
+  const skillsDir = getWorkspaceSkillsPath(workspaceRoot);
+  let slug = baseSlug || 'skill';
+  let suffix = 2;
+  while (existsSync(join(skillsDir, slug))) {
+    slug = `${baseSlug}-${suffix}`;
+    suffix += 1;
+  }
+  return slug;
+}
+
+function normalizeSkillSlug(value: string): string {
+  const withoutExtension = value.replace(/\.[^.]+$/, '');
+  const normalized = withoutExtension
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return normalized || 'skill';
+}
+
+function titleFromFileName(fileName?: string): string {
+  if (!fileName) return '';
+  const base = fileName.replace(/\.[^.]+$/, '').replace(/^skill$/i, '');
+  return base
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function titleFromMarkdown(content: string): string {
+  const heading = content.split(/\r?\n/).find(line => /^#\s+/.test(line));
+  return heading?.replace(/^#\s+/, '').trim() ?? '';
+}
+
+function escapeYamlString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
 // ============================================================

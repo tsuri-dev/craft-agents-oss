@@ -27,6 +27,19 @@ export interface AgentProfileDetail extends AgentProfile {
   instructionsPath?: string
 }
 
+export interface AgentProfileCreateInput {
+  name: string
+  description?: string
+  connectionSlug?: string
+  model?: string
+  thinkingLevel?: ThinkingLevel
+  permissionMode?: PermissionMode
+  instructions?: string
+  skillSlugs?: string[]
+  sourceSlugs?: string[]
+  environmentVariables?: Record<string, string>
+}
+
 export interface AgentProfileUpdateInput {
   profile?: Partial<Pick<AgentProfile,
     | 'name'

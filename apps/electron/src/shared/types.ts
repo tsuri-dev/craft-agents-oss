@@ -70,10 +70,11 @@ export type { ExportResourcesOptions, ExportResult, ResourceImportMode, Resource
 // LLM connection types
 import type { LlmConnection, LlmConnectionWithStatus, LlmAuthType, LlmProviderType, NetworkProxySettings } from '@craft-agent/shared/config';
 export type { LlmConnection, LlmConnectionWithStatus, LlmAuthType, LlmProviderType, NetworkProxySettings };
+import type { ImportWorkspaceSkillInput } from '@craft-agent/shared/skills';
 import type { AgentRun } from '@craft-agent/shared/agent-runs';
 export type { AgentRun };
-import type { AgentProfile, AgentProfileDetail, AgentProfileUpdateInput } from '@craft-agent/shared/agent-profiles';
-export type { AgentProfile, AgentProfileDetail, AgentProfileUpdateInput };
+import type { AgentProfile, AgentProfileCreateInput, AgentProfileDetail, AgentProfileUpdateInput } from '@craft-agent/shared/agent-profiles';
+export type { AgentProfile, AgentProfileCreateInput, AgentProfileDetail, AgentProfileUpdateInput };
 
 // =============================================================================
 // GUI-only types (not used by server/handler code)
@@ -252,6 +253,7 @@ export interface ElectronAPI {
   getTaskOutput(taskId: string): Promise<string | null>
   listAgentProfiles(workspaceId: string): Promise<AgentProfile[]>
   getAgentProfile(workspaceId: string, agentProfileId: string): Promise<AgentProfileDetail>
+  createAgentProfile(workspaceId: string, input: AgentProfileCreateInput): Promise<AgentProfileDetail>
   updateAgentProfile(workspaceId: string, agentProfileId: string, input: AgentProfileUpdateInput): Promise<AgentProfileDetail>
   listAgentRuns(workspaceId: string, input?: { agentProfileId?: string }): Promise<AgentRun[]>
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
@@ -527,6 +529,7 @@ export interface ElectronAPI {
   // Skills
   getSkills(workspaceId: string, workingDirectory?: string): Promise<LoadedSkill[]>
   getSkillFiles?(workspaceId: string, skillSlug: string): Promise<SkillFile[]>
+  importSkillFromContent(workspaceId: string, input: ImportWorkspaceSkillInput): Promise<LoadedSkill>
   deleteSkill(workspaceId: string, skillSlug: string): Promise<void>
   openSkillInEditor(workspaceId: string, skillSlug: string): Promise<void>
   openSkillInFinder(workspaceId: string, skillSlug: string): Promise<void>

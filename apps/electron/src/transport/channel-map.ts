@@ -30,6 +30,7 @@ export const CHANNEL_MAP = {
   getTaskOutput: invoke(RPC_CHANNELS.tasks.GET_OUTPUT),
   listAgentProfiles: invoke(RPC_CHANNELS.agentProfiles.LIST),
   getAgentProfile: invoke(RPC_CHANNELS.agentProfiles.GET),
+  createAgentProfile: invoke(RPC_CHANNELS.agentProfiles.CREATE),
   updateAgentProfile: invoke(RPC_CHANNELS.agentProfiles.UPDATE),
   listAgentRuns: invoke(RPC_CHANNELS.agentRuns.LIST),
   respondToPermission: invoke(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION),
@@ -256,6 +257,7 @@ export const CHANNEL_MAP = {
   // Skills
   getSkills: invoke(RPC_CHANNELS.skills.GET),
   getSkillFiles: invoke(RPC_CHANNELS.skills.GET_FILES),
+  importSkillFromContent: invoke(RPC_CHANNELS.skills.IMPORT),
   deleteSkill: invoke(RPC_CHANNELS.skills.DELETE),
   openSkillInEditor: invoke(RPC_CHANNELS.skills.OPEN_EDITOR),
   openSkillInFinder: invoke(RPC_CHANNELS.skills.OPEN_FINDER),
