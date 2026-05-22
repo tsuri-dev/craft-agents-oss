@@ -10,6 +10,7 @@ import {
   CircleX,
   Clock3,
   Code2,
+  DatabaseZap,
   Eye,
   EyeOff,
   FileText,
@@ -32,8 +33,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { TiptapMarkdownEditor } from '@craft-agent/ui'
+import { SourceAvatar } from '@/components/ui/source-avatar'
+import { deriveConnectionStatus } from '@/components/ui/source-status-indicator'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
 import { getModelDisplayName } from '@config/models'
@@ -48,7 +52,7 @@ import {
   type AgentRunBucket,
 } from '../../../shared/agent-runs'
 import type { AgentProfile, AgentProfileCreateInput, AgentProfileDetail, AgentProfileUpdateInput } from '../../../shared/agent-profiles'
-import type { LoadedSkill } from '../../../shared/types'
+import type { LoadedSkill, LoadedSource } from '../../../shared/types'
 
 export interface AgentProfileMock {
   id: string
@@ -985,6 +989,11 @@ function AgentDetailInspectorCard({
         <AgentPropRow label="Visibility">Workspace</AgentPropRow>
       </AgentInspectorSection>
 
+      <AgentInspectorSection label="Capabilities">
+        <AgentPropRow label="Skills">{profile.skillSlugs.length}</AgentPropRow>
+        <AgentPropRow label="Sources">{profile.sourceSlugs.length}</AgentPropRow>
+      </AgentInspectorSection>
+
       <AgentInspectorSection label="Details">
         <AgentPropRow label="Created">{formatTimestamp(profile.createdAt)}</AgentPropRow>
         <AgentPropRow label="Updated">{formatTimestamp(profile.updatedAt)}</AgentPropRow>
@@ -993,11 +1002,11 @@ function AgentDetailInspectorCard({
       <div className="flex flex-col border-b border-border px-5 py-4">
         <div className="mb-2 flex items-center gap-2">
           <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Skills</span>
-          <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">{agent.skillSlugs.length}</span>
+          <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">{profile.skillSlugs.length}</span>
         </div>
-        {agent.skillSlugs.length > 0 ? (
+        {profile.skillSlugs.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
-            {agent.skillSlugs.map(skill => <AgentSmallToken key={skill}>{skill}</AgentSmallToken>)}
+            {profile.skillSlugs.map(skill => <AgentSmallToken key={skill}>{skill}</AgentSmallToken>)}
           </div>
         ) : (
           <p className="text-xs italic text-muted-foreground/60">No skills attached.</p>
@@ -1097,12 +1106,13 @@ function AgentInspectorSelect({
   )
 }
 
-type AgentDetailTab = 'activity' | 'instructions' | 'skills' | 'environment'
+type AgentDetailTab = 'activity' | 'instructions' | 'skills' | 'sources' | 'environment'
 
 const AGENT_DETAIL_TABS: Array<{ id: AgentDetailTab; label: string; icon: typeof Bot }> = [
   { id: 'activity', label: 'Activity', icon: Activity },
   { id: 'instructions', label: 'Instructions', icon: FileText },
   { id: 'skills', label: 'Skills', icon: BookOpenText },
+  { id: 'sources', label: 'Sources', icon: DatabaseZap },
   { id: 'environment', label: 'Environment', icon: KeyRound },
 ]
 
@@ -1146,6 +1156,7 @@ function AgentOverviewPaneMock({
         {activeTab === 'activity' && <AgentActivityTab agent={agent} />}
         {activeTab === 'instructions' && <AgentInstructionsTab profile={profile} onSave={onInstructionsSave} />}
         {activeTab === 'skills' && <AgentSkillsTab profile={profile} onProfileUpdate={onProfileUpdate} />}
+        {activeTab === 'sources' && <AgentSourcesTab profile={profile} onProfileUpdate={onProfileUpdate} />}
         {activeTab === 'environment' && <AgentEnvironmentTab profile={profile} onSave={onEnvironmentSave} />}
       </div>
     </section>
@@ -1638,6 +1649,232 @@ function SkillAddDialog({
       </DialogContent>
     </Dialog>
   )
+}
+
+function AgentSourcesTab({
+  profile,
+  onProfileUpdate,
+}: {
+  profile: AgentProfileDetail
+  onProfileUpdate: (patch: NonNullable<AgentProfileUpdateInput['profile']>) => Promise<void>
+}) {
+  const appShell = useOptionalAppShellContext()
+  const [localSources, setLocalSources] = React.useState<LoadedSource[]>([])
+  const [draftSourceSlugs, setDraftSourceSlugs] = React.useState<string[]>(profile.sourceSlugs)
+  const [savingSlug, setSavingSlug] = React.useState<string | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  const profileSourceSlugKey = profile.sourceSlugs.join('\u0000')
+
+  React.useEffect(() => {
+    setDraftSourceSlugs(profile.sourceSlugs)
+    setError(null)
+  }, [profile.id, profileSourceSlugKey])
+
+  React.useEffect(() => {
+    let cancelled = false
+    const workspaceId = appShell?.activeWorkspaceId
+    if (!workspaceId || (appShell?.enabledSources?.length ?? 0) > 0 || typeof window === 'undefined' || !window.electronAPI?.getSources) return
+
+    window.electronAPI.getSources(workspaceId)
+      .then(sources => {
+        if (!cancelled) setLocalSources(sources ?? [])
+      })
+      .catch(() => {
+        if (!cancelled) setLocalSources([])
+      })
+
+    return () => { cancelled = true }
+  }, [appShell?.activeWorkspaceId, appShell?.enabledSources?.length])
+
+  const workspaceSources = React.useMemo(() => {
+    const bySlug = new Map<string, LoadedSource>()
+    for (const source of [...localSources, ...(appShell?.enabledSources ?? [])]) {
+      if (!source.config.slug || source.isBuiltin) continue
+      bySlug.set(source.config.slug, source)
+    }
+    return Array.from(bySlug.values()).sort((a, b) => a.config.name.localeCompare(b.config.name))
+  }, [appShell?.enabledSources, localSources])
+
+  const sourceBySlug = React.useMemo(() => {
+    const map = new Map<string, LoadedSource>()
+    for (const source of workspaceSources) map.set(source.config.slug, source)
+    return map
+  }, [workspaceSources])
+
+  const assignedSourceSet = React.useMemo(() => new Set(draftSourceSlugs), [draftSourceSlugs])
+  const missingSourceSlugs = React.useMemo(
+    () => draftSourceSlugs.filter(slug => !sourceBySlug.has(slug)),
+    [draftSourceSlugs, sourceBySlug],
+  )
+
+  const persistSourceSlugs = React.useCallback(async (nextSlugs: string[], savingTarget: string) => {
+    if (savingSlug) return
+    const previous = draftSourceSlugs
+    const uniqueNext = Array.from(new Set(nextSlugs))
+    setDraftSourceSlugs(uniqueNext)
+    setSavingSlug(savingTarget)
+    setError(null)
+    try {
+      await onProfileUpdate({ sourceSlugs: uniqueNext })
+    } catch (err) {
+      setDraftSourceSlugs(previous)
+      setError(err instanceof Error ? err.message : 'Failed to save sources')
+    } finally {
+      setSavingSlug(null)
+    }
+  }, [draftSourceSlugs, onProfileUpdate, savingSlug])
+
+  const toggleSource = React.useCallback((slug: string, enabled: boolean) => {
+    const next = enabled
+      ? [...draftSourceSlugs, slug]
+      : draftSourceSlugs.filter(item => item !== slug)
+    void persistSourceSlugs(next, slug)
+  }, [draftSourceSlugs, persistSourceSlugs])
+
+  const openSourceConfig = React.useCallback((slug?: string) => {
+    const route = slug
+      ? `craftagents://sources/source/${encodeURIComponent(slug)}?window=focused`
+      : 'craftagents://sources?window=focused'
+    const openPromise = window.electronAPI?.openUrl?.(route)
+    if (!openPromise) {
+      setError('Source navigation is not available')
+      return
+    }
+    openPromise.catch(err => {
+      setError(err instanceof Error ? err.message : 'Failed to open source configuration')
+    })
+  }, [])
+
+  return (
+    <div className="flex h-full flex-col gap-4 p-6">
+      <div className="flex items-start justify-between gap-3">
+        <p className="max-w-3xl text-xs leading-5 text-muted-foreground">
+          Choose the workspace sources this agent should receive when child agent execution is wired. Source slugs are saved to{' '}
+          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">profile.json</code>; auth, transport, and tool permissions stay configured on the source itself.
+        </p>
+        <Button variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={() => openSourceConfig()}>
+          <SlidersHorizontal className="h-3 w-3" />
+          Manage sources
+        </Button>
+      </div>
+
+      <div className="flex items-start gap-2 rounded-md border border-info/30 bg-info/5 px-3 py-2.5">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-info" />
+        <p className="text-xs text-muted-foreground">
+          Agent runs will use these source slugs as their session source selection. Disabled or unauthenticated sources can be saved here, but they must be fixed in Sources before a run can use them.
+        </p>
+      </div>
+
+      {error && <p className="text-xs text-destructive">{error}</p>}
+
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-background">
+        <div className="flex h-10 items-center justify-between border-b border-border bg-muted/20 px-3">
+          <span className="text-xs font-medium text-muted-foreground">Workspace sources</span>
+          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">{draftSourceSlugs.length} enabled</span>
+        </div>
+
+        {workspaceSources.length === 0 ? (
+          <div className="flex min-h-[260px] flex-col items-center justify-center px-6 py-12 text-center">
+            <DatabaseZap className="h-8 w-8 text-muted-foreground/40" />
+            <p className="mt-3 text-sm text-muted-foreground">No sources configured</p>
+            <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
+              Add workspace sources first, then attach the ones this agent should use.
+            </p>
+            <Button size="sm" className="mt-3 gap-1.5" onClick={() => openSourceConfig()}>
+              <Plus className="h-3 w-3" />
+              Add source
+            </Button>
+          </div>
+        ) : (
+          <ul className="divide-y divide-border">
+            {workspaceSources.map(source => {
+              const slug = source.config.slug
+              const enabledForAgent = assignedSourceSet.has(slug)
+              const status = getAgentSourceStatusPresentation(source)
+              const isSaving = savingSlug === slug
+              return (
+                <li key={slug} className="flex items-center gap-3 px-3 py-3">
+                  <SourceAvatar source={source} size="md" showStatus />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-sm font-medium">{source.config.name}</span>
+                      <AgentSmallToken>{source.config.type}</AgentSmallToken>
+                      {!source.config.enabled && <AgentSmallToken>disabled</AgentSmallToken>}
+                    </div>
+                    <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {source.config.tagline || source.config.provider || slug}
+                    </div>
+                  </div>
+                  <span className={cn('hidden shrink-0 text-xs md:inline', status.className)}>{status.label}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => openSourceConfig(slug)}
+                  >
+                    Configure
+                  </Button>
+                  <div className="flex w-12 shrink-0 justify-end">
+                    {isSaving ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      <Switch
+                        checked={enabledForAgent}
+                        onCheckedChange={checked => toggleSource(slug, checked)}
+                        aria-label={`${enabledForAgent ? 'Disable' : 'Enable'} ${source.config.name} for agent`}
+                        disabled={savingSlug !== null}
+                      />
+                    )}
+                  </div>
+                </li>
+              )
+            })}
+            {missingSourceSlugs.map(slug => (
+              <li key={slug} className="flex items-center gap-3 bg-warning/5 px-3 py-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-warning/10 text-warning">
+                  <CircleX className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">{slug}</div>
+                  <div className="truncate text-xs text-muted-foreground">Saved on this profile, but this source no longer exists in the workspace.</div>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-xs text-muted-foreground hover:text-destructive"
+                  onClick={() => toggleSource(slug, false)}
+                  disabled={savingSlug !== null}
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function getAgentSourceStatusPresentation(source: LoadedSource): { label: string; className: string } {
+  if (!source.config.enabled) return { label: 'Disabled', className: 'text-muted-foreground' }
+
+  const status = deriveConnectionStatus(source)
+  switch (status) {
+    case 'connected':
+      return { label: 'Connected', className: 'text-success' }
+    case 'needs_auth':
+      return { label: 'Needs auth', className: 'text-info' }
+    case 'failed':
+      return { label: 'Failed', className: 'text-destructive' }
+    case 'local_disabled':
+      return { label: 'Local MCP off', className: 'text-muted-foreground' }
+    case 'untested':
+    default:
+      return { label: 'Untested', className: 'text-muted-foreground' }
+  }
 }
 
 function envMapToEntries(env: Record<string, string>): EnvEntry[] {

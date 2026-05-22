@@ -1,12 +1,14 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { Command as CommandPrimitive } from 'cmdk'
+import { toast } from 'sonner'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   Paperclip,
   ArrowUp,
   Square,
   Check,
+  Code2,
   Zap,
   DatabaseZap,
   ChevronDown,
@@ -2561,6 +2563,25 @@ function WorkingDirectoryBadge({
   const inputRef = React.useRef<HTMLInputElement>(null)
   const closePopover = React.useCallback(() => setPopoverOpen(false), [])
 
+  const buildVsCodeFolderUrl = React.useCallback((path: string) => {
+    const normalized = path.replace(/\\/g, '/')
+    const withLeadingSlash = normalized.startsWith('/') ? normalized : `/${normalized}`
+    return `vscode://file${withLeadingSlash.split('/').map(encodeURIComponent).join('/')}`
+  }, [])
+
+  const handleOpenInVsCode = React.useCallback(async (event: React.MouseEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (!workingDirectory) return
+
+    try {
+      await window.electronAPI.openUrl(buildVsCodeFolderUrl(workingDirectory))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not open VS Code'
+      toast.error('Could not open VS Code', { description: message })
+    }
+  }, [buildVsCodeFolderUrl, workingDirectory])
+
   const {
     homeDir,
     gitBranch,
@@ -2609,27 +2630,44 @@ function WorkingDirectoryBadge({
   return (
     <>
     <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-      <PopoverTrigger asChild>
-        <span className="shrink min-w-0 overflow-hidden">
-          <FreeFormInputContextBadge
-            icon={<Icon_Home className="h-4 w-4" />}
-            label={folderName ?? 'Work in Folder'}
-            isExpanded={isEmptySession}
-            hasSelection={hasFolder}
-            showChevron={true}
-            isOpen={popoverOpen}
-            tooltip={
-              hasFolder ? (
-                <span className="flex flex-col gap-0.5">
-                  <span className="font-medium">{t("chat.workingDirectory")}</span>
-                  <span className="text-xs opacity-70">{formatPathForDisplay(workingDirectory, homeDir)}</span>
-                  {gitBranch && <span className="text-xs opacity-70">{t("chat.onBranch", { branch: gitBranch })}</span>}
-                </span>
-              ) : t("chat.chooseWorkingDirectory")
-            }
-          />
-        </span>
-      </PopoverTrigger>
+      <span className="inline-flex shrink min-w-0 items-center gap-0.5 overflow-hidden">
+        <PopoverTrigger asChild>
+          <span className="shrink min-w-0 overflow-hidden">
+            <FreeFormInputContextBadge
+              icon={<Icon_Home className="h-4 w-4" />}
+              label={folderName ?? 'Work in Folder'}
+              isExpanded={isEmptySession}
+              hasSelection={hasFolder}
+              showChevron={true}
+              isOpen={popoverOpen}
+              tooltip={
+                hasFolder ? (
+                  <span className="flex flex-col gap-0.5">
+                    <span className="font-medium">{t("chat.workingDirectory")}</span>
+                    <span className="text-xs opacity-70">{formatPathForDisplay(workingDirectory, homeDir)}</span>
+                    {gitBranch && <span className="text-xs opacity-70">{t("chat.onBranch", { branch: gitBranch })}</span>}
+                  </span>
+                ) : t("chat.chooseWorkingDirectory")
+              }
+            />
+          </span>
+        </PopoverTrigger>
+        {workingDirectory && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label="Open working directory in VS Code"
+                onClick={handleOpenInVsCode}
+                className="input-toolbar-btn inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground active:scale-95"
+              >
+                <Code2 className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">Open in VS Code</TooltipContent>
+          </Tooltip>
+        )}
+      </span>
       <PopoverContent side="top" align="start" sideOffset={8} className={MENU_CONTAINER_STYLE}>
         <CommandPrimitive shouldFilter={showFilter}>
           {/* Filter input - only shown when more than 5 recent folders */}

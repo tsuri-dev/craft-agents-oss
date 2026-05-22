@@ -4,7 +4,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
-- **Agent Profiles UI shell** — Added an initial Agents sidebar destination with static profile rows and a profile detail preview for future reusable agent presets. This is UI-only for now and lays out the planned instruction, skills, sources, defaults, activity, and artifact-handoff surfaces before execution and persistence are wired. The Activity tab now renders from an AgentRun data skeleton with active runs, 30-day summary metrics, and the latest 10 finished runs; the Instructions tab now reads and writes workspace-backed `instructions.md` files for each profile; the Environment tab can edit profile-level runtime variables for future child agent/MCP launches; and the Agents page can now create profiles, attach workspace skills, or import dropped `SKILL.md` files into the current profile.
+- **Agent Profiles UI shell** — Added an initial Agents sidebar destination with static profile rows and a profile detail preview for future reusable agent presets. This is UI-only for now and lays out the planned instruction, skills, sources, defaults, activity, and artifact-handoff surfaces before execution and persistence are wired. The Activity tab now renders from an AgentRun data skeleton with active runs, 30-day summary metrics, and the latest 10 finished runs; the Instructions tab now reads and writes workspace-backed `instructions.md` files for each profile; the Environment tab can edit profile-level runtime variables for future child agent/MCP launches; and the Agents page can now create profiles, attach workspace skills, import dropped `SKILL.md` files, or enable workspace sources on the current profile.
 - **Plugins hub and TAPD plugin board** — Added a Codex-style Plugins sidebar entry with a plugin hub, installed plugin children, and TAPD as the first plugin. Opening TAPD shows a link-import requirement board that fetches individual TAPD requirements from pasted links and saves them locally, opens requirements in a dedicated two-column detail page with safe Markdown/HTML rendering for TAPD descriptions and description images, links or unlinks requirements to session groups from a right-side business properties panel, creates seeded sessions from requirement context, and adds a lightweight requirement shortcut to linked sessions.
 
 ## Improvements
@@ -15,6 +15,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Working directory VS Code action** — Restored the small “Open in VS Code” button next to the chat input’s Working Directory badge so the selected folder can be opened directly in VS Code again.
 - **TAPD plugin theming** — Updated TAPD requirement details to use Craft Agent theme tokens so the plugin follows the app’s dark mode instead of forcing light surfaces.
 
 ## Breaking Changes
