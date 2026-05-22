@@ -33,6 +33,7 @@ export const CHANNEL_MAP = {
   createAgentProfile: invoke(RPC_CHANNELS.agentProfiles.CREATE),
   updateAgentProfile: invoke(RPC_CHANNELS.agentProfiles.UPDATE),
   listAgentRuns: invoke(RPC_CHANNELS.agentRuns.LIST),
+  cancelAgentRun: invoke(RPC_CHANNELS.agentRuns.CANCEL),
   respondToPermission: invoke(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION),
   respondToCredential: invoke(RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL),
   sessionCommand: invoke(RPC_CHANNELS.sessions.COMMAND),

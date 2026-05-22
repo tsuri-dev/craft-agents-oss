@@ -256,6 +256,7 @@ export interface ElectronAPI {
   createAgentProfile(workspaceId: string, input: AgentProfileCreateInput): Promise<AgentProfileDetail>
   updateAgentProfile(workspaceId: string, agentProfileId: string, input: AgentProfileUpdateInput): Promise<AgentProfileDetail>
   listAgentRuns(workspaceId: string, input?: { agentProfileId?: string }): Promise<AgentRun[]>
+  cancelAgentRun(workspaceId: string, input: { runId: string; parentSessionId?: string; childSessionId?: string }): Promise<AgentRun | null>
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
 

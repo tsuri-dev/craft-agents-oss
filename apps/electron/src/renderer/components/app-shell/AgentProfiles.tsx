@@ -1378,6 +1378,10 @@ function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
   const [isLoadingRuns, setIsLoadingRuns] = React.useState(false)
   const [isAllRunsOpen, setIsAllRunsOpen] = React.useState(false)
   const [cancellingRunId, setCancellingRunId] = React.useState<string | null>(null)
+  const [logRun, setLogRun] = React.useState<AgentRun | null>(null)
+  const [logContent, setLogContent] = React.useState('')
+  const [logError, setLogError] = React.useState<string | null>(null)
+  const [isLogLoading, setIsLogLoading] = React.useState(false)
 
   const loadRuns = React.useCallback(async () => {
     const workspaceId = appShell?.activeWorkspaceId
@@ -1418,22 +1422,41 @@ function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
   }, [activeRuns.length, loadRuns])
 
   const handleCancelRun = React.useCallback(async (run: AgentRun) => {
-    if (!run.childSessionId || typeof window === 'undefined' || !window.electronAPI?.cancelProcessing) return
+    const workspaceId = appShell?.activeWorkspaceId
+    if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.cancelAgentRun) return
     setCancellingRunId(run.id)
     try {
-      await window.electronAPI.cancelProcessing(run.childSessionId)
+      const cancelledRun = await window.electronAPI.cancelAgentRun(workspaceId, {
+        runId: run.id,
+        parentSessionId: run.parentSessionId,
+        childSessionId: run.childSessionId,
+      })
+      if (cancelledRun) {
+        setWorkspaceRuns(current => current.map(candidate => candidate.id === cancelledRun.id ? cancelledRun : candidate))
+      }
       await loadRuns()
     } finally {
       setCancellingRunId(null)
     }
-  }, [loadRuns])
+  }, [appShell?.activeWorkspaceId, loadRuns])
 
-  const handleOpenLog = React.useCallback((run: AgentRun) => {
-    if (!run.transcriptPath) return
-    appShell?.onOpenFile?.(run.transcriptPath)
-  }, [appShell])
+  const handleOpenLog = React.useCallback(async (run: AgentRun) => {
+    if (!run.transcriptPath || typeof window === 'undefined' || !window.electronAPI?.readFile) return
+    setLogRun(run)
+    setLogContent('')
+    setLogError(null)
+    setIsLogLoading(true)
+    try {
+      const content = await window.electronAPI.readFile(run.transcriptPath)
+      setLogContent(content)
+    } catch (err) {
+      setLogError(err instanceof Error ? err.message : 'Failed to read run log')
+    } finally {
+      setIsLogLoading(false)
+    }
+  }, [])
 
-  const canOpenFile = !!appShell?.onOpenFile
+  const canOpenLog = typeof window !== 'undefined' && !!window.electronAPI?.readFile
 
   return (
     <div className="flex flex-col gap-4 p-6">
@@ -1453,7 +1476,7 @@ function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
                 run={run}
                 onCancel={handleCancelRun}
                 onOpenLog={handleOpenLog}
-                canOpenLog={canOpenFile && !!run.transcriptPath}
+                canOpenLog={canOpenLog && !!run.transcriptPath}
                 cancelling={cancellingRunId === run.id}
               />
             ))}
@@ -1498,7 +1521,7 @@ function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
                 key={run.id}
                 run={run}
                 onOpenLog={handleOpenLog}
-                canOpenLog={canOpenFile && !!run.transcriptPath}
+                canOpenLog={canOpenLog && !!run.transcriptPath}
               />
             ))}
           </div>
@@ -1510,7 +1533,20 @@ function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
         onOpenChange={setIsAllRunsOpen}
         runs={allRuns}
         onOpenLog={handleOpenLog}
-        canOpenFile={canOpenFile}
+        canOpenLog={canOpenLog}
+      />
+      <AgentRunLogDialog
+        run={logRun}
+        content={logContent}
+        error={logError}
+        loading={isLogLoading}
+        onOpenChange={open => {
+          if (!open) {
+            setLogRun(null)
+            setLogContent('')
+            setLogError(null)
+          }
+        }}
       />
     </div>
   )
@@ -1598,7 +1634,38 @@ function AgentRunActions({ run, onOpenLog, canOpenLog }: { run: AgentRun; onOpen
   )
 }
 
-function AgentRunsHistoryDialog({ open, onOpenChange, runs, onOpenLog, canOpenFile }: { open: boolean; onOpenChange: (open: boolean) => void; runs: AgentRun[]; onOpenLog: (run: AgentRun) => void; canOpenFile: boolean }) {
+function AgentRunLogDialog({ run, content, error, loading, onOpenChange }: { run: AgentRun | null; content: string; error: string | null; loading: boolean; onOpenChange: (open: boolean) => void }) {
+  return (
+    <Dialog open={!!run} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[82vh] max-w-4xl overflow-hidden p-0">
+        <DialogHeader className="border-b border-border px-5 py-4">
+          <DialogTitle>Agent run log</DialogTitle>
+          <DialogDescription className="truncate">
+            {run ? `${run.triggerSummary} · ${run.id}` : 'Run transcript'}
+          </DialogDescription>
+        </DialogHeader>
+        <ScrollArea className="max-h-[62vh]">
+          <div className="p-4">
+            {loading ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading log…
+              </div>
+            ) : error ? (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}</div>
+            ) : (
+              <pre className="whitespace-pre-wrap break-words rounded-md border border-border bg-muted/30 p-3 font-mono text-[11px] leading-5 text-muted-foreground">
+                {formatAgentRunLogContent(content)}
+              </pre>
+            )}
+          </div>
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function AgentRunsHistoryDialog({ open, onOpenChange, runs, onOpenLog, canOpenLog }: { open: boolean; onOpenChange: (open: boolean) => void; runs: AgentRun[]; onOpenLog: (run: AgentRun) => void; canOpenLog: boolean }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[78vh] max-w-3xl overflow-hidden p-0">
@@ -1611,7 +1678,7 @@ function AgentRunsHistoryDialog({ open, onOpenChange, runs, onOpenLog, canOpenFi
             {runs.length === 0 ? (
               <p className="px-2 py-8 text-center text-xs italic text-muted-foreground/60">No runs yet.</p>
             ) : (
-              runs.map(run => <AgentRunHistoryRow key={run.id} run={run} onOpenLog={onOpenLog} canOpenLog={canOpenFile && !!run.transcriptPath} />)
+              runs.map(run => <AgentRunHistoryRow key={run.id} run={run} onOpenLog={onOpenLog} canOpenLog={canOpenLog && !!run.transcriptPath} />)
             )}
           </div>
         </ScrollArea>
@@ -2496,6 +2563,26 @@ function getRunStatusPresentation(status: AgentRun['status']): { icon: typeof Ch
     case 'stopping':
       return { icon: Clock3, className: 'text-info' }
   }
+}
+
+function formatAgentRunLogContent(content: string): string {
+  const lines = content.split('\n').map(line => line.trim()).filter(Boolean)
+  if (lines.length === 0) return 'No log records yet.'
+
+  return lines.map(line => {
+    try {
+      const parsed = JSON.parse(line) as Record<string, unknown>
+      const timestamp = typeof parsed.timestamp === 'string' ? parsed.timestamp : undefined
+      const type = typeof parsed.type === 'string' ? parsed.type : 'event'
+      const rest = { ...parsed }
+      delete rest.timestamp
+      delete rest.type
+      const detail = Object.keys(rest).length > 0 ? `\n${JSON.stringify(rest, null, 2)}` : ''
+      return `${timestamp ? `[${timestamp}] ` : ''}${type}${detail}`
+    } catch {
+      return line
+    }
+  }).join('\n\n')
 }
 
 function formatTimestamp(timestamp: number): string {

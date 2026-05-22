@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { scanWorkspaceAgentRuns } from './agent-runs'
+import { cancelAgentRunManifest, scanWorkspaceAgentRuns } from './agent-runs'
 
 function tempWorkspace(): string {
   return mkdtempSync(join(tmpdir(), 'craft-agent-runs-'))
@@ -36,6 +36,40 @@ describe('agent-runs RPC scanner', () => {
       artifactCount: 2,
     })
     expect(runs[0]?.manifestPath).toContain('manifest.json')
+  })
+
+  it('cancels a running manifest and appends a transcript log record', () => {
+    const workspace = tempWorkspace()
+    const runDir = join(workspace, 'sessions', 'parent-1', 'agent-runs', 'run-running')
+    mkdirSync(runDir, { recursive: true })
+    const manifestPath = join(runDir, 'manifest.json')
+    const transcriptPath = join(runDir, 'transcript.jsonl')
+    writeFileSync(manifestPath, JSON.stringify({
+      id: 'run-running',
+      agentProfileId: 'orion',
+      parentSessionId: 'parent-1',
+      childSessionId: 'child-1',
+      triggerSummary: 'Running task',
+      triggerType: 'mention',
+      status: 'running',
+      createdAt: '2026-05-20T10:00:00+08:00',
+      startedAt: '2026-05-20T10:00:00+08:00',
+      manifestPath,
+      transcriptPath,
+    }))
+    writeFileSync(transcriptPath, '')
+
+    const updated = cancelAgentRunManifest(workspace, { runId: 'run-running', parentSessionId: 'parent-1' })
+
+    expect(updated).toMatchObject({
+      id: 'run-running',
+      status: 'cancelled',
+      failureReason: 'Cancelled from Agent Activity',
+    })
+    expect(typeof updated?.completedAt).toBe('string')
+    const persisted = JSON.parse(readFileSync(manifestPath, 'utf-8'))
+    expect(persisted.status).toBe('cancelled')
+    expect(readFileSync(transcriptPath, 'utf-8')).toContain('agent_run_cancelled')
   })
 
   it('filters by agent profile id and ignores invalid manifests', () => {

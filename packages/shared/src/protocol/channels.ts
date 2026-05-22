@@ -73,6 +73,7 @@ export const RPC_CHANNELS = {
   },
   agentRuns: {
     LIST: 'agentRuns:list',
+    CANCEL: 'agentRuns:cancel',
   },
   agentProfiles: {
     LIST: 'agentProfiles:list',

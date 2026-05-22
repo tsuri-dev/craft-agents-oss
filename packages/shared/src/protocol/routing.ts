@@ -279,6 +279,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   // tasks / agents — workspace content
   RPC_CHANNELS.tasks.GET_OUTPUT,
   RPC_CHANNELS.agentRuns.LIST,
+  RPC_CHANNELS.agentRuns.CANCEL,
   RPC_CHANNELS.agentProfiles.LIST,
   RPC_CHANNELS.agentProfiles.GET,
   RPC_CHANNELS.agentProfiles.CREATE,
