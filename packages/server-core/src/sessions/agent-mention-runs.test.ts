@@ -8,6 +8,15 @@ function tempWorkspace(): string {
   return mkdtempSync(join(tmpdir(), 'sm-agent-runs-'))
 }
 
+async function waitForCondition(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    if (predicate()) return
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  throw new Error('Timed out waiting for condition')
+}
+
 async function waitForManifest(agentRunsDir: string, timeoutMs = 1000): Promise<string> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
@@ -121,6 +130,16 @@ describe('@agent mention AgentRun manifests', () => {
     })
     expect(userMessageEvents[0]).toMatchObject({ status: 'accepted', agentDelegated: true })
 
+    await waitForCondition(() => textCompleteEvents.length > 0 && parent.messages.at(-1)?.role === 'assistant')
+    expect(parent.messages.at(-1)?.role).toBe('assistant')
+    expect(parent.messages.at(-1)?.content).toContain('Orion started working on the delegated task')
+    expect(parent.messages.at(-1)?.content).toContain('Child session: child-1')
+    expect(textCompleteEvents[0]).toMatchObject({
+      sessionId: 'parent-1',
+      text: parent.messages.at(-1)?.content,
+      messageId: parent.messages.at(-1)?.id,
+    })
+
     const agentRunsDir = join(tmpRoot, 'sessions', 'parent-1', 'agent-runs')
     const manifestPath = await waitForManifest(agentRunsDir)
     const transcriptPath = join(manifestPath.slice(0, -'/manifest.json'.length), 'transcript.jsonl')
@@ -154,7 +173,7 @@ describe('@agent mention AgentRun manifests', () => {
     expect(parent.messages.at(-1)?.role).toBe('assistant')
     expect(parent.messages.at(-1)?.content).toContain('Agent final answer from child session.')
     expect(parent.messages.at(-1)?.content).toContain('Child session: child-1')
-    expect(textCompleteEvents[0]).toMatchObject({
+    expect(textCompleteEvents[1]).toMatchObject({
       sessionId: 'parent-1',
       text: parent.messages.at(-1)?.content,
       messageId: parent.messages.at(-1)?.id,
