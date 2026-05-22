@@ -25,6 +25,7 @@ import { routes } from '@/lib/navigate'
 import { coerceInputText } from '@/lib/input-text'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
 import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadedSessionsAtom, sessionMetaMapAtom } from '@/atoms/sessions'
+import { agentProfilesAtom } from '@/atoms/agent-profiles'
 import { getSessionTitle } from '@/utils/session'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
 import { resolveEffectiveConnectionSlug, isSessionConnectionUnavailable } from '@config/llm-connections'
@@ -88,6 +89,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     setOption,
     setPermissionMode,
   } = useSessionOptionsFor(sessionId)
+  const agentProfiles = useAtomValue(agentProfilesAtom)
 
   // Use per-session atom for isolated updates
   const session = useSessionData(sessionId)
@@ -728,6 +730,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 onAttachmentsChange={handleAttachmentsChange}
                 sources={enabledSources}
                 skills={skills}
+                agentProfiles={agentProfiles}
                 sessionStatuses={sessionStatuses}
                 onSessionStatusChange={handleSessionStatusChange}
                 workspaceId={activeWorkspaceId || undefined}
@@ -807,6 +810,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onAttachmentsChange={handleAttachmentsChange}
             sources={enabledSources}
             skills={skills}
+            agentProfiles={agentProfiles}
             labels={labels}
             onLabelsChange={(newLabels) => onSessionLabelsChange?.(sessionId, newLabels)}
             sessionStatuses={sessionStatuses}

@@ -11,6 +11,7 @@ import {
   EMOJI_ICON_PREFIX,
 } from '@/lib/icon-cache'
 import type { LoadedSkill, LoadedSource } from '../../../shared/types'
+import type { AgentProfile } from '../../../shared/agent-profiles'
 import type { MentionItemType } from './mention-menu'
 
 // ============================================================================
@@ -53,6 +54,8 @@ export interface RichTextInputProps extends Omit<React.HTMLAttributes<HTMLDivEle
   skills?: LoadedSkill[]
   /** Available sources for mention parsing */
   sources?: LoadedSource[]
+  /** Available Agent Profiles for mention parsing */
+  agents?: AgentProfile[]
   /** Workspace ID for avatars */
   workspaceId?: string
   /** Whether the input is disabled */
@@ -92,6 +95,8 @@ export interface RichTextInputHandle {
 const SKILL_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>`
 
 const SOURCE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>`
+
+const AGENT_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7V3"/><path d="M9 3h6"/><rect x="4" y="7" width="16" height="12" rx="4"/><path d="M8.5 12.5h.01"/><path d="M15.5 12.5h.01"/><path d="M9.5 16h5"/></svg>`
 
 // File icon (document with folded corner) - matches UserMessageBubble style (12x12, text-muted-foreground)
 const FILE_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-muted-foreground"><path d="M10.5 2.5C12.1569 2.5 13.5 3.84315 13.5 5.5V6.1C13.5 6.4716 13.5 6.6574 13.5246 6.81287C13.6602 7.66865 14.3313 8.33983 15.1871 8.47538C15.3426 8.5 15.5284 8.5 15.9 8.5H16.5C18.1569 8.5 19.5 9.84315 19.5 11.5M9 16H15M9 12H10M10.9645 2.5H10.6678C8.64635 2.5 7.63561 2.5 6.84835 2.85692C5.96507 3.25736 5.25736 3.96507 4.85692 4.84835C4.5 5.63561 4.5 6.64635 4.5 8.66781V14C4.5 17.2875 4.5 18.9312 5.40796 20.0376C5.57418 20.2401 5.75989 20.4258 5.96243 20.592C7.06878 21.5 8.71252 21.5 12 21.5C15.2875 21.5 16.9312 21.5 18.0376 20.592C18.2401 20.4258 18.4258 20.2401 18.592 20.0376C19.5 18.9312 19.5 17.2875 19.5 14V11.0355C19.5 10.0027 19.5 9.48628 19.4176 8.99414C19.2671 8.09576 18.9141 7.24342 18.3852 6.50177C18.0955 6.09549 17.7303 5.73032 17 5C16.2697 4.26968 15.9045 3.90451 15.4982 3.6148C14.7566 3.08595 13.9042 2.7329 13.0059 2.58243C12.5137 2.5 11.9973 2.5 10.9645 2.5Z"/></svg>`
@@ -152,6 +157,8 @@ function renderBadgeHTML(
       iconHtml = `<span class="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0">${SKILL_ICON_SVG}</span>`
     } else if (type === 'source') {
       iconHtml = `<span class="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0">${SOURCE_ICON_SVG}</span>`
+    } else if (type === 'agent') {
+      iconHtml = `<span class="h-[12px] w-[12px] rounded-[2px] bg-foreground/5 flex items-center justify-center text-foreground/50 shrink-0">${AGENT_ICON_SVG}</span>`
     } else if (type === 'file') {
       // Pick code file or generic file icon based on extension (no container, icon carries its own classes)
       iconHtml = isCodeFile(label) ? CODE_FILE_ICON_SVG : FILE_ICON_SVG
@@ -356,13 +363,15 @@ function textToHTML(
   text: string,
   skills: LoadedSkill[],
   sources: LoadedSource[],
+  agents: AgentProfile[],
   workspaceId?: string
 ): string {
   if (!text) return ''
 
   const skillSlugs = skills.map(s => s.slug)
   const sourceSlugs = sources.map(s => s.config.slug)
-  const matches = findMentionMatches(text, skillSlugs, sourceSlugs)
+  const agentIds = agents.map(agent => agent.id)
+  const matches = findMentionMatches(text, skillSlugs, sourceSlugs, agentIds)
 
   // Escape HTML in text
   const escapeHTML = (str: string) => str
@@ -401,6 +410,9 @@ function textToHTML(
     } else if (match.type === 'source') {
       source = sources.find(s => s.config.slug === match.id)
       label = source?.config.name || match.id
+    } else if (match.type === 'agent') {
+      const agent = agents.find(item => item.id === match.id)
+      label = agent?.name || match.id
     } else if (match.type === 'file') {
       // Show filename as badge label, full path as tooltip
       label = match.id.split('/').pop() || match.id
@@ -437,8 +449,8 @@ function textToHTML(
 // Check if mentions have changed (for determining if we need to re-render HTML)
 // ============================================================================
 
-function getMentionSignature(text: string, skillSlugs: string[], sourceSlugs: string[]): string {
-  const matches = findMentionMatches(text, skillSlugs, sourceSlugs)
+function getMentionSignature(text: string, skillSlugs: string[], sourceSlugs: string[], agentIds: string[]): string {
+  const matches = findMentionMatches(text, skillSlugs, sourceSlugs, agentIds)
   return matches.map(m => `${m.type}:${m.id}:${m.startIndex}`).join('|')
 }
 
@@ -505,6 +517,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       placeholder,
       skills = [],
       sources = [],
+      agents = [],
       workspaceId,
       disabled = false,
       className,
@@ -532,6 +545,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
     const skillSlugs = React.useMemo(() => skills.map(s => s.slug), [skills])
     const sourceSlugs = React.useMemo(() => sources.map(s => s.config.slug), [sources])
+    const agentIds = React.useMemo(() => agents.map(agent => agent.id), [agents])
 
     // Preload icons for sources and skills
     React.useEffect(() => {
@@ -601,12 +615,12 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       cursorPositionRef.current = cursorPos
 
       // Check if mentions changed - if so, we need to re-render HTML
-      const newSignature = getMentionSignature(newText, skillSlugs, sourceSlugs)
+      const newSignature = getMentionSignature(newText, skillSlugs, sourceSlugs, agentIds)
       if (newSignature !== lastMentionSignatureRef.current) {
         lastMentionSignatureRef.current = newSignature
         // Re-render with badges
         isInternalUpdate.current = true
-        const html = textToHTML(newText, skills, sources, workspaceId)
+        const html = textToHTML(newText, skills, sources, agents, workspaceId)
         divRef.current.innerHTML = html || '<br>' // Empty contenteditable needs a BR
         // Restore cursor
         setCursorPosition(divRef.current, cursorPos)
@@ -615,7 +629,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
       onChange(newText)
       onInput?.(newText, cursorPos)
-    }, [onChange, onInput, skills, sources, skillSlugs, sourceSlugs, workspaceId])
+    }, [onChange, onInput, skills, sources, agents, skillSlugs, sourceSlugs, agentIds, workspaceId])
 
     // Handle composition (IME)
     const handleCompositionStart = React.useCallback(() => {
@@ -688,9 +702,9 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
       // External value change - update content
       lastValueRef.current = safeValue
-      lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs)
+      lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs, agentIds)
 
-      const html = textToHTML(safeValue, skills, sources, workspaceId)
+      const html = textToHTML(safeValue, skills, sources, agents, workspaceId)
       divRef.current.innerHTML = html || '<br>'
 
       // Restore cursor position after innerHTML update.
@@ -703,13 +717,13 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
         setCursorPosition(divRef.current, cursorPos)
         pendingCursorRef.current = null // Clear after use
       }
-    }, [safeValue, skills, sources, skillSlugs, sourceSlugs, workspaceId])
+    }, [safeValue, skills, sources, agents, skillSlugs, sourceSlugs, agentIds, workspaceId])
 
     // Initialize content on mount
     React.useEffect(() => {
       if (!divRef.current) return
-      lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs)
-      const html = textToHTML(safeValue, skills, sources, workspaceId)
+      lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs, agentIds)
+      const html = textToHTML(safeValue, skills, sources, agents, workspaceId)
       divRef.current.innerHTML = html || '<br>'
       lastValueRef.current = safeValue
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -768,9 +782,9 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
     // Check if value contains any mentions (badges) to adjust line height
     const hasMentions = React.useMemo(() => {
-      const mentions = parseMentions(safeValue, skillSlugs, sourceSlugs)
-      return mentions.skills.length > 0 || mentions.sources.length > 0 || mentions.files.length > 0 || mentions.folders.length > 0
-    }, [safeValue, skillSlugs, sourceSlugs])
+      const mentions = parseMentions(safeValue, skillSlugs, sourceSlugs, agentIds)
+      return mentions.skills.length > 0 || mentions.sources.length > 0 || (mentions.agents?.length ?? 0) > 0 || mentions.files.length > 0 || mentions.folders.length > 0
+    }, [safeValue, skillSlugs, sourceSlugs, agentIds])
 
     return (
       <div className="relative">

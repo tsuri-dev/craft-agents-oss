@@ -7,6 +7,7 @@
  * Mention types:
  * - Skills:  [skill:slug] or [skill:workspaceId:slug]
  * - Sources: [source:slug]
+ * - Agents:  [agent:id]
  * - Files:   [file:path]
  * - Folders: [folder:path]
  */
@@ -37,6 +38,10 @@ export interface ParsedMentions {
   invalidSkills: string[]
   /** Source slugs mentioned via [source:slug] */
   sources: string[]
+  /** Agent profile IDs mentioned via [agent:id]. Present when agent parsing is requested or agent mentions exist. */
+  agents?: string[]
+  /** Invalid agent profile IDs mentioned but not found in availableAgentProfileIds. */
+  invalidAgents?: string[]
   /** File paths mentioned via [file:path] */
   files: string[]
   /** Folder paths mentioned via [folder:path] */
@@ -53,6 +58,7 @@ export interface ParsedMentions {
  * @param text - The message text to parse
  * @param availableSkillSlugs - Valid skill slugs to match against
  * @param availableSourceSlugs - Valid source slugs to match against
+ * @param availableAgentProfileIds - Valid Agent Profile IDs to match against
  * @returns Parsed mentions by type
  *
  * @example
@@ -62,7 +68,8 @@ export interface ParsedMentions {
 export function parseMentions(
   text: string,
   availableSkillSlugs: string[],
-  availableSourceSlugs: string[]
+  availableSourceSlugs: string[],
+  availableAgentProfileIds: string[] = []
 ): ParsedMentions {
   const result: ParsedMentions = {
     skills: [],
@@ -95,6 +102,24 @@ export function parseMentions(
     } else {
       if (!result.invalidSkills.includes(slug)) {
         result.invalidSkills.push(slug)
+      }
+    }
+  }
+
+  // Match agent mentions: [agent:id]
+  const shouldParseAgents = availableAgentProfileIds.length > 0 || /\[agent:/.test(text)
+  if (shouldParseAgents) {
+    result.agents = []
+    result.invalidAgents = []
+    const agentPattern = /\[agent:([\w-]+)\]/g
+    while ((match = agentPattern.exec(text)) !== null) {
+      const id = match[1]!
+      if (availableAgentProfileIds.includes(id)) {
+        if (!result.agents.includes(id)) {
+          result.agents.push(id)
+        }
+      } else if (!result.invalidAgents.includes(id)) {
+        result.invalidAgents.push(id)
       }
     }
   }
@@ -132,6 +157,8 @@ export function stripAllMentions(text: string): string {
   return text
     // Replace [source:slug] with just the slug
     .replace(/\[source:([\w-]+)\]/g, '$1')
+    // Replace [agent:id] with just the agent id
+    .replace(/\[agent:([\w-]+)\]/g, '$1')
     // Replace [skill:slug] or [skill:workspaceId:slug] with just the slug
     .replace(new RegExp(`\\[skill:(?:${WS_ID_CHARS}+:)?([\\w-]+)\\]`, 'g'), '$1')
     // Note: [file:...] and [folder:...] are NOT stripped — they are content
@@ -175,6 +202,27 @@ export function resolveSourceMentions(text: string): string {
   return text.replace(
     /\[source:([\w-]+)\]/g,
     (_match, slug: string) => `[Mentioned source: ${slug}]`
+  )
+}
+
+/**
+ * Resolve agent mentions to semantic markers.
+ *
+ * [agent:reviewer] → [Mentioned agent: Code Reviewer (id: reviewer)]
+ *
+ * @param text - The message text with agent mentions
+ * @param agentNames - Map of id → display name
+ */
+export function resolveAgentMentions(
+  text: string,
+  agentNames: Map<string, string>
+): string {
+  return text.replace(
+    /\[agent:([\w-]+)\]/g,
+    (_match, id: string) => {
+      const name = agentNames.get(id) || id
+      return `[Mentioned agent: ${name} (id: ${id})]`
+    }
   )
 }
 

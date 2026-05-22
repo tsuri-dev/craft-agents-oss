@@ -114,6 +114,7 @@ import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSourc
 import { extractSessionMeta, sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import { sourcesAtom } from "@/atoms/sources"
 import { skillsAtom } from "@/atoms/skills"
+import { agentProfilesAtom } from "@/atoms/agent-profiles"
 import { panelStackAtom, panelCountAtom, focusedPanelIdAtom, focusedSessionIdAtom, focusNextPanelAtom, focusPrevPanelAtom, parseSessionIdFromRoute } from "@/atoms/panel-stack"
 import { type SessionStatusId, type SessionStatus, statusConfigsToSessionStatuses } from "@/config/session-status-config"
 import { useStatuses } from "@/hooks/useStatuses"
@@ -959,6 +960,9 @@ function AppShellContent({
   React.useEffect(() => {
     setSkillsAtom(skills)
   }, [skills, setSkillsAtom])
+
+  // Agent Profiles state (workspace-scoped; used by @agent mentions)
+  const setAgentProfilesAtom = useSetAtom(agentProfilesAtom)
   // Automations — state, handlers, loading, subscriptions
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId)
 
@@ -1044,6 +1048,24 @@ function AppShellContent({
       console.error('[Chat] Failed to load sources:', err)
     })
   }, [activeWorkspaceId])
+
+  // Load Agent Profiles for @agent mention autocomplete and badge extraction
+  React.useEffect(() => {
+    if (!activeWorkspaceId) {
+      setAgentProfilesAtom([])
+      return
+    }
+
+    let cancelled = false
+    window.electronAPI.listAgentProfiles(activeWorkspaceId).then((profiles) => {
+      if (!cancelled) setAgentProfilesAtom(profiles || [])
+    }).catch(err => {
+      console.error('[Chat] Failed to load agent profiles:', err)
+      if (!cancelled) setAgentProfilesAtom([])
+    })
+
+    return () => { cancelled = true }
+  }, [activeWorkspaceId, setAgentProfilesAtom])
 
   // Subscribe to live source updates (when sources are added/removed dynamically)
   React.useEffect(() => {

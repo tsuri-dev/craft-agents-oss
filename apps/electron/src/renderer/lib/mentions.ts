@@ -4,6 +4,7 @@
  * Mention types:
  * - Skills:  [skill:slug]
  * - Sources: [source:slug]
+ * - Agents:  [agent:id]
  *
  * Bracket syntax allows mentions anywhere in text without word boundaries.
  */
@@ -11,12 +12,13 @@
 import type { ContentBadge } from '@craft-agent/core'
 import type { MentionItemType } from '@/components/ui/mention-menu'
 import type { LoadedSkill, LoadedSource } from '../../shared/types'
+import type { AgentProfile } from '../../shared/agent-profiles'
 import { AGENTS_PLUGIN_NAME } from '@craft-agent/shared/skills/types'
 import { getSourceIconSync, getSkillIconSync } from './icon-cache'
 
 // Import and re-export parsing functions from shared (pure string operations, no renderer deps)
-import { parseMentions, stripAllMentions, resolveSkillMentions, resolveSourceMentions, type ParsedMentions } from '@craft-agent/shared/mentions'
-export { parseMentions, stripAllMentions, resolveSkillMentions, resolveSourceMentions, type ParsedMentions }
+import { parseMentions, stripAllMentions, resolveSkillMentions, resolveSourceMentions, resolveAgentMentions, type ParsedMentions } from '@craft-agent/shared/mentions'
+export { parseMentions, stripAllMentions, resolveSkillMentions, resolveSourceMentions, resolveAgentMentions, type ParsedMentions }
 
 // ============================================================================
 // Constants
@@ -49,12 +51,14 @@ export interface MentionMatch {
  * @param text - The message text to search
  * @param availableSkillSlugs - Valid skill slugs
  * @param availableSourceSlugs - Valid source slugs
+ * @param availableAgentProfileIds - Valid Agent Profile IDs
  * @returns Array of mention matches with positions
  */
 export function findMentionMatches(
   text: string,
   availableSkillSlugs: string[],
-  availableSourceSlugs: string[]
+  availableSourceSlugs: string[],
+  availableAgentProfileIds: string[] = []
 ): MentionMatch[] {
   const matches: MentionMatch[] = []
 
@@ -83,6 +87,20 @@ export function findMentionMatches(
       matches.push({
         type: 'skill',
         id: slug,
+        fullMatch: match[1],
+        startIndex: match.index,
+      })
+    }
+  }
+
+  // Match agent mentions: [agent:id]
+  const agentPattern = /(\[agent:([\w-]+)\])/g
+  while ((match = agentPattern.exec(text)) !== null) {
+    const id = match[2]
+    if (availableAgentProfileIds.includes(id)) {
+      matches.push({
+        type: 'agent',
+        id,
         fullMatch: match[1],
         startIndex: match.index,
       })
@@ -130,6 +148,9 @@ export function removeMention(text: string, type: MentionItemType, id: string): 
     case 'source':
       pattern = new RegExp(`\\[source:${escapeRegExp(id)}\\]`, 'g')
       break
+    case 'agent':
+      pattern = new RegExp(`\\[agent:${escapeRegExp(id)}\\]`, 'g')
+      break
     case 'file':
       pattern = new RegExp(`\\[file:${escapeRegExp(id)}\\]`, 'g')
       break
@@ -156,10 +177,11 @@ export function removeMention(text: string, type: MentionItemType, id: string): 
 export function hasMentions(
   text: string,
   availableSkillSlugs: string[],
-  availableSourceSlugs: string[]
+  availableSourceSlugs: string[],
+  availableAgentProfileIds: string[] = []
 ): boolean {
-  const mentions = parseMentions(text, availableSkillSlugs, availableSourceSlugs)
-  return mentions.skills.length > 0 || mentions.sources.length > 0 || mentions.files.length > 0 || mentions.folders.length > 0
+  const mentions = parseMentions(text, availableSkillSlugs, availableSourceSlugs, availableAgentProfileIds)
+  return mentions.skills.length > 0 || mentions.sources.length > 0 || (mentions.agents?.length ?? 0) > 0 || mentions.files.length > 0 || mentions.folders.length > 0
 }
 
 // ============================================================================
@@ -198,21 +220,25 @@ export function stripSkillMentions(text: string): string {
  * @param skills - Available skills (for label lookup)
  * @param sources - Available sources (for label lookup)
  * @param workspaceId - Workspace ID (for icon lookup)
+ * @param agentProfiles - Available Agent Profiles (for label lookup)
  * @returns Array of ContentBadge objects
  */
 export function extractBadges(
   text: string,
   skills: LoadedSkill[],
   sources: LoadedSource[],
-  workspaceId: string
+  workspaceId: string,
+  agentProfiles: AgentProfile[] = []
 ): ContentBadge[] {
   const skillSlugs = skills.map(s => s.slug)
   const sourceSlugs = sources.map(s => s.config.slug)
-  const matches = findMentionMatches(text, skillSlugs, sourceSlugs)
+  const agentProfileIds = agentProfiles.map(agent => agent.id)
+  const matches = findMentionMatches(text, skillSlugs, sourceSlugs, agentProfileIds)
 
   // Build lookup maps to avoid linear scans per match
   const skillsBySlug = new Map(skills.map(s => [s.slug, s]))
   const sourcesBySlug = new Map(sources.map(s => [s.config.slug, s]))
+  const agentsById = new Map(agentProfiles.map(agent => [agent.id, agent]))
 
   return matches.map(match => {
     let label = match.id
@@ -231,6 +257,9 @@ export function extractBadges(
 
       // Get cached icon as data URL (preserves mime type for SVG, PNG, etc.)
       iconDataUrl = getSourceIconSync(workspaceId, match.id) ?? undefined
+    } else if (match.type === 'agent') {
+      const agent = agentsById.get(match.id)
+      label = agent?.name || match.id
     } else if (match.type === 'file') {
       // Show filename as label, full relative path stored for tooltip
       label = match.id.split('/').pop() || match.id
@@ -252,7 +281,7 @@ export function extractBadges(
     }
 
     return {
-      type: match.type as 'source' | 'skill' | 'file' | 'folder',
+      type: match.type as ContentBadge['type'],
       label,
       rawText,
       iconDataUrl,
