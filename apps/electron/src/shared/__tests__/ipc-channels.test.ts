@@ -26,6 +26,7 @@ const EXPECTED_CHANNELS: string[] = [
   'agentProfiles:get',
   'agentProfiles:list',
   'agentProfiles:update',
+  'agentRuns:cancel',
   'agentRuns:list',
   'appearance:getRichToolDescriptions',
   'appearance:setRichToolDescriptions',

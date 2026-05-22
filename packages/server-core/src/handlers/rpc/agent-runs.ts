@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { appendFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import type { RpcServer } from '@craft-agent/server-core/transport'
@@ -8,6 +8,7 @@ import type { AgentRun, AgentRunStatus, AgentRunTriggerType } from '@craft-agent
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.agentRuns.LIST,
+  RPC_CHANNELS.agentRuns.CANCEL,
 ] as const
 
 const VALID_STATUSES = new Set<AgentRunStatus>(['queued', 'running', 'stopping', 'completed', 'failed', 'cancelled'])
@@ -15,6 +16,12 @@ const VALID_TRIGGER_TYPES = new Set<AgentRunTriggerType>(['mention', 'manual', '
 
 interface ListAgentRunsInput {
   agentProfileId?: string
+}
+
+interface CancelAgentRunInput {
+  runId: string
+  parentSessionId?: string
+  childSessionId?: string
 }
 
 export function registerAgentRunsHandlers(server: RpcServer, deps: HandlerDeps): void {
@@ -34,6 +41,36 @@ export function registerAgentRunsHandlers(server: RpcServer, deps: HandlerDeps):
       return []
     }
   })
+
+  server.handle(RPC_CHANNELS.agentRuns.CANCEL, async (_ctx, workspaceId: string, input: CancelAgentRunInput) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+    if (!input?.runId) throw new Error('runId is required')
+
+    const run = findAgentRun(workspace.rootPath, input)
+    if (!run) return null
+
+    if (run.childSessionId) {
+      try {
+        await deps.sessionManager.cancelProcessing(run.childSessionId, false)
+      } catch (error) {
+        log.warn?.('[agent-runs] failed to cancel child session for run', {
+          workspaceId,
+          runId: run.id,
+          childSessionId: run.childSessionId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+
+    return updateAgentRunStatus(run, 'cancelled', 'Cancelled from Agent Activity')
+  })
+}
+
+export function cancelAgentRunManifest(workspaceRootPath: string, input: CancelAgentRunInput): AgentRun | null {
+  const run = findAgentRun(workspaceRootPath, input)
+  if (!run) return null
+  return updateAgentRunStatus(run, 'cancelled', 'Cancelled from Agent Activity')
 }
 
 export function scanWorkspaceAgentRuns(workspaceRootPath: string, agentProfileId?: string): AgentRun[] {
@@ -88,6 +125,46 @@ function readAgentRunManifest(manifestPath: string, parentSessionIdFallback: str
   } catch {
     return null
   }
+}
+
+function findAgentRun(workspaceRootPath: string, input: CancelAgentRunInput): AgentRun | null {
+  const run = scanWorkspaceAgentRuns(workspaceRootPath).find(candidate => {
+    if (candidate.id !== input.runId) return false
+    if (input.parentSessionId && candidate.parentSessionId !== input.parentSessionId) return false
+    if (input.childSessionId && candidate.childSessionId !== input.childSessionId) return false
+    return true
+  })
+  return run ?? null
+}
+
+function updateAgentRunStatus(run: AgentRun, status: AgentRunStatus, failureReason?: string): AgentRun {
+  const manifestPath = run.manifestPath
+  if (!manifestPath) throw new Error(`AgentRun ${run.id} has no manifestPath`)
+
+  const now = new Date().toISOString()
+  const completedAt = status === 'queued' || status === 'running' || status === 'stopping'
+    ? run.completedAt
+    : now
+  const updated: AgentRun = {
+    ...run,
+    status,
+    failureReason,
+    completedAt,
+  }
+
+  writeFileSync(manifestPath, `${JSON.stringify(updated, null, 2)}\n`, 'utf-8')
+
+  const transcriptPath = run.transcriptPath || join(dirname(manifestPath), 'transcript.jsonl')
+  appendFileSync(transcriptPath, `${JSON.stringify({
+    timestamp: now,
+    type: 'agent_run_cancelled',
+    runId: run.id,
+    childSessionId: run.childSessionId,
+    status,
+    failureReason,
+  })}\n`, 'utf-8')
+
+  return updated
 }
 
 function safeReadDir(path: string): string[] {
