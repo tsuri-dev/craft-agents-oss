@@ -5763,12 +5763,75 @@ export class SessionManager implements ISessionManager {
     return run
   }
 
+  private buildAgentRunCompletionMessage(run: AgentRun, assistantContent?: string): string {
+    const parent = this.sessions.get(run.parentSessionId)
+    const profile = parent ? readAgentProfileDetail(parent.workspace.rootPath, run.agentProfileId) : null
+    const agentName = profile?.name ?? run.agentProfileId
+    const statusLabel = run.status === 'completed'
+      ? 'completed'
+      : run.status === 'failed'
+        ? 'failed'
+        : run.status === 'cancelled'
+          ? 'was cancelled'
+          : run.status
+    const result = assistantContent?.trim()
+    const header = `**${agentName} ${statusLabel} the delegated task.**`
+    const meta = [
+      `AgentRun: ${run.id}`,
+      run.childSessionId ? `Child session: ${run.childSessionId}` : undefined,
+      run.failureReason ? `Reason: ${run.failureReason}` : undefined,
+    ].filter(Boolean).join('\n')
+
+    return result
+      ? `${header}\n\n${result}\n\n---\n${meta}`
+      : `${header}\n\n${meta}`
+  }
+
+  private async notifyParentOfAgentRunCompletion(run: AgentRun, assistantContent?: string): Promise<void> {
+    const parent = this.sessions.get(run.parentSessionId)
+    if (!parent) return
+
+    const content = this.buildAgentRunCompletionMessage(run, assistantContent)
+    const messageId = generateMessageId()
+    const timestamp = this.monotonic()
+    const turnId = `agent-run-${run.id}`
+    const message: Message = {
+      id: messageId,
+      role: 'assistant',
+      content,
+      timestamp,
+      turnId,
+    }
+
+    parent.messages.push(message)
+    parent.lastMessageRole = 'assistant'
+    parent.lastMessageAt = timestamp
+
+    if (!this.isSessionBeingViewed(parent.id, parent.workspace.id) && !parent.hasUnread) {
+      parent.hasUnread = true
+      await updateSessionMetadata(parent.workspace.rootPath, parent.id, { hasUnread: true })
+      this.emitUnreadSummaryChanged()
+    }
+
+    this.persistSession(parent)
+    await this.flushSession(parent.id)
+    this.sendEvent({
+      type: 'text_complete',
+      sessionId: parent.id,
+      text: content,
+      turnId,
+      timestamp,
+      messageId,
+    }, parent.workspace.id)
+  }
+
   private async updateAgentRunForChildSession(childSessionId: string, status: AgentRunStatus, failureReason?: string): Promise<void> {
     const manifestPath = this.agentRunManifestByChildSessionId.get(childSessionId)
     if (!manifestPath || !existsSync(manifestPath)) return
 
     try {
       const run = JSON.parse(readFileSync(manifestPath, 'utf-8')) as AgentRun
+      const wasAlreadyFinished = run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled'
       const child = this.sessions.get(childSessionId)
       const now = new Date().toISOString()
       const toolCount = child?.messages.filter(message => message.role === 'tool').length ?? run.toolCount
@@ -5799,6 +5862,10 @@ export class SessionManager implements ISessionManager {
         failureReason,
         toolCount,
       })
+
+      if (isFinished && !wasAlreadyFinished) {
+        await this.notifyParentOfAgentRunCompletion(updated, lastAssistant?.content)
+      }
     } catch (err) {
       sessionLog.warn(`Failed to update AgentRun manifest for child session ${childSessionId}:`, err)
     }

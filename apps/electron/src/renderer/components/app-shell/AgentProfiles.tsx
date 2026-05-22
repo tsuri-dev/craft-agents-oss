@@ -43,6 +43,7 @@ import { TiptapMarkdownEditor } from '@craft-agent/ui'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { deriveConnectionStatus } from '@/components/ui/source-status-indicator'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
+import { useNavigation } from '@/contexts/NavigationContext'
 import { agentProfilesAtom } from '@/atoms/agent-profiles'
 import { cn } from '@/lib/utils'
 import { getModelDisplayName } from '@config/models'
@@ -1374,6 +1375,7 @@ function AgentOverviewPaneMock({
 
 function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
   const appShell = useOptionalAppShellContext()
+  const { navigateToSession } = useNavigation()
   const [workspaceRuns, setWorkspaceRuns] = React.useState<AgentRun[]>([])
   const [isLoadingRuns, setIsLoadingRuns] = React.useState(false)
   const [isAllRunsOpen, setIsAllRunsOpen] = React.useState(false)
@@ -1457,6 +1459,10 @@ function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
   }, [])
 
   const canOpenLog = typeof window !== 'undefined' && !!window.electronAPI?.readFile
+  const handleOpenRunSession = React.useCallback((run: AgentRun) => {
+    if (!run.childSessionId) return
+    navigateToSession(run.childSessionId)
+  }, [navigateToSession])
 
   return (
     <div className="flex flex-col gap-4 p-6">
@@ -1476,6 +1482,7 @@ function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
                 run={run}
                 onCancel={handleCancelRun}
                 onOpenLog={handleOpenLog}
+                onOpenSession={handleOpenRunSession}
                 canOpenLog={canOpenLog && !!run.transcriptPath}
                 cancelling={cancellingRunId === run.id}
               />
@@ -1521,6 +1528,7 @@ function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
                 key={run.id}
                 run={run}
                 onOpenLog={handleOpenLog}
+                onOpenSession={handleOpenRunSession}
                 canOpenLog={canOpenLog && !!run.transcriptPath}
               />
             ))}
@@ -1533,6 +1541,7 @@ function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
         onOpenChange={setIsAllRunsOpen}
         runs={allRuns}
         onOpenLog={handleOpenLog}
+        onOpenSession={handleOpenRunSession}
         canOpenLog={canOpenLog}
       />
       <AgentRunLogDialog
@@ -1567,10 +1576,22 @@ function AgentActivitySection({ title, subtitle, action, children }: { title: st
   )
 }
 
-function ActiveAgentRunRow({ run, onCancel, onOpenLog, canOpenLog, cancelling }: { run: AgentRun; onCancel: (run: AgentRun) => void; onOpenLog: (run: AgentRun) => void; canOpenLog: boolean; cancelling: boolean }) {
+function ActiveAgentRunRow({ run, onCancel, onOpenLog, onOpenSession, canOpenLog, cancelling }: { run: AgentRun; onCancel: (run: AgentRun) => void; onOpenLog: (run: AgentRun) => void; onOpenSession: (run: AgentRun) => void; canOpenLog: boolean; cancelling: boolean }) {
   const isStopping = run.status === 'stopping' || cancelling
+  const canOpenSession = !!run.childSessionId
   return (
-    <div className="group flex items-center gap-3 rounded-md border border-info/30 bg-info/5 px-3 py-2.5">
+    <div
+      role={canOpenSession ? 'button' : undefined}
+      tabIndex={canOpenSession ? 0 : undefined}
+      onClick={() => { if (canOpenSession) onOpenSession(run) }}
+      onKeyDown={event => {
+        if (!canOpenSession || (event.key !== 'Enter' && event.key !== ' ')) return
+        event.preventDefault()
+        onOpenSession(run)
+      }}
+      className={cn('group flex items-center gap-3 rounded-md border border-info/30 bg-info/5 px-3 py-2.5', canOpenSession && 'cursor-pointer transition-colors hover:bg-info/10')}
+      title={canOpenSession ? 'Open child session' : undefined}
+    >
       <Activity className="h-4 w-4 shrink-0 animate-pulse text-info" />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
@@ -1586,7 +1607,7 @@ function ActiveAgentRunRow({ run, onCancel, onOpenLog, canOpenLog, cancelling }:
       </div>
       <AgentRunActions run={run} onOpenLog={onOpenLog} canOpenLog={canOpenLog} />
       {run.childSessionId && (
-        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" disabled={isStopping} onClick={() => onCancel(run)} title="Cancel run">
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" disabled={isStopping} onClick={event => { event.stopPropagation(); onCancel(run) }} title="Cancel run">
           {isStopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
         </Button>
       )}
@@ -1594,11 +1615,23 @@ function ActiveAgentRunRow({ run, onCancel, onOpenLog, canOpenLog, cancelling }:
   )
 }
 
-function RecentAgentRunRow({ run, onOpenLog, canOpenLog }: { run: AgentRun; onOpenLog: (run: AgentRun) => void; canOpenLog: boolean }) {
+function RecentAgentRunRow({ run, onOpenLog, onOpenSession, canOpenLog }: { run: AgentRun; onOpenLog: (run: AgentRun) => void; onOpenSession: (run: AgentRun) => void; canOpenLog: boolean }) {
   const status = getRunStatusPresentation(run.status)
   const Icon = status.icon
+  const canOpenSession = !!run.childSessionId
   return (
-    <div className="group flex items-center gap-3 rounded-md border border-border px-3 py-2.5 transition-colors hover:bg-muted/50">
+    <div
+      role={canOpenSession ? 'button' : undefined}
+      tabIndex={canOpenSession ? 0 : undefined}
+      onClick={() => { if (canOpenSession) onOpenSession(run) }}
+      onKeyDown={event => {
+        if (!canOpenSession || (event.key !== 'Enter' && event.key !== ' ')) return
+        event.preventDefault()
+        onOpenSession(run)
+      }}
+      className={cn('group flex items-center gap-3 rounded-md border border-border px-3 py-2.5 transition-colors hover:bg-muted/50', canOpenSession && 'cursor-pointer')}
+      title={canOpenSession ? 'Open child session' : undefined}
+    >
       <Icon className={cn('h-4 w-4 shrink-0', status.className)} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
@@ -1625,7 +1658,7 @@ function AgentRunActions({ run, onOpenLog, canOpenLog }: { run: AgentRun; onOpen
       size="sm"
       className="h-7 shrink-0 px-2 text-[11px] text-muted-foreground"
       disabled={!canOpenLog}
-      onClick={() => onOpenLog(run)}
+      onClick={event => { event.stopPropagation(); onOpenLog(run) }}
       title={canOpenLog ? 'Open run log' : run.transcriptPath}
     >
       <FileText className="mr-1 h-3.5 w-3.5" />
@@ -1665,7 +1698,12 @@ function AgentRunLogDialog({ run, content, error, loading, onOpenChange }: { run
   )
 }
 
-function AgentRunsHistoryDialog({ open, onOpenChange, runs, onOpenLog, canOpenLog }: { open: boolean; onOpenChange: (open: boolean) => void; runs: AgentRun[]; onOpenLog: (run: AgentRun) => void; canOpenLog: boolean }) {
+function AgentRunsHistoryDialog({ open, onOpenChange, runs, onOpenLog, onOpenSession, canOpenLog }: { open: boolean; onOpenChange: (open: boolean) => void; runs: AgentRun[]; onOpenLog: (run: AgentRun) => void; onOpenSession: (run: AgentRun) => void; canOpenLog: boolean }) {
+  const handleOpenSession = React.useCallback((run: AgentRun) => {
+    onOpenSession(run)
+    onOpenChange(false)
+  }, [onOpenChange, onOpenSession])
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[78vh] max-w-3xl overflow-hidden p-0">
@@ -1678,7 +1716,7 @@ function AgentRunsHistoryDialog({ open, onOpenChange, runs, onOpenLog, canOpenLo
             {runs.length === 0 ? (
               <p className="px-2 py-8 text-center text-xs italic text-muted-foreground/60">No runs yet.</p>
             ) : (
-              runs.map(run => <AgentRunHistoryRow key={run.id} run={run} onOpenLog={onOpenLog} canOpenLog={canOpenLog && !!run.transcriptPath} />)
+              runs.map(run => <AgentRunHistoryRow key={run.id} run={run} onOpenLog={onOpenLog} onOpenSession={handleOpenSession} canOpenLog={canOpenLog && !!run.transcriptPath} />)
             )}
           </div>
         </ScrollArea>
@@ -1687,11 +1725,23 @@ function AgentRunsHistoryDialog({ open, onOpenChange, runs, onOpenLog, canOpenLo
   )
 }
 
-function AgentRunHistoryRow({ run, onOpenLog, canOpenLog }: { run: AgentRun; onOpenLog: (run: AgentRun) => void; canOpenLog: boolean }) {
+function AgentRunHistoryRow({ run, onOpenLog, onOpenSession, canOpenLog }: { run: AgentRun; onOpenLog: (run: AgentRun) => void; onOpenSession: (run: AgentRun) => void; canOpenLog: boolean }) {
   const status = getRunStatusPresentation(run.status)
   const Icon = status.icon
+  const canOpenSession = !!run.childSessionId
   return (
-    <div className="flex items-center gap-3 rounded-md border border-border px-3 py-2.5">
+    <div
+      role={canOpenSession ? 'button' : undefined}
+      tabIndex={canOpenSession ? 0 : undefined}
+      onClick={() => { if (canOpenSession) onOpenSession(run) }}
+      onKeyDown={event => {
+        if (!canOpenSession || (event.key !== 'Enter' && event.key !== ' ')) return
+        event.preventDefault()
+        onOpenSession(run)
+      }}
+      className={cn('flex items-center gap-3 rounded-md border border-border px-3 py-2.5 transition-colors hover:bg-muted/50', canOpenSession && 'cursor-pointer')}
+      title={canOpenSession ? 'Open child session' : undefined}
+    >
       <Icon className={cn('h-4 w-4 shrink-0', status.className)} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">

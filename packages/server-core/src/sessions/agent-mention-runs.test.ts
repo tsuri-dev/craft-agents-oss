@@ -78,10 +78,12 @@ describe('@agent mention AgentRun manifests', () => {
     const childIds: string[] = []
     const childCreateOptions: Array<{ permissionMode?: string; enabledSourceSlugs?: string[] }> = []
     const userMessageEvents: Array<{ agentDelegated?: boolean; status?: string }> = []
+    const textCompleteEvents: Array<{ text?: string; sessionId?: string; messageId?: string }> = []
     const originalSendMessage = sm.sendMessage.bind(sm)
 
-    ;(sm as unknown as { sendEvent: (event: { type?: string; agentDelegated?: boolean; status?: string }) => void }).sendEvent = (event) => {
+    ;(sm as unknown as { sendEvent: (event: { type?: string; agentDelegated?: boolean; status?: string; text?: string; sessionId?: string; messageId?: string }) => void }).sendEvent = (event) => {
       if (event.type === 'user_message') userMessageEvents.push(event)
+      if (event.type === 'text_complete') textCompleteEvents.push(event)
     }
     ;(sm as unknown as { sendMessage: (...args: Parameters<SessionManager['sendMessage']>) => Promise<void> }).sendMessage = async (...args) => {
       if (args[0] === 'child-1') return
@@ -138,5 +140,24 @@ describe('@agent mention AgentRun manifests', () => {
     expect(manifest.transcriptPath).toBe(transcriptPath)
     expect(existsSync(transcriptPath)).toBe(true)
     expect(readFileSync(transcriptPath, 'utf-8')).toContain('agent_run_started')
+
+    const child = (sm as unknown as { sessions: Map<string, any> }).sessions.get('child-1')
+    child.messages.push({
+      id: 'child-answer-1',
+      role: 'assistant',
+      content: 'Agent final answer from child session.',
+      timestamp: Date.now(),
+    })
+
+    await (sm as unknown as { updateAgentRunForChildSession: (childSessionId: string, status: string) => Promise<void> }).updateAgentRunForChildSession('child-1', 'completed')
+
+    expect(parent.messages.at(-1)?.role).toBe('assistant')
+    expect(parent.messages.at(-1)?.content).toContain('Agent final answer from child session.')
+    expect(parent.messages.at(-1)?.content).toContain('Child session: child-1')
+    expect(textCompleteEvents[0]).toMatchObject({
+      sessionId: 'parent-1',
+      text: parent.messages.at(-1)?.content,
+      messageId: parent.messages.at(-1)?.id,
+    })
   })
 })
