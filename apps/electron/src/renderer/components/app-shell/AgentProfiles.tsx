@@ -1809,6 +1809,24 @@ function SkillAddDialog({
   skills: LoadedSkill[]
   onAdd: (slug: string) => void
 }) {
+  const [query, setQuery] = React.useState('')
+  const normalizedQuery = query.trim().toLowerCase()
+  const filteredSkills = React.useMemo(() => {
+    if (!normalizedQuery) return skills
+    return skills.filter(skill => {
+      const fields = [
+        skill.metadata.name,
+        skill.slug,
+        skill.metadata.description,
+      ]
+      return fields.some(field => field.toLowerCase().includes(normalizedQuery))
+    })
+  }, [skills, normalizedQuery])
+
+  React.useEffect(() => {
+    if (open) setQuery('')
+  }, [open])
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -1816,8 +1834,24 @@ function SkillAddDialog({
           <DialogTitle className="text-sm">Add skill</DialogTitle>
           <DialogDescription className="text-xs">Select a workspace skill to assign to this agent.</DialogDescription>
         </DialogHeader>
+        <div className="shrink-0 border-b border-border pb-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              autoFocus
+              aria-label="Filter skills by name"
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="Filter skills by name…"
+              className="h-8 pl-8 text-sm"
+            />
+          </div>
+          <div className="mt-2 text-right font-mono text-xs tabular-nums text-muted-foreground/70">
+            {filteredSkills.length} of {skills.length}
+          </div>
+        </div>
         <div className="max-h-64 space-y-1 overflow-y-auto">
-          {skills.map(skill => (
+          {filteredSkills.map(skill => (
             <button
               key={skill.slug}
               type="button"
@@ -1832,6 +1866,7 @@ function SkillAddDialog({
             </button>
           ))}
           {skills.length === 0 && <p className="py-6 text-center text-xs text-muted-foreground">All workspace skills are already assigned.</p>}
+          {skills.length > 0 && filteredSkills.length === 0 && <p className="py-6 text-center text-xs text-muted-foreground">No skills match this filter.</p>}
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
