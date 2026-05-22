@@ -6,6 +6,7 @@
  */
 
 import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, SessionStatus, AuthRequest, ToolDisplayMeta } from '../../shared/types'
+import type { AgentRunMessageMeta } from '@craft-agent/core'
 
 /**
  * Streaming state for a session - replaces streamingTextRef
@@ -48,6 +49,8 @@ export interface TextCompleteEvent {
   timestamp?: number
   /** Authoritative message ID from main process for persistence/branching parity */
   messageId?: string
+  /** AgentRun metadata for child-agent messages posted back to the parent */
+  agentRun?: AgentRunMessageMeta
 }
 
 /**

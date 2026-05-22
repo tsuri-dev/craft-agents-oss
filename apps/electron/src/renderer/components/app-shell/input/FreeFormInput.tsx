@@ -143,6 +143,12 @@ export interface FollowUpInputItem {
   color?: string
 }
 
+export interface AgentReplyTargetInputItem {
+  agentName: string
+  runId: string
+  excerpt?: string
+}
+
 export interface FreeFormInputProps {
   /** Placeholder text(s) for the textarea - can be array for rotation */
   placeholder?: string | string[]
@@ -240,6 +246,10 @@ export interface FreeFormInputProps {
   onFollowUpClick?: (item: FollowUpInputItem, anchor?: { x: number; y: number }) => void
   /** Callback when user clicks the follow-up index badge */
   onFollowUpIndexClick?: (item: FollowUpInputItem) => void
+  /** Agent child session reply target shown as a context chip above the input */
+  agentReplyTarget?: AgentReplyTargetInputItem
+  /** Clear the active Agent reply target */
+  onAgentReplyTargetClear?: () => void
   /**
    * Compact-footer layout. Used by EditPopover (popover embedding) and by
    * ChatPage in auto-compact / WebUI mobile mode. The popover case hides the
@@ -324,6 +334,8 @@ export function FreeFormInput({
   followUpItems = [],
   onFollowUpClick,
   onFollowUpIndexClick,
+  agentReplyTarget,
+  onAgentReplyTargetClear,
   compactMode = false,
   enableCompactModelPicker = false,
   currentConnection,
@@ -1675,6 +1687,43 @@ export function FreeFormInput({
           disabled={disabled}
           loadingCount={loadingCount}
         />
+
+        {/* Agent reply target chip */}
+        <AnimatePresence initial={false}>
+          {agentReplyTarget && (
+            <motion.div
+              key="agent-reply-target"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.18, ease: [0.2, 0, 0.2, 1] }}
+              className="overflow-hidden"
+            >
+              <div className="px-3 pt-3.5 pb-0">
+                <div className="inline-flex max-w-full items-center gap-2 rounded-[7px] border border-primary/20 bg-primary/5 px-2.5 py-1.5 text-[13px] text-foreground/85 shadow-minimal">
+                  <span className="min-w-0 truncate">
+                    <span className="font-medium">Replying to {agentReplyTarget.agentName}</span>
+                    {agentReplyTarget.excerpt ? (
+                      <span className="text-muted-foreground"> · {agentReplyTarget.excerpt}</span>
+                    ) : null}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Clear agent reply target"
+                    className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      onAgentReplyTargetClear?.()
+                    }}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Follow-up context chips */}
         <AnimatePresence initial={false}>

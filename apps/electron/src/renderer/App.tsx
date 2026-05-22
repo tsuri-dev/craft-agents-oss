@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/hooks/useTheme'
 import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
-import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState } from '../shared/types'
+import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState, SendMessageOptions } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@craft-agent/shared/config'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
@@ -1205,7 +1205,7 @@ export default function App() {
     window.electronAPI.sessionCommand(sessionId, { type: 'rename', name })
   }, [updateSessionById])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], extraOptions?: SendMessageOptions) => {
     try {
       // Capture pre-send processing state so we can flag mid-stream sends
       // for the queued badge (#616 follow-up — covers Pi steer path which
@@ -1289,6 +1289,7 @@ export default function App() {
         : []
       const badges: ContentBadge[] = [...(externalBadges || []), ...mentionBadges]
       const delegatesToAgentProfile = badges.some(badge => badge.type === 'agent') || /\[agent:[\w-]+\]/.test(message)
+      const delegatesToAgent = delegatesToAgentProfile || !!extraOptions?.agentRunReply
 
       // Step 4.1: Detect SDK slash commands (e.g., /compact) and create command badges
       // This makes /compact render as an inline badge rather than raw text
@@ -1339,7 +1340,7 @@ export default function App() {
         attachments: storedAttachments,
         badges: badges.length > 0 ? badges : undefined,
         isPending: true,  // Optimistic - will be confirmed by backend
-        isQueued: sendingMidStream && !delegatesToAgentProfile,
+        isQueued: sendingMidStream && !delegatesToAgent,
       }
 
       // Optimistic UI update - add user message. Agent Profile mentions are
@@ -1347,12 +1348,13 @@ export default function App() {
       // parent session as processing or queued.
       updateSessionById(sessionId, (s) => ({
         messages: [...s.messages, userMessage],
-        isProcessing: delegatesToAgentProfile ? s.isProcessing : true,
+        isProcessing: delegatesToAgent ? s.isProcessing : true,
         lastMessageAt: Date.now()
       }))
 
       // Step 6: Send to Claude with processed attachments + stored attachments for persistence
       await window.electronAPI.sendMessage(sessionId, message, processedAttachments, storedAttachments, {
+        ...extraOptions,
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,

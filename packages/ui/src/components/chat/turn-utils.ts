@@ -635,6 +635,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         streamStartTime: message.isStreaming ? message.timestamp : undefined,
         messageId: message.id,
         annotations: message.annotations,
+        agentRun: message.agentRun,
       }
       currentTurn.isStreaming = !!message.isStreaming
       currentTurn.isComplete = !message.isStreaming

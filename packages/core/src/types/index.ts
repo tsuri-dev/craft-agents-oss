@@ -38,6 +38,7 @@ export type {
   AnnotationSelector,
   AnnotationTarget,
   AnnotationV1,
+  AgentRunMessageMeta,
   Message,
   StoredMessage,
   TokenUsage,
