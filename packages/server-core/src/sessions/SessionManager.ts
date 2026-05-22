@@ -80,7 +80,7 @@ import { collectDirectoryFiles, restoreFiles, type BundleFile } from '@craft-age
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SessionUsageEntry, type UsageStats, type UsageStatsRange, type UsageTotals, type RequirementBinding, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
-import type { AgentRun, AgentRunStatus } from '@craft-agent/shared/agent-runs'
+import type { AgentRun, AgentRunStatus, AgentRunTriggerType } from '@craft-agent/shared/agent-runs'
 import type { AgentProfileDetail } from '@craft-agent/shared/agent-profiles'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
@@ -5727,6 +5727,7 @@ export class SessionManager implements ISessionManager {
     agentProfileId: string
     childSessionId: string
     triggerSummary: string
+    triggerType?: AgentRunTriggerType
   }): Promise<AgentRun> {
     const runId = `run-${input.agentProfileId}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`
     const runDir = join(getSessionStoragePath(input.parent.workspace.rootPath, input.parent.id), 'agent-runs', runId)
@@ -5738,7 +5739,7 @@ export class SessionManager implements ISessionManager {
       agentProfileId: input.agentProfileId,
       parentSessionId: input.parent.id,
       childSessionId: input.childSessionId,
-      triggerType: 'mention',
+      triggerType: input.triggerType ?? 'mention',
       triggerSummary: input.triggerSummary,
       status: 'running',
       createdAt: now,
@@ -5757,6 +5758,7 @@ export class SessionManager implements ISessionManager {
       agentProfileId: input.agentProfileId,
       parentSessionId: input.parent.id,
       childSessionId: input.childSessionId,
+      triggerType: run.triggerType,
       triggerSummary: input.triggerSummary,
     })
 
@@ -5767,12 +5769,22 @@ export class SessionManager implements ISessionManager {
     const messageId = generateMessageId()
     const timestamp = this.monotonic()
     const turnId = `agent-run-${run.id}-${phase}`
+    const profile = readAgentProfileDetail(parent.workspace.rootPath, run.agentProfileId)
+    const agentRun = {
+      runId: run.id,
+      agentProfileId: run.agentProfileId,
+      parentSessionId: run.parentSessionId,
+      childSessionId: run.childSessionId,
+      agentName: profile?.name ?? run.agentProfileId,
+      phase,
+    } satisfies NonNullable<Message['agentRun']>
     const message: Message = {
       id: messageId,
       role: 'assistant',
       content,
       timestamp,
       turnId,
+      agentRun,
     }
 
     parent.messages.push(message)
@@ -5794,12 +5806,16 @@ export class SessionManager implements ISessionManager {
       turnId,
       timestamp,
       messageId,
+      agentRun,
     }, parent.workspace.id)
   }
 
   private buildAgentRunStartedMessage(agentName: string, run: AgentRun): string {
+    const header = run.triggerType === 'follow-up'
+      ? `**${agentName} started working on your follow-up.**`
+      : `**${agentName} started working on the delegated task.**`
     return [
-      `**${agentName} started working on the delegated task.**`,
+      header,
       '',
       'You can keep chatting in this session. I will post the agent result here when it finishes.',
       '',
@@ -5854,8 +5870,10 @@ export class SessionManager implements ISessionManager {
       const wasAlreadyFinished = run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled'
       const child = this.sessions.get(childSessionId)
       const now = new Date().toISOString()
-      const toolCount = child?.messages.filter(message => message.role === 'tool').length ?? run.toolCount
-      const lastAssistant = child?.messages.slice().reverse().find(message => message.role === 'assistant' && !message.isIntermediate)
+      const runStartedAtMs = Date.parse(run.startedAt ?? run.createdAt)
+      const isAfterRunStart = (message: Message) => Number.isFinite(runStartedAtMs) ? message.timestamp >= runStartedAtMs : true
+      const toolCount = child?.messages.filter(message => message.role === 'tool' && isAfterRunStart(message)).length ?? run.toolCount
+      const lastAssistant = child?.messages.slice().reverse().find(message => message.role === 'assistant' && !message.isIntermediate && isAfterRunStart(message))
       const summaryPath = run.summaryPath ?? join(dirname(manifestPath), 'summary.md')
       const isFinished = status !== 'stopping' && status !== 'running' && status !== 'queued'
       const shouldWriteSummary = !!lastAssistant && isFinished
@@ -5889,6 +5907,91 @@ export class SessionManager implements ISessionManager {
     } catch (err) {
       sessionLog.warn(`Failed to update AgentRun manifest for child session ${childSessionId}:`, err)
     }
+  }
+
+  private async sendAgentRunFollowUp(
+    parent: ManagedSession,
+    parentMessage: string,
+    attachments: FileAttachment[] | undefined,
+    storedAttachments: StoredAttachment[] | undefined,
+    options: SendMessageOptions,
+    onAck?: (messageId: string) => void,
+  ): Promise<void> {
+    const reply = options.agentRunReply
+    if (!reply) return
+    if (reply.parentSessionId && reply.parentSessionId !== parent.id) {
+      throw new Error(`AgentRun reply belongs to parent session ${reply.parentSessionId}, not ${parent.id}`)
+    }
+
+    const child = this.sessions.get(reply.childSessionId)
+    if (!child) {
+      throw new Error(`Agent child session ${reply.childSessionId} not found`)
+    }
+    await this.ensureMessagesLoaded(child)
+
+    const userMessage: Message = {
+      id: generateMessageId(),
+      role: 'user',
+      content: parentMessage,
+      timestamp: this.monotonic(),
+      attachments: storedAttachments,
+      badges: options.badges,
+    }
+    parent.messages.push(userMessage)
+    parent.lastMessageRole = 'user'
+    parent.lastMessageAt = Date.now()
+
+    this.persistSession(parent)
+    await this.flushSession(parent.id)
+    onAck?.(userMessage.id)
+
+    this.sendEvent({
+      type: 'user_message',
+      sessionId: parent.id,
+      message: userMessage,
+      status: 'accepted',
+      optimisticMessageId: options.optimisticMessageId,
+      agentDelegated: true,
+    }, parent.workspace.id)
+
+    const triggerSummary = parentMessage.trim() || 'Follow-up to agent result'
+    const run = await this.createAgentRunManifest({
+      parent,
+      agentProfileId: reply.agentProfileId,
+      childSessionId: reply.childSessionId,
+      triggerSummary,
+      triggerType: 'follow-up',
+    })
+
+    await this.appendAgentRunLog(run.transcriptPath, {
+      type: 'agent_run_follow_up_requested',
+      runId: run.id,
+      sourceRunId: reply.runId,
+      sourceMessageId: reply.sourceMessageId,
+      childSessionId: reply.childSessionId,
+      triggerSummary,
+    })
+
+    const profile = readAgentProfileDetail(parent.workspace.rootPath, reply.agentProfileId)
+    await this.notifyParentOfAgentRunStarted(parent, profile?.name ?? reply.agentName ?? reply.agentProfileId, run)
+
+    const childSkillSlugs = Array.from(new Set([
+      ...(profile?.skillSlugs ?? []),
+      ...(options.skillSlugs ?? []),
+    ]))
+    this.sendMessage(reply.childSessionId, parentMessage, attachments, undefined, {
+      skillSlugs: childSkillSlugs.length > 0 ? childSkillSlugs : undefined,
+    }).then(() => {
+      void this.appendAgentRunLog(run.transcriptPath, {
+        type: 'agent_run_follow_up_prompt_accepted',
+        runId: run.id,
+        childSessionId: reply.childSessionId,
+        sourceRunId: reply.runId,
+      })
+    }).catch(err => {
+      sessionLog.error(`Failed to send AgentRun follow-up to child session ${reply.childSessionId}:`, err)
+      void this.updateAgentRunForChildSession(reply.childSessionId, 'failed', err instanceof Error ? err.message : String(err))
+    })
   }
 
   private async spawnAgentProfileMentionSessions(
@@ -6002,6 +6105,11 @@ export class SessionManager implements ISessionManager {
 
     // Ensure messages are loaded before we try to add new ones
     await this.ensureMessagesLoaded(managed)
+
+    if (options?.agentRunReply) {
+      await this.sendAgentRunFollowUp(managed, message, attachments, storedAttachments, options, onAck)
+      return
+    }
 
     const delegatedAgentProfileIds = this.extractAgentProfileMentionIds(message, options)
     if (delegatedAgentProfileIds.length > 0) {

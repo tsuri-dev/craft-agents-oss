@@ -227,6 +227,20 @@ export interface AnnotationV1 {
 }
 
 /**
+ * Metadata linking a parent-session assistant message to an AgentRun.
+ * Used to render agent result actions (reply/open child/log) after a
+ * delegated Agent Profile posts back into the parent conversation.
+ */
+export interface AgentRunMessageMeta {
+  runId: string;
+  agentProfileId: string;
+  parentSessionId: string;
+  childSessionId?: string;
+  agentName?: string;
+  phase?: 'started' | 'finished';
+}
+
+/**
  * Stored attachment metadata (persisted to disk, no base64)
  * Created when user sends a message with attachments
  */
@@ -277,6 +291,8 @@ export interface Message {
   badges?: ContentBadge[];
   /** Annotation payloads for this message */
   annotations?: AnnotationV1[];
+  /** AgentRun metadata for assistant messages posted back from child agents */
+  agentRun?: AgentRunMessageMeta;
   isError?: boolean;
   isStreaming?: boolean;
   // Pending: streaming text where we don't yet know if it's intermediate
@@ -365,6 +381,8 @@ export interface StoredMessage {
   badges?: ContentBadge[];
   /** Annotations persisted at message level */
   annotations?: AnnotationV1[];
+  /** AgentRun metadata persisted for parent-session reply actions */
+  agentRun?: AgentRunMessageMeta;
   // Turn grouping - critical for TurnCard rendering after reload
   isIntermediate?: boolean;
   turnId?: string;

@@ -18,17 +18,22 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 1000): Pro
 }
 
 async function waitForManifest(agentRunsDir: string, timeoutMs = 1000): Promise<string> {
+  const manifests = await waitForManifestCount(agentRunsDir, 1, timeoutMs)
+  return manifests[0]
+}
+
+async function waitForManifestCount(agentRunsDir: string, count: number, timeoutMs = 1000): Promise<string[]> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     if (existsSync(agentRunsDir)) {
-      for (const runId of readdirSync(agentRunsDir)) {
-        const manifestPath = join(agentRunsDir, runId, 'manifest.json')
-        if (existsSync(manifestPath)) return manifestPath
-      }
+      const manifests = readdirSync(agentRunsDir)
+        .map(runId => join(agentRunsDir, runId, 'manifest.json'))
+        .filter(existsSync)
+      if (manifests.length >= count) return manifests
     }
     await new Promise(resolve => setTimeout(resolve, 10))
   }
-  throw new Error(`Timed out waiting for AgentRun manifest in ${agentRunsDir}`)
+  throw new Error(`Timed out waiting for ${count} AgentRun manifest(s) in ${agentRunsDir}`)
 }
 
 describe('@agent mention AgentRun manifests', () => {
@@ -87,10 +92,10 @@ describe('@agent mention AgentRun manifests', () => {
     const childIds: string[] = []
     const childCreateOptions: Array<{ permissionMode?: string; enabledSourceSlugs?: string[] }> = []
     const userMessageEvents: Array<{ agentDelegated?: boolean; status?: string }> = []
-    const textCompleteEvents: Array<{ text?: string; sessionId?: string; messageId?: string }> = []
+    const textCompleteEvents: Array<{ text?: string; sessionId?: string; messageId?: string; agentRun?: unknown }> = []
     const originalSendMessage = sm.sendMessage.bind(sm)
 
-    ;(sm as unknown as { sendEvent: (event: { type?: string; agentDelegated?: boolean; status?: string; text?: string; sessionId?: string; messageId?: string }) => void }).sendEvent = (event) => {
+    ;(sm as unknown as { sendEvent: (event: { type?: string; agentDelegated?: boolean; status?: string; text?: string; sessionId?: string; messageId?: string; agentRun?: unknown }) => void }).sendEvent = (event) => {
       if (event.type === 'user_message') userMessageEvents.push(event)
       if (event.type === 'text_complete') textCompleteEvents.push(event)
     }
@@ -134,10 +139,18 @@ describe('@agent mention AgentRun manifests', () => {
     expect(parent.messages.at(-1)?.role).toBe('assistant')
     expect(parent.messages.at(-1)?.content).toContain('Orion started working on the delegated task')
     expect(parent.messages.at(-1)?.content).toContain('Child session: child-1')
+    expect(parent.messages.at(-1)?.agentRun).toMatchObject({
+      agentProfileId: 'orion',
+      parentSessionId: 'parent-1',
+      childSessionId: 'child-1',
+      agentName: 'Orion',
+      phase: 'started',
+    })
     expect(textCompleteEvents[0]).toMatchObject({
       sessionId: 'parent-1',
       text: parent.messages.at(-1)?.content,
       messageId: parent.messages.at(-1)?.id,
+      agentRun: parent.messages.at(-1)?.agentRun,
     })
 
     const agentRunsDir = join(tmpRoot, 'sessions', 'parent-1', 'agent-runs')
@@ -173,10 +186,115 @@ describe('@agent mention AgentRun manifests', () => {
     expect(parent.messages.at(-1)?.role).toBe('assistant')
     expect(parent.messages.at(-1)?.content).toContain('Agent final answer from child session.')
     expect(parent.messages.at(-1)?.content).toContain('Child session: child-1')
+    expect(parent.messages.at(-1)?.agentRun).toMatchObject({
+      agentProfileId: 'orion',
+      parentSessionId: 'parent-1',
+      childSessionId: 'child-1',
+      agentName: 'Orion',
+      phase: 'finished',
+    })
     expect(textCompleteEvents[1]).toMatchObject({
       sessionId: 'parent-1',
       text: parent.messages.at(-1)?.content,
       messageId: parent.messages.at(-1)?.id,
+      agentRun: parent.messages.at(-1)?.agentRun,
+    })
+  })
+
+  it('routes parent replies to the same child session without blocking the parent', async () => {
+    writeProfile('orion')
+    const parent = addManagedSession('parent-1', true, 'allow-all')
+    const child = addManagedSession('child-1', false, 'allow-all')
+    child.messages.push({
+      id: 'old-child-answer',
+      role: 'assistant',
+      content: 'Old completed run answer.',
+      timestamp: Date.now() - 10_000,
+    })
+
+    const userMessageEvents: Array<{ agentDelegated?: boolean; status?: string; optimisticMessageId?: string }> = []
+    const textCompleteEvents: Array<{ text?: string; sessionId?: string; messageId?: string; agentRun?: any }> = []
+    const childSends: Array<{ sessionId: string; message: string; options?: any }> = []
+    const originalSendMessage = sm.sendMessage.bind(sm)
+
+    ;(sm as unknown as { sendEvent: (event: { type?: string; agentDelegated?: boolean; status?: string; optimisticMessageId?: string; text?: string; sessionId?: string; messageId?: string; agentRun?: any }) => void }).sendEvent = (event) => {
+      if (event.type === 'user_message') userMessageEvents.push(event)
+      if (event.type === 'text_complete') textCompleteEvents.push(event)
+    }
+    ;(sm as unknown as { sendMessage: (...args: Parameters<SessionManager['sendMessage']>) => Promise<void> }).sendMessage = async (...args) => {
+      if (args[0] === 'child-1') {
+        childSends.push({ sessionId: args[0], message: args[1], options: args[4] })
+        return
+      }
+      return originalSendMessage(...args)
+    }
+
+    await sm.sendMessage('parent-1', 'Can you refine that result?', undefined, undefined, {
+      optimisticMessageId: 'opt-follow-up-1',
+      agentRunReply: {
+        runId: 'run-orion-original',
+        agentProfileId: 'orion',
+        parentSessionId: 'parent-1',
+        childSessionId: 'child-1',
+        agentName: 'Orion',
+        sourceMessageId: 'msg-agent-result-1',
+      },
+    })
+
+    await waitForCondition(() => childSends.length === 1 && textCompleteEvents.length >= 1)
+
+    expect(parent.isProcessing).toBe(true)
+    expect(parent.messageQueue).toHaveLength(0)
+    expect(userMessageEvents[0]).toMatchObject({
+      status: 'accepted',
+      optimisticMessageId: 'opt-follow-up-1',
+      agentDelegated: true,
+    })
+    expect(parent.messages.find(message => message.role === 'user')?.content).toBe('Can you refine that result?')
+    expect(parent.messages.at(-1)?.role).toBe('assistant')
+    expect(parent.messages.at(-1)?.content).toContain('Orion started working on your follow-up')
+    expect(parent.messages.at(-1)?.agentRun).toMatchObject({
+      agentProfileId: 'orion',
+      parentSessionId: 'parent-1',
+      childSessionId: 'child-1',
+      phase: 'started',
+    })
+    expect(childSends[0]).toMatchObject({
+      sessionId: 'child-1',
+      message: 'Can you refine that result?',
+      options: { skillSlugs: ['test-skill'] },
+    })
+
+    const agentRunsDir = join(tmpRoot, 'sessions', 'parent-1', 'agent-runs')
+    const manifestPath = (await waitForManifestCount(agentRunsDir, 1))[0]
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'))
+    expect(manifest).toMatchObject({
+      agentProfileId: 'orion',
+      parentSessionId: 'parent-1',
+      childSessionId: 'child-1',
+      triggerType: 'follow-up',
+      triggerSummary: 'Can you refine that result?',
+      status: 'running',
+    })
+    expect(readFileSync(manifest.transcriptPath, 'utf-8')).toContain('agent_run_follow_up_requested')
+
+    child.messages.push({
+      id: 'child-follow-up-answer',
+      role: 'assistant',
+      content: 'New follow-up answer from the same child session.',
+      timestamp: Date.now(),
+    })
+
+    await (sm as unknown as { updateAgentRunForChildSession: (childSessionId: string, status: string) => Promise<void> }).updateAgentRunForChildSession('child-1', 'completed')
+
+    expect(parent.messages.at(-1)?.role).toBe('assistant')
+    expect(parent.messages.at(-1)?.content).toContain('New follow-up answer from the same child session.')
+    expect(parent.messages.at(-1)?.content).not.toContain('Old completed run answer.')
+    expect(parent.messages.at(-1)?.agentRun).toMatchObject({
+      agentProfileId: 'orion',
+      parentSessionId: 'parent-1',
+      childSessionId: 'child-1',
+      phase: 'finished',
     })
   })
 })

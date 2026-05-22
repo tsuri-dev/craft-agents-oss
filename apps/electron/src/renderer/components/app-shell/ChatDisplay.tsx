@@ -41,7 +41,7 @@ import {
 } from "@craft-agent/ui"
 import { useFocusZone } from "@/hooks/keyboard"
 import { useTheme } from "@/hooks/useTheme"
-import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, LoadedSource, LoadedSkill } from "../../../shared/types"
+import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, LoadedSource, LoadedSkill, SendMessageOptions } from "../../../shared/types"
 import type { AgentProfile } from "../../../shared/agent-profiles"
 import type { PermissionMode } from "@craft-agent/shared/agent/modes"
 import type { ThinkingLevel } from "@craft-agent/shared/agent/thinking-levels"
@@ -134,9 +134,14 @@ function getTurnKey(turn: Turn): string {
   return `turn-${turn.turnId}-${turn.timestamp}`
 }
 
+type AgentReplyTarget = NonNullable<SendMessageOptions['agentRunReply']> & {
+  agentName: string
+  excerpt?: string
+}
+
 interface ChatDisplayProps {
   session: Session | null
-  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => void
+  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], options?: SendMessageOptions) => void
   onOpenFile: (path: string) => void
   onOpenUrl: (url: string) => void
   // Model selection
@@ -638,6 +643,29 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     expandedActivityGroups,
     setExpandedActivityGroups,
   } = useTurnCardExpansion(session?.id)
+
+  const [agentReplyTarget, setAgentReplyTarget] = useState<AgentReplyTarget | null>(null)
+
+  useEffect(() => {
+    setAgentReplyTarget(null)
+  }, [session?.id])
+
+  const handleReplyToAgentResult = useCallback((turn: AssistantTurn) => {
+    const agentRun = turn.response?.agentRun
+    if (!agentRun?.childSessionId || !turn.response?.messageId) return
+
+    const target: AgentReplyTarget = {
+      runId: agentRun.runId,
+      agentProfileId: agentRun.agentProfileId,
+      parentSessionId: agentRun.parentSessionId,
+      childSessionId: agentRun.childSessionId,
+      agentName: agentRun.agentName ?? agentRun.agentProfileId,
+      sourceMessageId: turn.response.messageId,
+      excerpt: turn.response.text.trim().replace(/\s+/g, ' ').slice(0, 180),
+    }
+    setAgentReplyTarget(target)
+    textareaRef?.current?.focus()
+  }, [textareaRef])
 
 
   // ============================================================================
@@ -1323,9 +1351,25 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       : message
     const normalizedMessage = normalizeFollowUpsMarkdown(messageWithFollowUps)
 
+    const sendOptions: SendMessageOptions | undefined = agentReplyTarget
+      ? {
+          agentRunReply: {
+            runId: agentReplyTarget.runId,
+            agentProfileId: agentReplyTarget.agentProfileId,
+            parentSessionId: agentReplyTarget.parentSessionId,
+            childSessionId: agentReplyTarget.childSessionId,
+            agentName: agentReplyTarget.agentName,
+            sourceMessageId: agentReplyTarget.sourceMessageId,
+          },
+        }
+      : undefined
+
     // Force stick-to-bottom when user sends a message
     isStickToBottomRef.current = true
-    onSendMessage(normalizedMessage, attachments, skillSlugs)
+    onSendMessage(normalizedMessage, attachments, skillSlugs, sendOptions)
+    if (agentReplyTarget) {
+      setAgentReplyTarget(null)
+    }
 
     // Persist sent marker on follow-up annotations so TurnCard can distinguish
     // sent vs pending follow-ups. If user edits a follow-up later, TurnCard
@@ -1941,6 +1985,17 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           }
                         }}
                       />
+                      {turn.response?.agentRun?.phase === 'finished' && turn.response.agentRun.childSessionId && (
+                        <div className="mt-1 flex justify-start px-3">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 rounded-md border border-border/70 bg-background/80 px-2.5 py-1 text-xs font-medium text-muted-foreground shadow-minimal transition-colors hover:border-primary/30 hover:bg-primary/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            onClick={() => handleReplyToAgentResult(turn)}
+                          >
+                            Reply to Agent
+                          </button>
+                        </div>
+                      )}
                       </div>
                     )
                   })}
@@ -2026,6 +2081,14 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               followUpItems: followUpInputItems,
               onFollowUpClick: handleFollowUpChipClick,
               onFollowUpIndexClick: handleFollowUpIndexClick,
+              agentReplyTarget: agentReplyTarget
+                ? {
+                    agentName: agentReplyTarget.agentName,
+                    runId: agentReplyTarget.runId,
+                    excerpt: agentReplyTarget.excerpt,
+                  }
+                : undefined,
+              onAgentReplyTargetClear: () => setAgentReplyTarget(null),
             }}
           />
           </div>

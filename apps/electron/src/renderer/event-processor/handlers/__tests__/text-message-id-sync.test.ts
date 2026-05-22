@@ -63,6 +63,30 @@ describe('handleTextComplete messageId synchronization', () => {
     expect((next.session.messages[0] as any).id).toBe('msg-main-race')
   })
 
+  it('preserves AgentRun metadata from text_complete events', () => {
+    const state = makeState([])
+
+    const event: TextCompleteEvent = {
+      type: 'text_complete',
+      sessionId: 'session-1',
+      text: 'agent result',
+      turnId: 'turn-agent',
+      messageId: 'msg-agent-result',
+      timestamp: 350,
+      agentRun: {
+        runId: 'run-orion-1',
+        agentProfileId: 'orion',
+        parentSessionId: 'session-1',
+        childSessionId: 'child-1',
+        agentName: 'Orion',
+        phase: 'finished',
+      },
+    }
+
+    const next = handleTextComplete(state, event)
+    expect((next.session.messages[0] as any).agentRun).toEqual(event.agentRun)
+  })
+
   it('keeps backward compatibility when messageId is missing', () => {
     const state = makeState([])
 

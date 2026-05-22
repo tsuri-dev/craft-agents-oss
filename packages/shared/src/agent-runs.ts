@@ -1,6 +1,6 @@
 export type AgentRunStatus = 'queued' | 'running' | 'stopping' | 'completed' | 'failed' | 'cancelled'
 
-export type AgentRunTriggerType = 'mention' | 'manual' | 'automation' | 'tapd'
+export type AgentRunTriggerType = 'mention' | 'follow-up' | 'manual' | 'automation' | 'tapd'
 
 export interface AgentRun {
   id: string

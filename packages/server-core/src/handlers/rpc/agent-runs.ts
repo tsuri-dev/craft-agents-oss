@@ -12,7 +12,7 @@ export const HANDLED_CHANNELS = [
 ] as const
 
 const VALID_STATUSES = new Set<AgentRunStatus>(['queued', 'running', 'stopping', 'completed', 'failed', 'cancelled'])
-const VALID_TRIGGER_TYPES = new Set<AgentRunTriggerType>(['mention', 'manual', 'automation', 'tapd'])
+const VALID_TRIGGER_TYPES = new Set<AgentRunTriggerType>(['mention', 'follow-up', 'manual', 'automation', 'tapd'])
 
 interface ListAgentRunsInput {
   agentProfileId?: string
