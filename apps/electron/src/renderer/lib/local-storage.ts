@@ -25,6 +25,7 @@ export const KEYS = {
   sessionBoardViewMode: 'session-board-view-mode', // Session navigator mode: list | board
   sessionBoardGroupBy: 'session-board-group-by', // Board column grouping: status | label | recent
   sessionBoardHiddenStatuses: 'session-board-hidden-statuses', // Workspace-scoped hidden board columns
+  showAgentTasks: 'show-agent-tasks', // Include delegated agent child sessions in session navigator
 
   // Focus mode
   focusModeEnabled: 'focus-mode-enabled',
