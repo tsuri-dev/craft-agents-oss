@@ -96,6 +96,22 @@ describe('parseMentions - skill pattern with workspace IDs', () => {
 })
 
 // ============================================================================
+// parseMentions - Agent Profile Tests
+// ============================================================================
+
+describe('parseMentions - agent profile IDs', () => {
+  it('parses valid agent mention when agent ids are provided', () => {
+    const result = parseMentions('[agent:reviewer] review this', [], [], ['reviewer'])
+    expect(result.agents).toEqual(['reviewer'])
+  })
+
+  it('deduplicates agent mentions', () => {
+    const result = parseMentions('[agent:reviewer] [agent:reviewer]', [], [], ['reviewer'])
+    expect(result.agents).toEqual(['reviewer'])
+  })
+})
+
+// ============================================================================
 // findMentionMatches - Skill Pattern Tests
 // ============================================================================
 
@@ -136,6 +152,22 @@ describe('findMentionMatches - skill pattern with workspace IDs', () => {
     const text = 'Please use [skill:My Workspace:commit] for this'
     const matches = findMentionMatches(text, availableSkills, [])
     expect(matches[0]?.startIndex).toBe(11)
+  })
+})
+
+// ============================================================================
+// findMentionMatches - Agent Profile Tests
+// ============================================================================
+
+describe('findMentionMatches - agent profile IDs', () => {
+  it('finds agent mentions by id', () => {
+    const matches = findMentionMatches('Ask [agent:reviewer] to check this', [], [], ['reviewer'])
+    expect(matches).toHaveLength(1)
+    expect(matches[0]).toMatchObject({
+      type: 'agent',
+      id: 'reviewer',
+      fullMatch: '[agent:reviewer]',
+    })
   })
 })
 
@@ -313,5 +345,14 @@ describe('extractBadges - skill qualification with workspace slug', () => {
     expect(badges).toHaveLength(1)
     expect(badges[0]!.rawText).toBe('[source:linear]')
     expect(badges[0]!.type).toBe('source')
+  })
+
+  it('extracts agent mention badges with display names', () => {
+    const agents = [{ id: 'reviewer', name: 'Code Reviewer' }] as any[]
+    const badges = extractBadges('[agent:reviewer]', [], [], 'my-project', agents)
+    expect(badges).toHaveLength(1)
+    expect(badges[0]!.rawText).toBe('[agent:reviewer]')
+    expect(badges[0]!.label).toBe('Code Reviewer')
+    expect(badges[0]!.type).toBe('agent')
   })
 })

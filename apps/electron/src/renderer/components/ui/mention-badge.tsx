@@ -60,6 +60,18 @@ export function MentionBadge({
       {type === 'source' && source && (
         <SourceAvatar source={source} size="xs" />
       )}
+      {type === 'agent' && (
+        <span className="flex h-4 w-4 items-center justify-center rounded-[4px] bg-foreground/5 text-muted-foreground">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 7V3" />
+            <path d="M9 3h6" />
+            <rect x="4" y="7" width="16" height="12" rx="4" />
+            <path d="M8.5 12.5h.01" />
+            <path d="M15.5 12.5h.01" />
+            <path d="M9.5 16h5" />
+          </svg>
+        </span>
+      )}
 
       {/* Label */}
       <span className="truncate max-w-[100px]">{label}</span>

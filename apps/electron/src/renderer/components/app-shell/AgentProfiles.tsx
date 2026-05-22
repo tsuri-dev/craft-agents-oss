@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { useSetAtom } from 'jotai'
 import {
   Activity,
   ArrowLeft,
@@ -42,6 +43,7 @@ import { TiptapMarkdownEditor } from '@craft-agent/ui'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { deriveConnectionStatus } from '@/components/ui/source-status-indicator'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
+import { agentProfilesAtom } from '@/atoms/agent-profiles'
 import { cn } from '@/lib/utils'
 import { getModelDisplayName } from '@config/models'
 import { DEFAULT_THINKING_LEVEL, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
@@ -243,8 +245,15 @@ function agentProfileToView(profile: AgentProfile, connectionOptions: AgentConne
   }
 }
 
+function upsertAgentProfileList<T extends AgentProfile>(profiles: T[], profile: AgentProfile): T[] {
+  const next = profiles.filter(item => item.id !== profile.id)
+  next.unshift(profile as T)
+  return next
+}
+
 function useAgentProfileViews(): AgentProfileMock[] {
   const appShell = useOptionalAppShellContext()
+  const setAgentProfilesAtom = useSetAtom(agentProfilesAtom)
   const connectionOptions = React.useMemo(
     () => buildAgentConnectionOptions(appShell?.llmConnections),
     [appShell?.llmConnections],
@@ -261,14 +270,17 @@ function useAgentProfileViews(): AgentProfileMock[] {
 
     window.electronAPI.listAgentProfiles(workspaceId)
       .then(profiles => {
-        if (!cancelled) setWorkspaceProfiles(profiles)
+        if (!cancelled) {
+          setWorkspaceProfiles(profiles)
+          setAgentProfilesAtom(profiles)
+        }
       })
       .catch(() => {
         if (!cancelled) setWorkspaceProfiles(null)
       })
 
     return () => { cancelled = true }
-  }, [appShell?.activeWorkspaceId])
+  }, [appShell?.activeWorkspaceId, setAgentProfilesAtom])
 
   return React.useMemo(
     () => workspaceProfiles?.map(profile => agentProfileToView(profile, connectionOptions)) ?? MOCK_AGENT_PROFILES,
@@ -405,6 +417,7 @@ function CreateAgentProfileDialog({
   onCreated: (profileId: string) => void
 }) {
   const appShell = useOptionalAppShellContext()
+  const setAgentProfilesAtom = useSetAtom(agentProfilesAtom)
   const [name, setName] = React.useState('')
   const [description, setDescription] = React.useState('')
   const [connectionSlug, setConnectionSlug] = React.useState(() => {
@@ -453,6 +466,7 @@ function CreateAgentProfileDialog({
     setError(null)
     try {
       const created = await window.electronAPI.createAgentProfile(workspaceId, input)
+      setAgentProfilesAtom(current => upsertAgentProfileList(current, created))
       onCreated(created.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create agent')
@@ -823,6 +837,7 @@ function createFallbackProfileDetail(agent: AgentProfileMock): AgentProfileDetai
 
 function useAgentProfileDetail(agent: AgentProfileMock) {
   const appShell = useOptionalAppShellContext()
+  const setAgentProfilesAtom = useSetAtom(agentProfilesAtom)
   const fallback = React.useMemo(() => createFallbackProfileDetail(agent), [agent])
   const [profile, setProfile] = React.useState<AgentProfileDetail>(fallback)
 
@@ -837,14 +852,17 @@ function useAgentProfileDetail(agent: AgentProfileMock) {
 
     window.electronAPI.getAgentProfile(workspaceId, agent.id)
       .then(detail => {
-        if (!cancelled) setProfile(detail)
+        if (!cancelled) {
+          setProfile(detail)
+          setAgentProfilesAtom(current => upsertAgentProfileList(current, detail))
+        }
       })
       .catch(() => {
         if (!cancelled) setProfile(fallback)
       })
 
     return () => { cancelled = true }
-  }, [agent.id, appShell?.activeWorkspaceId, fallback])
+  }, [agent.id, appShell?.activeWorkspaceId, fallback, setAgentProfilesAtom])
 
   const profileIdRef = React.useRef(fallback.id)
   React.useEffect(() => {
@@ -870,11 +888,12 @@ function useAgentProfileDetail(agent: AgentProfileMock) {
     try {
       const updated = await window.electronAPI.updateAgentProfile(workspaceId, targetProfileId, input)
       setProfile(updated)
+      setAgentProfilesAtom(current => upsertAgentProfileList(current, updated))
     } catch (err) {
       setProfile(previousProfile)
       throw err
     }
-  }, [agent.id, appShell?.activeWorkspaceId, profile])
+  }, [agent.id, appShell?.activeWorkspaceId, profile, setAgentProfilesAtom])
 
   const saveInstructions = React.useCallback(async (instructions: string) => {
     await updateProfile({ instructions })

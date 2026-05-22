@@ -54,6 +54,7 @@ import {
 } from '@/atoms/sessions'
 import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
+import { agentProfilesAtom } from '@/atoms/agent-profiles'
 import { extractBadges } from '@/lib/mentions'
 import { getDefaultStore } from 'jotai'
 import {
@@ -330,9 +331,10 @@ export default function App() {
   // Notifications enabled state (from app settings)
   const [notificationsEnabled, setNotificationsEnabled] = useState(true)
 
-  // Sources and skills for badge extraction
+  // Sources, skills, and Agent Profiles for badge extraction
   const sources = useAtomValue(sourcesAtom)
   const skills = useAtomValue(skillsAtom)
+  const agentProfiles = useAtomValue(agentProfilesAtom)
 
   // Compute if app is fully ready (all data loaded)
   const isFullyReady = appState === 'ready' && sessionsLoaded
@@ -1283,7 +1285,7 @@ export default function App() {
       // Merge with any externally provided badges (e.g., from EditPopover context badges)
       // Use workspace slug (not UUID) for skill qualification - SDK expects "workspaceSlug:skillSlug"
       const mentionBadges: ContentBadge[] = windowWorkspaceSlug
-        ? extractBadges(message, skills, sources, windowWorkspaceSlug)
+        ? extractBadges(message, skills, sources, windowWorkspaceSlug, agentProfiles)
         : []
       const badges: ContentBadge[] = [...(externalBadges || []), ...mentionBadges]
 
@@ -1367,7 +1369,7 @@ export default function App() {
         ]
       }))
     }
-  }, [sessionOptions, updateSessionById, skills, sources, windowWorkspaceId])
+  }, [sessionOptions, updateSessionById, skills, sources, agentProfiles, windowWorkspaceId])
 
   /**
    * Unified handler for all session option changes.
@@ -1746,10 +1748,11 @@ export default function App() {
       // (prevents memory growth on repeated workspace switches)
       sessionDraftsRef.current.clear()
 
-      // 7. Reset sources and skills atoms to empty
+      // 7. Reset workspace-scoped atoms to empty
       // (prevents stale data flash during workspace switch - AppShell will reload)
       store.set(sourcesAtom, [])
       store.set(skillsAtom, [])
+      store.set(agentProfilesAtom, [])
 
       // 8. Clear session atoms BEFORE workspace switch
       // This prevents stale session data from the previous workspace being visible.

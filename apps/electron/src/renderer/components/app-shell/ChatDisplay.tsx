@@ -42,6 +42,7 @@ import {
 import { useFocusZone } from "@/hooks/keyboard"
 import { useTheme } from "@/hooks/useTheme"
 import type { Session, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, LoadedSource, LoadedSkill } from "../../../shared/types"
+import type { AgentProfile } from "../../../shared/agent-profiles"
 import type { PermissionMode } from "@craft-agent/shared/agent/modes"
 import type { ThinkingLevel } from "@craft-agent/shared/agent/thinking-levels"
 import {
@@ -194,6 +195,9 @@ interface ChatDisplayProps {
   // Skill selection (for @mentions)
   /** Available skills for @mention autocomplete */
   skills?: LoadedSkill[]
+  // Agent Profile selection (for @mentions)
+  /** Available Agent Profiles for @mention autocomplete */
+  agentProfiles?: AgentProfile[]
   // Label selection (for #labels)
   /** Available label configs (tree) for label menu and badge display */
   labels?: import('@craft-agent/shared/labels').LabelConfig[]
@@ -476,6 +480,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onSourcesChange,
   // Skills (for @mentions)
   skills,
+  // Agent Profiles (for @mentions)
+  agentProfiles,
   // Labels (for #labels)
   labels,
   onLabelsChange,
@@ -2003,6 +2009,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               enabledSourceSlugs: session.enabledSourceSlugs,
               onSourcesChange,
               skills,
+              agentProfiles,
               workspaceId,
               workingDirectory,
               onWorkingDirectoryChange,

@@ -79,6 +79,7 @@ import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
 import { derivePickerMode } from './picker-mode'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
+import type { AgentProfile } from '../../../../shared/agent-profiles'
 import type { PermissionMode } from '@craft-agent/shared/agent/modes'
 import { type ThinkingLevel, THINKING_LEVELS, getThinkingLevelNameKey } from '@craft-agent/shared/agent/thinking-levels'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
@@ -198,6 +199,9 @@ export interface FreeFormInputProps {
   // Skill selection (for @mentions)
   /** Available skills for @mention autocomplete */
   skills?: LoadedSkill[]
+  // Agent Profile selection (for @mentions)
+  /** Available Agent Profiles for @mention autocomplete */
+  agentProfiles?: AgentProfile[]
   // Label selection (for #labels)
   /** Available labels for #label autocomplete */
   labels?: LabelConfig[]
@@ -304,6 +308,7 @@ export function FreeFormInput({
   enabledSourceSlugs = [],
   onSourcesChange,
   skills = [],
+  agentProfiles = [],
   labels = [],
   sessionLabels = [],
   onLabelAdd,
@@ -993,7 +998,7 @@ export function FreeFormInput({
     homeDir,
   })
 
-  // Handle mention selection (sources, skills, files)
+  // Handle mention selection (sources, skills, agents, files)
   const handleMentionSelect = React.useCallback((item: MentionItem) => {
     // For sources: enable the source immediately
     if (item.type === 'source' && item.source && onSourcesChange) {
@@ -1005,15 +1010,15 @@ export function FreeFormInput({
       }
     }
 
-    // Files via @ mention in text are sufficient context for the agent.
-    // Skills also don't need special handling beyond text insertion.
+    // Files/skills/agents via @ mention in text are sufficient context for the agent.
   }, [optimisticSourceSlugs, onSourcesChange])
 
-  // Inline mention hook (for skills, sources, and files)
+  // Inline mention hook (for agents, skills, sources, and files)
   const inlineMention = useInlineMention({
     inputRef: richInputRef,
     skills,
     sources,
+    agents: agentProfiles,
     basePath: workingDirectory,
     onSelect: handleMentionSelect,
     // Use workspace slug (not UUID) for SDK skill qualification
@@ -1282,10 +1287,11 @@ export function FreeFormInput({
     // Tutorial may disable sending to guide user through specific steps
     if (disableSend) return false
 
-    // Parse all @mentions (skills, sources, folders)
+    // Parse all @mentions (skills, sources, agents, folders)
     const skillSlugs = skills.map(s => s.slug)
     const sourceSlugs = sources.map(s => s.config.slug)
-    const mentions = parseMentions(input, skillSlugs, sourceSlugs)
+    const agentProfileIds = agentProfiles.map(agent => agent.id)
+    const mentions = parseMentions(input, skillSlugs, sourceSlugs, agentProfileIds)
 
     // Enable any mentioned sources that aren't already enabled
     if (mentions.sources.length > 0 && onSourcesChange) {
@@ -1317,7 +1323,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir])
+  }, [input, attachments, followUpItems, disabled, disableSend, onInputChange, onAttachmentsChange, onSubmit, skills, sources, agentProfiles, optimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
@@ -1777,6 +1783,7 @@ export function FreeFormInput({
           disabled={disabled}
           skills={skills}
           sources={sources}
+          agents={agentProfiles}
           workspaceId={workspaceSlug}
           className="pl-5 pr-4 pt-4 pb-3 overflow-y-auto min-h-[88px]"
           style={{ maxHeight: inputMaxHeight }}

@@ -7,7 +7,7 @@
  * "find the root cause in [Mentioned skill: Datadog API (slug: datadog-api)]").
  */
 import { describe, it, expect } from 'bun:test'
-import { resolveSkillMentions, resolveSourceMentions, stripAllMentions } from '../index.ts'
+import { resolveSkillMentions, resolveSourceMentions, resolveAgentMentions, stripAllMentions } from '../index.ts'
 
 // ============================================================================
 // resolveSkillMentions
@@ -129,7 +129,27 @@ describe('resolveSourceMentions', () => {
 })
 
 // ============================================================================
-// stripAllMentions — now replaces with slug instead of empty string
+// resolveAgentMentions
+// ============================================================================
+
+describe('resolveAgentMentions', () => {
+  const agentNames = new Map([
+    ['reviewer', 'Code Reviewer'],
+  ])
+
+  it('resolves agent mention to semantic marker', () => {
+    expect(resolveAgentMentions('[agent:reviewer] check this', agentNames))
+      .toBe('[Mentioned agent: Code Reviewer (id: reviewer)] check this')
+  })
+
+  it('falls back to id when not in map', () => {
+    expect(resolveAgentMentions('[agent:unknown-agent] check this', agentNames))
+      .toBe('[Mentioned agent: unknown-agent (id: unknown-agent)] check this')
+  })
+})
+
+// ============================================================================
+// stripAllMentions — now replaces with slug/id instead of empty string
 // ============================================================================
 
 describe('stripAllMentions - slug replacement', () => {
@@ -146,6 +166,11 @@ describe('stripAllMentions - slug replacement', () => {
   it('replaces source mention with slug', () => {
     expect(stripAllMentions('[source:github] check this'))
       .toBe('github check this')
+  })
+
+  it('replaces agent mention with id', () => {
+    expect(stripAllMentions('[agent:reviewer] check this'))
+      .toBe('reviewer check this')
   })
 
   it('replaces multiple mentions with slugs', () => {
