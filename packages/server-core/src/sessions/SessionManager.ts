@@ -5763,6 +5763,56 @@ export class SessionManager implements ISessionManager {
     return run
   }
 
+  private async postParentAgentRunMessage(parent: ManagedSession, run: AgentRun, content: string, phase: 'started' | 'finished'): Promise<void> {
+    const messageId = generateMessageId()
+    const timestamp = this.monotonic()
+    const turnId = `agent-run-${run.id}-${phase}`
+    const message: Message = {
+      id: messageId,
+      role: 'assistant',
+      content,
+      timestamp,
+      turnId,
+    }
+
+    parent.messages.push(message)
+    parent.lastMessageRole = 'assistant'
+    parent.lastMessageAt = timestamp
+
+    if (!this.isSessionBeingViewed(parent.id, parent.workspace.id) && !parent.hasUnread) {
+      parent.hasUnread = true
+      await updateSessionMetadata(parent.workspace.rootPath, parent.id, { hasUnread: true })
+      this.emitUnreadSummaryChanged()
+    }
+
+    this.persistSession(parent)
+    await this.flushSession(parent.id)
+    this.sendEvent({
+      type: 'text_complete',
+      sessionId: parent.id,
+      text: content,
+      turnId,
+      timestamp,
+      messageId,
+    }, parent.workspace.id)
+  }
+
+  private buildAgentRunStartedMessage(agentName: string, run: AgentRun): string {
+    return [
+      `**${agentName} started working on the delegated task.**`,
+      '',
+      'You can keep chatting in this session. I will post the agent result here when it finishes.',
+      '',
+      '---',
+      `AgentRun: ${run.id}`,
+      run.childSessionId ? `Child session: ${run.childSessionId}` : undefined,
+    ].filter(Boolean).join('\n')
+  }
+
+  private async notifyParentOfAgentRunStarted(parent: ManagedSession, agentName: string, run: AgentRun): Promise<void> {
+    await this.postParentAgentRunMessage(parent, run, this.buildAgentRunStartedMessage(agentName, run), 'started')
+  }
+
   private buildAgentRunCompletionMessage(run: AgentRun, assistantContent?: string): string {
     const parent = this.sessions.get(run.parentSessionId)
     const profile = parent ? readAgentProfileDetail(parent.workspace.rootPath, run.agentProfileId) : null
@@ -5792,37 +5842,7 @@ export class SessionManager implements ISessionManager {
     if (!parent) return
 
     const content = this.buildAgentRunCompletionMessage(run, assistantContent)
-    const messageId = generateMessageId()
-    const timestamp = this.monotonic()
-    const turnId = `agent-run-${run.id}`
-    const message: Message = {
-      id: messageId,
-      role: 'assistant',
-      content,
-      timestamp,
-      turnId,
-    }
-
-    parent.messages.push(message)
-    parent.lastMessageRole = 'assistant'
-    parent.lastMessageAt = timestamp
-
-    if (!this.isSessionBeingViewed(parent.id, parent.workspace.id) && !parent.hasUnread) {
-      parent.hasUnread = true
-      await updateSessionMetadata(parent.workspace.rootPath, parent.id, { hasUnread: true })
-      this.emitUnreadSummaryChanged()
-    }
-
-    this.persistSession(parent)
-    await this.flushSession(parent.id)
-    this.sendEvent({
-      type: 'text_complete',
-      sessionId: parent.id,
-      text: content,
-      turnId,
-      timestamp,
-      messageId,
-    }, parent.workspace.id)
+    await this.postParentAgentRunMessage(parent, run, content, 'finished')
   }
 
   private async updateAgentRunForChildSession(childSessionId: string, status: AgentRunStatus, failureReason?: string): Promise<void> {
@@ -5914,6 +5934,8 @@ export class SessionManager implements ISessionManager {
           childSessionId: session.id,
           triggerSummary: delegatedPrompt,
         })
+
+        await this.notifyParentOfAgentRunStarted(parent, profile.name, run)
 
         this.sendEvent({ type: 'session_created', sessionId: session.id }, workspaceId)
 
