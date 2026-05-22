@@ -2301,15 +2301,15 @@ function AppShellContent({
     result.push({ id: 'nav:flagged', type: 'nav', action: handleFlaggedClick })
     result.push({ id: 'nav:archived', type: 'nav', action: handleArchivedClick })
 
-    // 3. Plugins, Sources, Skills, Automations, Settings
-    result.push({ id: 'nav:plugins', type: 'nav', action: handlePluginsClick })
+    // 3. Agents, Plugins, Sources, Skills, Automations, Settings
     result.push({ id: 'nav:agents', type: 'nav', action: handleAgentsClick })
-    result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
-    result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
-    result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
+    result.push({ id: 'nav:plugins', type: 'nav', action: handlePluginsClick })
     if (tapdPluginInstalled) {
       result.push({ id: 'nav:plugins:tapd', type: 'nav', action: () => navigate(routes.view.plugins('tapd', 'board')) })
     }
+    result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
+    result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
+    result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
     result.push({ id: 'nav:settings', type: 'nav', action: () => handleSettingsClick() })
     result.push({ id: 'nav:whats-new', type: 'nav', action: handleWhatsNewClick })
 
@@ -2917,6 +2917,15 @@ function AppShellContent({
                     },
                     // --- Separator ---
                     { id: "separator:chats-sources", type: "separator" },
+                    // --- Agents ---
+                    {
+                      id: "nav:agents",
+                      title: "Agents",
+                      label: String(MOCK_AGENT_PROFILES.length),
+                      icon: Bot,
+                      variant: isAgentsNavigation(navState) ? "default" : "ghost",
+                      onClick: handleAgentsClick,
+                    },
                     // --- Plugins ---
                     {
                       id: "nav:plugins",
@@ -2938,14 +2947,6 @@ function AppShellContent({
                           onClick: () => navigate(routes.view.plugins('tapd', 'board')),
                         },
                       ] : [],
-                    },
-                    {
-                      id: "nav:agents",
-                      title: "Agents",
-                      label: String(MOCK_AGENT_PROFILES.length),
-                      icon: Bot,
-                      variant: isAgentsNavigation(navState) ? "default" : "ghost",
-                      onClick: handleAgentsClick,
                     },
                     // --- Sources & Skills Section ---
                     {

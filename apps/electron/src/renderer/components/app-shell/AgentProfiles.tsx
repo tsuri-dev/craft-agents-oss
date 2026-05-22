@@ -1661,6 +1661,7 @@ function AgentSourcesTab({
   const appShell = useOptionalAppShellContext()
   const [localSources, setLocalSources] = React.useState<LoadedSource[]>([])
   const [draftSourceSlugs, setDraftSourceSlugs] = React.useState<string[]>(profile.sourceSlugs)
+  const [sourceQuery, setSourceQuery] = React.useState('')
   const [savingSlug, setSavingSlug] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const profileSourceSlugKey = profile.sourceSlugs.join('\u0000')
@@ -1701,11 +1702,29 @@ function AgentSourcesTab({
     return map
   }, [workspaceSources])
 
+  const normalizedSourceQuery = sourceQuery.trim().toLowerCase()
+  const filteredWorkspaceSources = React.useMemo(() => {
+    if (!normalizedSourceQuery) return workspaceSources
+    return workspaceSources.filter(source => {
+      const fields = [
+        source.config.name,
+        source.config.slug,
+        source.config.provider,
+        source.config.tagline ?? '',
+      ]
+      return fields.some(field => field.toLowerCase().includes(normalizedSourceQuery))
+    })
+  }, [workspaceSources, normalizedSourceQuery])
+
   const assignedSourceSet = React.useMemo(() => new Set(draftSourceSlugs), [draftSourceSlugs])
   const missingSourceSlugs = React.useMemo(
     () => draftSourceSlugs.filter(slug => !sourceBySlug.has(slug)),
     [draftSourceSlugs, sourceBySlug],
   )
+  const filteredMissingSourceSlugs = React.useMemo(() => {
+    if (!normalizedSourceQuery) return missingSourceSlugs
+    return missingSourceSlugs.filter(slug => slug.toLowerCase().includes(normalizedSourceQuery))
+  }, [missingSourceSlugs, normalizedSourceQuery])
 
   const persistSourceSlugs = React.useCallback(async (nextSlugs: string[], savingTarget: string) => {
     if (savingSlug) return
@@ -1767,92 +1786,116 @@ function AgentSourcesTab({
 
       {error && <p className="text-xs text-destructive">{error}</p>}
 
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border bg-background">
-        <div className="flex h-10 items-center justify-between border-b border-border bg-muted/20 px-3">
-          <span className="text-xs font-medium text-muted-foreground">Workspace sources</span>
-          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">{draftSourceSlugs.length} enabled</span>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-background">
+        <div className="shrink-0 border-b border-border bg-background px-3 py-2">
+          <div className="flex items-center gap-3">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                aria-label="Filter sources by name"
+                value={sourceQuery}
+                onChange={event => setSourceQuery(event.target.value)}
+                placeholder="Filter sources by name…"
+                className="h-8 pl-8 text-sm"
+              />
+            </div>
+            <span className="hidden shrink-0 font-mono text-xs tabular-nums text-muted-foreground/70 sm:inline">
+              {filteredWorkspaceSources.length} of {workspaceSources.length}
+            </span>
+            <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground/70">{draftSourceSlugs.length} enabled</span>
+          </div>
         </div>
 
-        {workspaceSources.length === 0 ? (
-          <div className="flex min-h-[260px] flex-col items-center justify-center px-6 py-12 text-center">
-            <DatabaseZap className="h-8 w-8 text-muted-foreground/40" />
-            <p className="mt-3 text-sm text-muted-foreground">No sources configured</p>
-            <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
-              Add workspace sources first, then attach the ones this agent should use.
-            </p>
-            <Button size="sm" className="mt-3 gap-1.5" onClick={() => openSourceConfig()}>
-              <Plus className="h-3 w-3" />
-              Add source
-            </Button>
-          </div>
-        ) : (
-          <ul className="divide-y divide-border">
-            {workspaceSources.map(source => {
-              const slug = source.config.slug
-              const enabledForAgent = assignedSourceSet.has(slug)
-              const status = getAgentSourceStatusPresentation(source)
-              const isSaving = savingSlug === slug
-              return (
-                <li key={slug} className="flex items-center gap-3 px-3 py-3">
-                  <SourceAvatar source={source} size="md" showStatus />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-sm font-medium">{source.config.name}</span>
-                      <AgentSmallToken>{source.config.type}</AgentSmallToken>
-                      {!source.config.enabled && <AgentSmallToken>disabled</AgentSmallToken>}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {workspaceSources.length === 0 ? (
+            <div className="flex min-h-[260px] flex-col items-center justify-center px-6 py-12 text-center">
+              <DatabaseZap className="h-8 w-8 text-muted-foreground/40" />
+              <p className="mt-3 text-sm text-muted-foreground">No sources configured</p>
+              <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
+                Add workspace sources first, then attach the ones this agent should use.
+              </p>
+              <Button size="sm" className="mt-3 gap-1.5" onClick={() => openSourceConfig()}>
+                <Plus className="h-3 w-3" />
+                Add source
+              </Button>
+            </div>
+          ) : filteredWorkspaceSources.length === 0 && filteredMissingSourceSlugs.length === 0 ? (
+            <div className="flex min-h-[220px] flex-col items-center justify-center px-6 py-12 text-center">
+              <Search className="h-8 w-8 text-muted-foreground/40" />
+              <p className="mt-3 text-sm text-muted-foreground">No sources match this filter</p>
+              <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
+                Try a different source name, slug, or provider.
+              </p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-border">
+              {filteredWorkspaceSources.map(source => {
+                const slug = source.config.slug
+                const enabledForAgent = assignedSourceSet.has(slug)
+                const status = getAgentSourceStatusPresentation(source)
+                const isSaving = savingSlug === slug
+                return (
+                  <li key={slug} className="flex items-center gap-3 px-3 py-3">
+                    <SourceAvatar source={source} size="md" showStatus />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-sm font-medium">{source.config.name}</span>
+                        <AgentSmallToken>{source.config.type}</AgentSmallToken>
+                        {!source.config.enabled && <AgentSmallToken>disabled</AgentSmallToken>}
+                      </div>
+                      <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {source.config.tagline || source.config.provider || slug}
+                      </div>
                     </div>
-                    <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {source.config.tagline || source.config.provider || slug}
+                    <span className={cn('hidden shrink-0 text-xs md:inline', status.className)}>{status.label}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 shrink-0 text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => openSourceConfig(slug)}
+                    >
+                      Configure
+                    </Button>
+                    <div className="flex w-12 shrink-0 justify-end">
+                      {isSaving ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      ) : (
+                        <Switch
+                          checked={enabledForAgent}
+                          onCheckedChange={checked => toggleSource(slug, checked)}
+                          aria-label={`${enabledForAgent ? 'Disable' : 'Enable'} ${source.config.name} for agent`}
+                          disabled={savingSlug !== null}
+                        />
+                      )}
                     </div>
+                  </li>
+                )
+              })}
+              {filteredMissingSourceSlugs.map(slug => (
+                <li key={slug} className="flex items-center gap-3 bg-warning/5 px-3 py-3">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-warning/10 text-warning">
+                    <CircleX className="h-4 w-4" />
                   </div>
-                  <span className={cn('hidden shrink-0 text-xs md:inline', status.className)}>{status.label}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{slug}</div>
+                    <div className="truncate text-xs text-muted-foreground">Saved on this profile, but this source no longer exists in the workspace.</div>
+                  </div>
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-8 shrink-0 text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() => openSourceConfig(slug)}
+                    className="h-8 text-xs text-muted-foreground hover:text-destructive"
+                    onClick={() => toggleSource(slug, false)}
+                    disabled={savingSlug !== null}
                   >
-                    Configure
+                    Remove
                   </Button>
-                  <div className="flex w-12 shrink-0 justify-end">
-                    {isSaving ? (
-                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                    ) : (
-                      <Switch
-                        checked={enabledForAgent}
-                        onCheckedChange={checked => toggleSource(slug, checked)}
-                        aria-label={`${enabledForAgent ? 'Disable' : 'Enable'} ${source.config.name} for agent`}
-                        disabled={savingSlug !== null}
-                      />
-                    )}
-                  </div>
                 </li>
-              )
-            })}
-            {missingSourceSlugs.map(slug => (
-              <li key={slug} className="flex items-center gap-3 bg-warning/5 px-3 py-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-warning/10 text-warning">
-                  <CircleX className="h-4 w-4" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{slug}</div>
-                  <div className="truncate text-xs text-muted-foreground">Saved on this profile, but this source no longer exists in the workspace.</div>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 text-xs text-muted-foreground hover:text-destructive"
-                  onClick={() => toggleSource(slug, false)}
-                  disabled={savingSlug !== null}
-                >
-                  Remove
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     </div>
   )
