@@ -22,6 +22,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import {
+  Bot,
   Calendar,
   Check,
   Flag,
@@ -83,6 +84,8 @@ interface CompactSessionListFilterProps {
   chatGroupingMode: ChatGroupingMode
   setChatGroupingMode: (mode: ChatGroupingMode) => void
   isStateSubView: boolean
+  showAgentTasks: boolean
+  onShowAgentTasksChange: (show: boolean | ((prev: boolean) => boolean)) => void
   onOpenSearch: () => void
 }
 
@@ -98,6 +101,8 @@ export function CompactSessionListFilter({
   chatGroupingMode,
   setChatGroupingMode,
   isStateSubView,
+  showAgentTasks,
+  onShowAgentTasksChange,
   onOpenSearch,
 }: CompactSessionListFilterProps) {
   const { t } = useTranslation()
@@ -127,7 +132,7 @@ export function CompactSessionListFilter({
     }
   }, [isSearching, trimmedQuery, effectiveSessionStatuses, flatLabelItems])
 
-  const hasUserFilter = listFilter.size > 0 || labelFilter.size > 0
+  const hasUserFilter = listFilter.size > 0 || labelFilter.size > 0 || showAgentTasks
   const hasAnyFilter =
     hasUserFilter
     || pinnedFilters.pinnedFlagged
@@ -203,6 +208,7 @@ export function CompactSessionListFilter({
               onClick={() => {
                 setListFilter(new Map())
                 setLabelFilter(new Map())
+                onShowAgentTasksChange(false)
               }}
               className="text-xs text-muted-foreground hover:text-foreground"
             >
@@ -241,6 +247,17 @@ export function CompactSessionListFilter({
               effectiveSessionStatuses={effectiveSessionStatuses}
               labelConfigs={labelConfigs}
             />
+          )}
+
+          {!isSearching && (
+            <Section title="Visibility">
+              <FilterRow
+                icon={<Bot className="h-4 w-4" />}
+                label="Show agent tasks"
+                radioSelected={showAgentTasks}
+                onTap={() => onShowAgentTasksChange(prev => !prev)}
+              />
+            </Section>
           )}
 
           {results.states.length > 0 && (

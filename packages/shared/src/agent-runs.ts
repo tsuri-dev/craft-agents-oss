@@ -2,6 +2,17 @@ export type AgentRunStatus = 'queued' | 'running' | 'stopping' | 'completed' | '
 
 export type AgentRunTriggerType = 'mention' | 'follow-up' | 'manual' | 'automation' | 'tapd'
 
+export const AGENT_TASK_LABEL_ID = 'agent-task'
+
+export function hasAgentTaskLabel(labels?: readonly string[]): boolean {
+  return labels?.some(label => label === AGENT_TASK_LABEL_ID || label.startsWith(`${AGENT_TASK_LABEL_ID}::`)) ?? false
+}
+
+export function withAgentTaskLabel(labels?: readonly string[]): string[] {
+  const existing = labels ? [...labels] : []
+  return hasAgentTaskLabel(existing) ? existing : [...existing, AGENT_TASK_LABEL_ID]
+}
+
 export interface AgentRun {
   id: string
   agentProfileId: string

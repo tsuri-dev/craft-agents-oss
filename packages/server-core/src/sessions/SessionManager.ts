@@ -80,6 +80,7 @@ import { collectDirectoryFiles, restoreFiles, type BundleFile } from '@craft-age
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SessionUsageEntry, type UsageStats, type UsageStatsRange, type UsageTotals, type RequirementBinding, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
+import { withAgentTaskLabel } from '@craft-agent/shared/agent-runs'
 import type { AgentRun, AgentRunStatus, AgentRunTriggerType } from '@craft-agent/shared/agent-runs'
 import type { AgentProfileDetail } from '@craft-agent/shared/agent-profiles'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@craft-agent/core/types'
@@ -6028,7 +6029,7 @@ export class SessionManager implements ISessionManager {
           permissionMode: this.resolveAgentProfileChildPermissionMode(parent, profile),
           enabledSourceSlugs: profile.sourceSlugs,
           workingDirectory: parent.workingDirectory,
-          labels: parent.labels,
+          labels: withAgentTaskLabel(parent.labels),
         })
 
         const run = await this.createAgentRunManifest({

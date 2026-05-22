@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { AGENT_TASK_LABEL_ID } from '@craft-agent/shared/agent-runs'
 import { SessionManager, createManagedSession } from './SessionManager.ts'
 
 function tempWorkspace(): string {
@@ -90,7 +91,7 @@ describe('@agent mention AgentRun manifests', () => {
     writeProfile('orion')
     const parent = addManagedSession('parent-1', true, 'allow-all')
     const childIds: string[] = []
-    const childCreateOptions: Array<{ permissionMode?: string; enabledSourceSlugs?: string[] }> = []
+    const childCreateOptions: Array<{ permissionMode?: string; enabledSourceSlugs?: string[]; labels?: string[] }> = []
     const userMessageEvents: Array<{ agentDelegated?: boolean; status?: string }> = []
     const textCompleteEvents: Array<{ text?: string; sessionId?: string; messageId?: string; agentRun?: unknown }> = []
     const originalSendMessage = sm.sendMessage.bind(sm)
@@ -103,8 +104,8 @@ describe('@agent mention AgentRun manifests', () => {
       if (args[0] === 'child-1') return
       return originalSendMessage(...args)
     }
-    ;(sm as unknown as { createSession: (workspaceId: string, options?: { name?: string; permissionMode?: string; llmConnection?: string; model?: string; thinkingLevel?: string; enabledSourceSlugs?: string[] }) => Promise<{ id: string }> }).createSession = async (_workspaceId, options) => {
-      childCreateOptions.push({ permissionMode: options?.permissionMode, enabledSourceSlugs: options?.enabledSourceSlugs })
+    ;(sm as unknown as { createSession: (workspaceId: string, options?: { name?: string; permissionMode?: string; llmConnection?: string; model?: string; thinkingLevel?: string; enabledSourceSlugs?: string[]; labels?: string[] }) => Promise<{ id: string }> }).createSession = async (_workspaceId, options) => {
+      childCreateOptions.push({ permissionMode: options?.permissionMode, enabledSourceSlugs: options?.enabledSourceSlugs, labels: options?.labels })
       const childId = `child-${childIds.length + 1}`
       childIds.push(childId)
       const child = createManagedSession(
@@ -116,6 +117,7 @@ describe('@agent mention AgentRun manifests', () => {
           model: options?.model,
           thinkingLevel: options?.thinkingLevel as never,
           enabledSourceSlugs: options?.enabledSourceSlugs,
+          labels: options?.labels,
         },
         workspace() as never,
         { messagesLoaded: true },
@@ -132,6 +134,7 @@ describe('@agent mention AgentRun manifests', () => {
     expect(childCreateOptions[0]).toMatchObject({
       permissionMode: 'allow-all',
       enabledSourceSlugs: ['test-source'],
+      labels: [AGENT_TASK_LABEL_ID],
     })
     expect(userMessageEvents[0]).toMatchObject({ status: 'accepted', agentDelegated: true })
 

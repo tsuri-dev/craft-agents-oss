@@ -49,6 +49,7 @@ import {
 } from '../../shared/route-parser'
 import { routes, type Route, type ViewRoute } from '../../shared/routes'
 import { parsePermissionMode } from '@craft-agent/shared/agent/mode-types'
+import { hasAgentTaskLabel } from '@craft-agent/shared/agent-runs'
 import { NAVIGATE_EVENT, type NavigateOptions } from '../lib/navigate'
 import { normalizePanelRouteForReconcile } from './navigation-reconcile'
 import { buildSemanticHistoryKey, canRunInitialRestore } from './navigation-history'
@@ -533,9 +534,12 @@ export function NavigationProvider({
   // Always excludes hidden sessions - they should never appear in navigation
   const filterSessionsByFilter = useCallback(
     (filter: SessionFilter): SessionMeta[] => {
-      // First filter out hidden sessions - they should never appear in any view
+      // First filter out hidden sessions - they should never appear in any view.
+      // Agent child sessions are a system artifact; keep them out of the normal
+      // navigator unless the "Show agent tasks" toggle is enabled.
+      const showAgentTasks = storage.get<boolean>(storage.KEYS.showAgentTasks, false)
       const visibleSessions = sessionMetas.filter(
-        s => !s.hidden && (!workspaceId || s.workspaceId === workspaceId)
+        s => !s.hidden && (!workspaceId || s.workspaceId === workspaceId) && (showAgentTasks || !hasAgentTaskLabel(s.labels))
       )
 
       return visibleSessions.filter((session) => {

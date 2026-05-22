@@ -169,6 +169,7 @@ import {
 import { hasOpenOverlay } from "@/lib/overlay-detection"
 import { clearSourceIconCaches } from "@/lib/icon-cache"
 import { dispatchFocusInputEvent } from "./input/focus-input-events"
+import { hasAgentTaskLabel } from "@craft-agent/shared/agent-runs"
 import { RPC_CHANNELS } from "@craft-agent/shared/protocol"
 
 /**
@@ -1456,6 +1457,14 @@ function AppShellContent({
   // For remote workspaces, sessions have the remote workspace ID (not the local one),
   // so we match against both the local and remote workspace IDs.
   const remoteWorkspaceId = activeWorkspace?.remoteServer?.remoteWorkspaceId
+  const [showAgentTasks, setShowAgentTasks] = React.useState<boolean>(() =>
+    storage.get<boolean>(storage.KEYS.showAgentTasks, false)
+  )
+
+  useEffect(() => {
+    storage.set(storage.KEYS.showAgentTasks, showAgentTasks)
+  }, [showAgentTasks])
+
   const workspaceSessionMetas = useMemo(() => {
     const metas = Array.from(sessionMetaMap.values())
     if (!activeWorkspaceId) return metas.filter(s => !s.hidden)
@@ -1464,10 +1473,16 @@ function AppShellContent({
     )
   }, [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId])
 
+  const navigatorSessionMetas = useMemo(() => {
+    return showAgentTasks
+      ? workspaceSessionMetas
+      : workspaceSessionMetas.filter(s => !hasAgentTaskLabel(s.labels))
+  }, [workspaceSessionMetas, showAgentTasks])
+
   // Active sessions exclude archived - use this for all counts and filters except archived view
   const activeSessionMetas = useMemo(() => {
-    return workspaceSessionMetas.filter(s => !s.isArchived)
-  }, [workspaceSessionMetas])
+    return navigatorSessionMetas.filter(s => !s.isArchived)
+  }, [navigatorSessionMetas])
 
   const projectFilterOptions = useMemo(
     () => buildSessionProjectFilterOptions(activeSessionMetas),
@@ -1669,7 +1684,7 @@ function AppShellContent({
   // Count sessions by todo state (scoped to workspace)
   const isMetaDone = (s: SessionMeta) => s.sessionStatus === 'done' || s.sessionStatus === 'cancelled'
   const flaggedCount = activeSessionMetas.filter(s => s.isFlagged).length
-  const archivedCount = workspaceSessionMetas.filter(s => s.isArchived).length
+  const archivedCount = navigatorSessionMetas.filter(s => s.isArchived).length
 
   // Compute session counts per label (cumulative: parent includes descendants).
   // Flatten the tree for iteration, use the tree for descendant lookups.
@@ -1762,7 +1777,7 @@ function AppShellContent({
         break
       case 'archived':
         // Archived view shows only archived sessions
-        result = workspaceSessionMetas.filter(s => s.isArchived)
+        result = navigatorSessionMetas.filter(s => s.isArchived)
         break
       case 'state':
         // Filter by specific todo state (excludes archived)
@@ -1845,7 +1860,7 @@ function AppShellContent({
     result = filterSessionsByGroupFilter(result, groupFilter)
 
     return result
-  }, [workspaceSessionMetas, activeSessionMetas, sessionFilter, listFilter, labelFilter, projectFilter, groupFilter, labelConfigs])
+  }, [navigatorSessionMetas, activeSessionMetas, sessionFilter, listFilter, labelFilter, projectFilter, groupFilter, labelConfigs])
 
   // Derive "pinned" (non-removable) filters from the current sessionFilter path.
   // These represent filters that are implicit in the current deeplink/route and
@@ -2445,6 +2460,7 @@ function AppShellContent({
 
 
   const hasSessionSecondaryFilters = listFilter.size > 0 || labelFilter.size > 0 || projectFilter.size > 0 || groupFilter.size > 0
+  const hasSessionFilterButtonState = hasSessionSecondaryFilters || showAgentTasks
 
   const activeStandaloneProjectId = React.useMemo(() => {
     if (sessionFilter?.kind !== 'allSessions') return null
@@ -2781,7 +2797,7 @@ function AppShellContent({
                     {
                       id: "nav:allSessions",
                       title: t("sidebar.allSessions"),
-                      label: String(workspaceSessionMetas.length),
+                      label: String(navigatorSessionMetas.length),
                       icon: Inbox,
                       variant: sessionFilter?.kind === 'allSessions' && !hasSessionSecondaryFilters ? "default" : "ghost",
                       onClick: handleAllSessionsClick,
@@ -3158,6 +3174,8 @@ function AppShellContent({
                         chatGroupingMode={chatGroupingMode}
                         setChatGroupingMode={setChatGroupingMode}
                         isStateSubView={isStateSubView}
+                        showAgentTasks={showAgentTasks}
+                        onShowAgentTasksChange={setShowAgentTasks}
                         onOpenSearch={() => setSearchActive(true)}
                       />
                     ) : (
@@ -3165,8 +3183,8 @@ function AppShellContent({
                       <DropdownMenuTrigger asChild>
                         <HeaderIconButton
                           icon={<ListFilter className="h-4 w-4" />}
-                          className={(listFilter.size > 0 || labelFilter.size > 0 || projectFilter.size > 0 || groupFilter.size > 0) ? "bg-accent/5 text-accent rounded-[8px] shadow-tinted" : "rounded-[8px]"}
-                          style={(listFilter.size > 0 || labelFilter.size > 0 || projectFilter.size > 0 || groupFilter.size > 0) ? { '--shadow-color': 'var(--accent-rgb)' } as React.CSSProperties : undefined}
+                          className={hasSessionFilterButtonState ? "bg-accent/5 text-accent rounded-[8px] shadow-tinted" : "rounded-[8px]"}
+                          style={hasSessionFilterButtonState ? { '--shadow-color': 'var(--accent-rgb)' } as React.CSSProperties : undefined}
                         />
                       </DropdownMenuTrigger>
                       <StyledDropdownMenuContent
@@ -3193,7 +3211,7 @@ function AppShellContent({
                         {/* Header with title and clear button (only clears user-added filters, never pinned) */}
                         <div className="flex items-center justify-between px-2 py-1.5">
                           <span className="text-xs font-medium text-muted-foreground">{t("sidebar.filterChats")}</span>
-                          {(listFilter.size > 0 || labelFilter.size > 0 || projectFilter.size > 0 || groupFilter.size > 0) && (
+                          {hasSessionFilterButtonState && (
                             <button
                               onClick={(e) => {
                                 e.preventDefault()
@@ -3201,6 +3219,7 @@ function AppShellContent({
                                 setLabelFilter(new Map())
                                 setProjectFilter(new Map())
                                 setGroupFilter(new Map())
+                                setShowAgentTasks(false)
                               }}
                               className="text-xs text-muted-foreground hover:text-foreground"
                             >
@@ -3302,6 +3321,19 @@ function AppShellContent({
                             />
                           </div>
                         </div>
+
+                        {!filterDropdownQuery.trim() && (
+                          <>
+                            <StyledDropdownMenuItem onClick={() => setShowAgentTasks(prev => !prev)}>
+                              <FilterMenuRow
+                                icon={<Bot className="h-3.5 w-3.5" />}
+                                label="Show agent tasks"
+                                accessory={showAgentTasks ? <Check className="h-3 w-3 text-muted-foreground" /> : undefined}
+                              />
+                            </StyledDropdownMenuItem>
+                            <StyledDropdownMenuSeparator />
+                          </>
+                        )}
 
                         {/* ── Conditional body: hierarchical (no query) vs flat filtered list (has query) ── */}
                         {filterDropdownQuery.trim() === '' ? (
@@ -4231,7 +4263,7 @@ function AppShellContent({
                 {/* Key on sidebarMode forces full remount when switching views, skipping animations */}
                 <SessionList
                   key={sessionFilter?.kind}
-                  items={searchActive ? workspaceSessionMetas : filteredSessionMetas}
+                  items={searchActive ? navigatorSessionMetas : filteredSessionMetas}
                   onDelete={handleDeleteSession}
                   onFlag={onFlagSession}
                   onUnflag={onUnflagSession}
