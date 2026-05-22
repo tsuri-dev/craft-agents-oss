@@ -15,7 +15,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **Agent mentions in chat input** — Restored `@agent` autocomplete in the chat composer by loading Agent Profiles into the mention menu, rendering agent inline badges, preserving `[agent:id]` badges in sent messages, and delegating Agent Profile mentions into independent child sessions so they do not queue or block the parent chat.
+- **Agent mentions in chat input** — Restored `@agent` autocomplete in the chat composer by loading Agent Profiles into the mention menu, rendering agent inline badges, preserving `[agent:id]` badges in sent messages, and delegating Agent Profile mentions into independent child sessions so they do not queue or block the parent chat. Delegated child sessions now create real AgentRun manifests with transcript logs, surface in the Agent Activity tab, provide a View all runs entry, and can be cancelled from Activity.
 - **Agent Profile source saving** — Registered Agent Profile RPC channels in the workspace routing table so enabling sources on an Agent Profile saves through `agentProfiles:update` instead of failing with a missing-handler error.
 - **Working directory VS Code action** — Restored the small “Open in VS Code” button next to the chat input’s Working Directory badge so the selected folder can be opened directly in VS Code again.
 - **TAPD plugin theming** — Updated TAPD requirement details to use Craft Agent theme tokens so the plugin follows the app’s dark mode instead of forcing light surfaces.

@@ -48,10 +48,10 @@ import { cn } from '@/lib/utils'
 import { getModelDisplayName } from '@config/models'
 import { DEFAULT_THINKING_LEVEL, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import {
-  AGENT_RUN_MOCK_NOW,
   getActiveAgentRuns,
   getRecentFinishedAgentRuns,
   getRunDurationMs,
+  listAgentRuns,
   summarizeAgentRunsLast30Days,
   type AgentRun,
   type AgentRunBucket,
@@ -1374,35 +1374,66 @@ function AgentOverviewPaneMock({
 
 function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
   const appShell = useOptionalAppShellContext()
-  const [workspaceRuns, setWorkspaceRuns] = React.useState<AgentRun[] | null>(null)
+  const [workspaceRuns, setWorkspaceRuns] = React.useState<AgentRun[]>([])
+  const [isLoadingRuns, setIsLoadingRuns] = React.useState(false)
+  const [isAllRunsOpen, setIsAllRunsOpen] = React.useState(false)
+  const [cancellingRunId, setCancellingRunId] = React.useState<string | null>(null)
 
-  React.useEffect(() => {
-    let cancelled = false
+  const loadRuns = React.useCallback(async () => {
     const workspaceId = appShell?.activeWorkspaceId
     if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.listAgentRuns) {
-      setWorkspaceRuns(null)
+      setWorkspaceRuns([])
       return
     }
 
-    window.electronAPI.listAgentRuns(workspaceId, { agentProfileId: agent.id })
-      .then(runs => {
-        if (!cancelled) setWorkspaceRuns(runs.length > 0 ? runs : null)
-      })
-      .catch(() => {
-        if (!cancelled) setWorkspaceRuns(null)
-      })
-
-    return () => { cancelled = true }
+    setIsLoadingRuns(true)
+    try {
+      const runs = await window.electronAPI.listAgentRuns(workspaceId, { agentProfileId: agent.id })
+      setWorkspaceRuns(runs)
+    } catch {
+      setWorkspaceRuns([])
+    } finally {
+      setIsLoadingRuns(false)
+    }
   }, [agent.id, appShell?.activeWorkspaceId])
 
-  const runSource = workspaceRuns ?? undefined
+  React.useEffect(() => {
+    void loadRuns()
+  }, [loadRuns])
+
+  const runSource = workspaceRuns
+  const allRuns = React.useMemo(() => listAgentRuns(agent.id, runSource), [agent.id, runSource])
   const activeRuns = React.useMemo(() => getActiveAgentRuns(agent.id, runSource), [agent.id, runSource])
   const recentRuns = React.useMemo(() => getRecentFinishedAgentRuns(agent.id, 10, runSource), [agent.id, runSource])
   const summary = React.useMemo(
-    () => summarizeAgentRunsLast30Days(agent.id, runSource, AGENT_RUN_MOCK_NOW),
+    () => summarizeAgentRunsLast30Days(agent.id, runSource, Date.now()),
     [agent.id, runSource],
   )
   const avgDuration = summary.avgDurationMs > 0 ? formatDurationMs(summary.avgDurationMs) : '—'
+
+  React.useEffect(() => {
+    if (activeRuns.length === 0) return
+    const interval = window.setInterval(() => { void loadRuns() }, 2500)
+    return () => window.clearInterval(interval)
+  }, [activeRuns.length, loadRuns])
+
+  const handleCancelRun = React.useCallback(async (run: AgentRun) => {
+    if (!run.childSessionId || typeof window === 'undefined' || !window.electronAPI?.cancelProcessing) return
+    setCancellingRunId(run.id)
+    try {
+      await window.electronAPI.cancelProcessing(run.childSessionId)
+      await loadRuns()
+    } finally {
+      setCancellingRunId(null)
+    }
+  }, [loadRuns])
+
+  const handleOpenLog = React.useCallback((run: AgentRun) => {
+    if (!run.transcriptPath) return
+    appShell?.onOpenFile?.(run.transcriptPath)
+  }, [appShell])
+
+  const canOpenFile = !!appShell?.onOpenFile
 
   return (
     <div className="flex flex-col gap-4 p-6">
@@ -1411,10 +1442,21 @@ function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
         subtitle={activeRuns.length === 0 ? 'No active work' : `${activeRuns.length} active run${activeRuns.length === 1 ? '' : 's'}`}
       >
         {activeRuns.length === 0 ? (
-          <p className="text-xs italic text-muted-foreground/60">This agent isn&apos;t running anything right now.</p>
+          <p className="text-xs italic text-muted-foreground/60">
+            {isLoadingRuns ? 'Loading activity…' : 'This agent isn\'t running anything right now.'}
+          </p>
         ) : (
           <div className="space-y-1.5">
-            {activeRuns.map(run => <ActiveAgentRunRow key={run.id} run={run} />)}
+            {activeRuns.map(run => (
+              <ActiveAgentRunRow
+                key={run.id}
+                run={run}
+                onCancel={handleCancelRun}
+                onOpenLog={handleOpenLog}
+                canOpenLog={canOpenFile && !!run.transcriptPath}
+                cancelling={cancellingRunId === run.id}
+              />
+            ))}
           </div>
         )}
       </AgentActivitySection>
@@ -1438,38 +1480,65 @@ function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
         </div>
       </AgentActivitySection>
 
-      <AgentActivitySection title="Recent work" subtitle={`${recentRuns.length} latest`}>
+      <AgentActivitySection
+        title="Recent work"
+        subtitle={`${recentRuns.length} latest · ${allRuns.length} total`}
+        action={allRuns.length > 0 ? (
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setIsAllRunsOpen(true)}>
+            View all
+          </Button>
+        ) : null}
+      >
         {recentRuns.length === 0 ? (
           <p className="text-xs italic text-muted-foreground/60">This agent hasn&apos;t finished any runs yet.</p>
         ) : (
           <div className="space-y-1.5">
-            {recentRuns.map(run => <RecentAgentRunRow key={run.id} run={run} />)}
+            {recentRuns.map(run => (
+              <RecentAgentRunRow
+                key={run.id}
+                run={run}
+                onOpenLog={handleOpenLog}
+                canOpenLog={canOpenFile && !!run.transcriptPath}
+              />
+            ))}
           </div>
         )}
       </AgentActivitySection>
+
+      <AgentRunsHistoryDialog
+        open={isAllRunsOpen}
+        onOpenChange={setIsAllRunsOpen}
+        runs={allRuns}
+        onOpenLog={handleOpenLog}
+        canOpenFile={canOpenFile}
+      />
     </div>
   )
 }
 
-function AgentActivitySection({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
+function AgentActivitySection({ title, subtitle, action, children }: { title: string; subtitle: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-3 rounded-lg border border-border bg-background p-5">
-      <div className="flex items-baseline gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
-        <span className="text-[11px] text-muted-foreground/70">{subtitle}</span>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-baseline gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
+          <span className="text-[11px] text-muted-foreground/70">{subtitle}</span>
+        </div>
+        {action}
       </div>
       {children}
     </section>
   )
 }
 
-function ActiveAgentRunRow({ run }: { run: AgentRun }) {
+function ActiveAgentRunRow({ run, onCancel, onOpenLog, canOpenLog, cancelling }: { run: AgentRun; onCancel: (run: AgentRun) => void; onOpenLog: (run: AgentRun) => void; canOpenLog: boolean; cancelling: boolean }) {
+  const isStopping = run.status === 'stopping' || cancelling
   return (
     <div className="group flex items-center gap-3 rounded-md border border-info/30 bg-info/5 px-3 py-2.5">
       <Activity className="h-4 w-4 shrink-0 animate-pulse text-info" />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-info">{run.status}</span>
+          <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-info">{isStopping ? 'stopping' : run.status}</span>
           <span className="truncate text-sm">{run.triggerSummary}</span>
         </div>
         <AgentRunMeta run={run} active />
@@ -1477,13 +1546,19 @@ function ActiveAgentRunRow({ run }: { run: AgentRun }) {
       <div className="hidden shrink-0 items-center gap-2 text-xs text-muted-foreground sm:flex">
         <span>{run.toolCount ?? 0} tools</span>
         <Sep />
-        <span>{formatDurationMs(getRunDurationMs(run, AGENT_RUN_MOCK_NOW))}</span>
+        <span>{formatDurationMs(getRunDurationMs(run))}</span>
       </div>
+      <AgentRunActions run={run} onOpenLog={onOpenLog} canOpenLog={canOpenLog} />
+      {run.childSessionId && (
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" disabled={isStopping} onClick={() => onCancel(run)} title="Cancel run">
+          {isStopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+        </Button>
+      )}
     </div>
   )
 }
 
-function RecentAgentRunRow({ run }: { run: AgentRun }) {
+function RecentAgentRunRow({ run, onOpenLog, canOpenLog }: { run: AgentRun; onOpenLog: (run: AgentRun) => void; canOpenLog: boolean }) {
   const status = getRunStatusPresentation(run.status)
   const Icon = status.icon
   return (
@@ -1501,6 +1576,71 @@ function RecentAgentRunRow({ run }: { run: AgentRun }) {
         <Sep />
         <span>{formatDurationMs(getRunDurationMs(run))}</span>
       </div>
+      <AgentRunActions run={run} onOpenLog={onOpenLog} canOpenLog={canOpenLog} />
+    </div>
+  )
+}
+
+function AgentRunActions({ run, onOpenLog, canOpenLog }: { run: AgentRun; onOpenLog: (run: AgentRun) => void; canOpenLog: boolean }) {
+  if (!run.transcriptPath) return null
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 shrink-0 px-2 text-[11px] text-muted-foreground"
+      disabled={!canOpenLog}
+      onClick={() => onOpenLog(run)}
+      title={canOpenLog ? 'Open run log' : run.transcriptPath}
+    >
+      <FileText className="mr-1 h-3.5 w-3.5" />
+      Log
+    </Button>
+  )
+}
+
+function AgentRunsHistoryDialog({ open, onOpenChange, runs, onOpenLog, canOpenFile }: { open: boolean; onOpenChange: (open: boolean) => void; runs: AgentRun[]; onOpenLog: (run: AgentRun) => void; canOpenFile: boolean }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[78vh] max-w-3xl overflow-hidden p-0">
+        <DialogHeader className="border-b border-border px-5 py-4">
+          <DialogTitle>All agent runs</DialogTitle>
+          <DialogDescription>{runs.length} run{runs.length === 1 ? '' : 's'} found for this agent.</DialogDescription>
+        </DialogHeader>
+        <ScrollArea className="max-h-[56vh]">
+          <div className="space-y-1 p-3">
+            {runs.length === 0 ? (
+              <p className="px-2 py-8 text-center text-xs italic text-muted-foreground/60">No runs yet.</p>
+            ) : (
+              runs.map(run => <AgentRunHistoryRow key={run.id} run={run} onOpenLog={onOpenLog} canOpenLog={canOpenFile && !!run.transcriptPath} />)
+            )}
+          </div>
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function AgentRunHistoryRow({ run, onOpenLog, canOpenLog }: { run: AgentRun; onOpenLog: (run: AgentRun) => void; canOpenLog: boolean }) {
+  const status = getRunStatusPresentation(run.status)
+  const Icon = status.icon
+  return (
+    <div className="flex items-center gap-3 rounded-md border border-border px-3 py-2.5">
+      <Icon className={cn('h-4 w-4 shrink-0', status.className)} />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm">{run.triggerSummary}</span>
+          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">{run.status}</span>
+        </div>
+        <AgentRunMeta run={run} active={run.status === 'queued' || run.status === 'running' || run.status === 'stopping'} />
+      </div>
+      <div className="hidden shrink-0 items-center gap-2 text-xs text-muted-foreground sm:flex">
+        <span>{run.toolCount ?? 0} tools</span>
+        <Sep />
+        <span>{run.artifactCount ?? 0} artifacts</span>
+        <Sep />
+        <span>{formatDurationMs(getRunDurationMs(run))}</span>
+      </div>
+      <AgentRunActions run={run} onOpenLog={onOpenLog} canOpenLog={canOpenLog} />
     </div>
   )
 }
@@ -2379,7 +2519,7 @@ function formatDurationMs(ms: number): string {
 function formatRelativeTime(value: string): string {
   const timestamp = Date.parse(value)
   if (!Number.isFinite(timestamp)) return '—'
-  const deltaMs = Math.max(0, AGENT_RUN_MOCK_NOW - timestamp)
+  const deltaMs = Math.max(0, Date.now() - timestamp)
   if (deltaMs < 60_000) return 'just now'
   if (deltaMs < 60 * 60_000) return `${Math.floor(deltaMs / 60_000)}m ago`
   if (deltaMs < 24 * 60 * 60_000) return `${Math.floor(deltaMs / (60 * 60_000))}h ago`
