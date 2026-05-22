@@ -127,6 +127,8 @@ type EnvEntry = {
 
 let nextEnvEntryId = 0
 
+const DIALOG_SELECT_CONTENT_STYLE: React.CSSProperties = { zIndex: 'calc(var(--z-modal, 200) + 1)' }
+
 export const MOCK_AGENT_PROFILES: AgentProfileMock[] = [
   {
     id: 'qqnews-implementation',
@@ -492,7 +494,7 @@ function CreateAgentProfileDialog({
                 <SelectTrigger className="mt-1">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent style={DIALOG_SELECT_CONTENT_STYLE}>
                   {connectionOptions.map(option => (
                     <SelectItem key={option.slug} value={option.slug}>{option.name}</SelectItem>
                   ))}
@@ -505,7 +507,7 @@ function CreateAgentProfileDialog({
                 <SelectTrigger className="mt-1">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent style={DIALOG_SELECT_CONTENT_STYLE}>
                   {THINKING_OPTIONS.map(option => (
                     <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                   ))}
@@ -520,7 +522,7 @@ function CreateAgentProfileDialog({
               <SelectTrigger className="mt-1">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent style={DIALOG_SELECT_CONTENT_STYLE}>
                 {modelOptions.map(modelId => (
                   <SelectItem key={modelId} value={modelId}>{modelId === 'connection-default' ? 'Connection default' : getModelDisplayName(modelId)}</SelectItem>
                 ))}
@@ -837,21 +839,35 @@ function useAgentProfileDetail(agent: AgentProfileMock) {
     return () => { cancelled = true }
   }, [agent.id, appShell?.activeWorkspaceId, fallback])
 
+  const profileIdRef = React.useRef(fallback.id)
+  React.useEffect(() => {
+    profileIdRef.current = profile.id
+  }, [profile.id])
+
   const updateProfile = React.useCallback(async (input: AgentProfileUpdateInput) => {
     const workspaceId = appShell?.activeWorkspaceId
-    setProfile(current => ({
-      ...current,
-      ...input.profile,
-      instructions: input.instructions ?? current.instructions,
-      environmentVariables: input.profile?.environmentVariables ?? current.environmentVariables,
-      updatedAt: Date.now(),
-    }))
+    const targetProfileId = profileIdRef.current || agent.id
+    const previousProfile = profile
 
-    if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.updateAgentProfile) return
+    if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.updateAgentProfile) {
+      setProfile(current => ({
+        ...current,
+        ...input.profile,
+        instructions: input.instructions ?? current.instructions,
+        environmentVariables: input.profile?.environmentVariables ?? current.environmentVariables,
+        updatedAt: Date.now(),
+      }))
+      return
+    }
 
-    const updated = await window.electronAPI.updateAgentProfile(workspaceId, agent.id, input)
-    setProfile(updated)
-  }, [agent.id, appShell?.activeWorkspaceId])
+    try {
+      const updated = await window.electronAPI.updateAgentProfile(workspaceId, targetProfileId, input)
+      setProfile(updated)
+    } catch (err) {
+      setProfile(previousProfile)
+      throw err
+    }
+  }, [agent.id, appShell?.activeWorkspaceId, profile])
 
   const saveInstructions = React.useCallback(async (instructions: string) => {
     await updateProfile({ instructions })
@@ -1688,8 +1704,8 @@ function AgentEnvironmentTab({ profile, onSave }: { profile: AgentProfileDetail;
     setError(null)
     try {
       await onSave(currentEnvMap)
-    } catch {
-      setError('Failed to save environment variables')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save environment variables')
     } finally {
       setSaving(false)
     }

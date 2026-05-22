@@ -47,6 +47,7 @@ import type {
 } from '../../../shared/types'
 
 const TAPD_CACHE_STORAGE_VERSION = 1
+const DIALOG_SELECT_CONTENT_STYLE: React.CSSProperties = { zIndex: 'calc(var(--z-modal, 200) + 1)' }
 const TAPD_DETAIL_THEME = {
   page: 'bg-background text-foreground',
   panel: 'bg-background',
@@ -1361,7 +1362,7 @@ function RequirementCreateSessionDialog({
               <SelectTrigger className="mt-1">
                 <SelectValue placeholder="No agent" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent style={DIALOG_SELECT_CONTENT_STYLE}>
                 <SelectItem value="none">No agent</SelectItem>
                 {agents.map(agent => (
                   <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
