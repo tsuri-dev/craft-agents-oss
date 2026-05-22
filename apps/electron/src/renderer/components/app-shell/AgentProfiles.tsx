@@ -22,6 +22,7 @@ import {
   Loader2,
   Monitor,
   MoreHorizontal,
+  Pencil,
   Plus,
   Save,
   Search,
@@ -31,10 +32,12 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { TiptapMarkdownEditor } from '@craft-agent/ui'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { deriveConnectionStatus } from '@/components/ui/source-status-indicator'
@@ -941,8 +944,14 @@ function AgentDetailInspectorCard({
           <Icon className="h-7 w-7 text-muted-foreground" />
         </div>
         <div className="flex flex-col gap-1">
-          <h2 className="text-base font-semibold leading-tight">{profile.name}</h2>
-          <p className="text-xs leading-relaxed text-muted-foreground">{profile.description || 'No description'}</p>
+          <AgentNameEditor
+            name={profile.name}
+            onSave={name => onProfileUpdate({ name })}
+          />
+          <AgentDescriptionEditor
+            description={profile.description ?? ''}
+            onSave={description => onProfileUpdate({ description })}
+          />
         </div>
         <AvailabilityBadge availability={agent.availability}>{capitalize(agent.availability)}</AvailabilityBadge>
       </div>
@@ -1013,6 +1022,187 @@ function AgentDetailInspectorCard({
         )}
       </div>
     </aside>
+  )
+}
+
+function AgentNameEditor({ name, onSave }: { name: string; onSave: (name: string) => Promise<void> }) {
+  const [open, setOpen] = React.useState(false)
+  const [draft, setDraft] = React.useState(name)
+  const [saving, setSaving] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const trimmedDraft = draft.trim()
+  const isDirty = trimmedDraft !== name
+
+  React.useEffect(() => {
+    if (open) {
+      setDraft(name)
+      setError(null)
+    }
+  }, [name, open])
+
+  const handleSave = async () => {
+    if (saving) return
+    if (!trimmedDraft) {
+      setError('Agent name is required')
+      return
+    }
+    if (!isDirty) {
+      setOpen(false)
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+    try {
+      await onSave(trimmedDraft)
+      setOpen(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rename agent')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <div className="group/name flex min-w-0 items-center gap-1">
+        <h2 className="min-w-0 truncate text-base font-semibold leading-tight">{name}</h2>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label="Rename agent"
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-70 transition-colors hover:bg-accent hover:text-foreground group-hover/name:opacity-100"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        </PopoverTrigger>
+      </div>
+      <PopoverContent align="start" side="bottom" sideOffset={6} className="w-80 p-4">
+        <form
+          className="space-y-3"
+          onSubmit={event => {
+            event.preventDefault()
+            void handleSave()
+          }}
+        >
+          <div>
+            <div className="text-sm font-medium text-foreground">Rename agent</div>
+            <Input
+              autoFocus
+              value={draft}
+              onChange={event => {
+                setDraft(event.target.value)
+                setError(null)
+              }}
+              className="mt-3 h-9"
+              placeholder="Agent name"
+              maxLength={80}
+            />
+          </div>
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          <div className="flex items-center justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={saving}>Cancel</Button>
+            <Button type="submit" size="sm" disabled={saving || !trimmedDraft || !isDirty}>
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              Save
+            </Button>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+const AGENT_DESCRIPTION_MAX_LENGTH = 255
+
+function AgentDescriptionEditor({
+  description,
+  onSave,
+}: {
+  description: string
+  onSave: (description: string) => Promise<void>
+}) {
+  const [open, setOpen] = React.useState(false)
+  const [draft, setDraft] = React.useState(description)
+  const [saving, setSaving] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const trimmedDraft = draft.trim()
+  const isDirty = trimmedDraft !== description
+
+  React.useEffect(() => {
+    if (open) {
+      setDraft(description)
+      setError(null)
+    }
+  }, [description, open])
+
+  const handleSave = async () => {
+    if (saving || !isDirty) return
+    setSaving(true)
+    setError(null)
+    try {
+      await onSave(trimmedDraft)
+      setOpen(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save description')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="group/desc relative -mx-2 rounded-md px-2 py-1 pr-9 transition-colors hover:bg-muted/40">
+        <p className={cn('text-xs leading-relaxed', description ? 'text-muted-foreground' : 'italic text-muted-foreground/60')}>
+          {description || 'No description'}
+        </p>
+        <button
+          type="button"
+          aria-label="Edit description"
+          onClick={() => setOpen(true)}
+          className="absolute right-1 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-70 transition-colors hover:bg-accent hover:text-foreground group-hover/desc:opacity-100"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Edit description</DialogTitle>
+            <DialogDescription>
+              Keep it short and clear so teammates know when to use this agent.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Textarea
+              autoFocus
+              value={draft}
+              onChange={event => {
+                setDraft(event.target.value.slice(0, AGENT_DESCRIPTION_MAX_LENGTH))
+                setError(null)
+              }}
+              className="min-h-40 resize-none text-sm leading-6"
+              placeholder="Describe what this agent helps with…"
+              maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
+            />
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-destructive">{error}</span>
+              <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+                {draft.length} / {AGENT_DESCRIPTION_MAX_LENGTH}
+              </span>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={saving}>Cancel</Button>
+            <Button type="button" onClick={() => void handleSave()} disabled={saving || !isDirty}>
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
