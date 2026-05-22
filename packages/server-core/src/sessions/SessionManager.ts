@@ -81,6 +81,7 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SessionUsageEntry, type UsageStats, type UsageStatsRange, type UsageTotals, type RequirementBinding, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import type { AgentRun, AgentRunStatus } from '@craft-agent/shared/agent-runs'
+import type { AgentProfileDetail } from '@craft-agent/shared/agent-profiles'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
@@ -5699,6 +5700,16 @@ export class SessionManager implements ISessionManager {
     return `<agent-profile name="${profileName.replace(/"/g, '&quot;')}">\n${trimmedInstructions}\n</agent-profile>\n\n${userPrompt}`
   }
 
+  private resolveAgentProfileChildPermissionMode(parent: ManagedSession, profile: AgentProfileDetail): PermissionMode {
+    // Profiles created from the original MVP default to `ask`. When the parent
+    // turn is explicitly in Execute/allow-all, keep delegated agents equally
+    // capable instead of unexpectedly downgrading them and blocking MCP calls.
+    if (parent.permissionMode === 'allow-all' && profile.permissionMode === 'ask') {
+      return parent.permissionMode
+    }
+    return profile.permissionMode ?? parent.permissionMode
+  }
+
   private async writeAgentRunManifest(run: AgentRun): Promise<void> {
     if (!run.manifestPath) return
     await mkdir(dirname(run.manifestPath), { recursive: true })
@@ -5824,7 +5835,7 @@ export class SessionManager implements ISessionManager {
           llmConnection: profile.connectionSlug ?? parent.llmConnection,
           model: profile.model ?? parent.model,
           thinkingLevel: profile.thinkingLevel ?? parent.thinkingLevel,
-          permissionMode: profile.permissionMode ?? parent.permissionMode,
+          permissionMode: this.resolveAgentProfileChildPermissionMode(parent, profile),
           enabledSourceSlugs: profile.sourceSlugs,
           workingDirectory: parent.workingDirectory,
           labels: parent.labels,
@@ -5927,6 +5938,7 @@ export class SessionManager implements ISessionManager {
         message: userMessage,
         status: 'accepted',
         optimisticMessageId: options?.optimisticMessageId,
+        agentDelegated: true,
       }, managed.workspace.id)
 
       // Fire and forget: Agent Profile mentions run in independent child
