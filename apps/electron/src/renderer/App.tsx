@@ -1288,7 +1288,7 @@ export default function App() {
         ? extractBadges(message, skills, sources, windowWorkspaceSlug, agentProfiles)
         : []
       const badges: ContentBadge[] = [...(externalBadges || []), ...mentionBadges]
-      const delegatesToAgentProfile = badges.some(badge => badge.type === 'agent')
+      const delegatesToAgentProfile = badges.some(badge => badge.type === 'agent') || /\[agent:[\w-]+\]/.test(message)
 
       // Step 4.1: Detect SDK slash commands (e.g., /compact) and create command badges
       // This makes /compact render as an inline badge rather than raw text

@@ -401,6 +401,8 @@ export interface UserMessageEvent {
   status: 'accepted' | 'queued' | 'processing'
   /** Frontend's optimistic message ID for reliable matching */
   optimisticMessageId?: string
+  /** True when this parent message delegated work to child Agent Profile sessions. */
+  agentDelegated?: boolean
 }
 
 /**

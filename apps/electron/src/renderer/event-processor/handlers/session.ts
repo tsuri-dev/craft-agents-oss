@@ -45,6 +45,11 @@ import type {
 import type { Message } from '../../../shared/types'
 import { generateMessageId, appendMessage } from '../helpers'
 
+function isAgentProfileDelegationMessage(message: Message): boolean {
+  if (/\[agent:[\w-]+\]/.test(message.content)) return true
+  return (message.badges ?? []).some(badge => badge.type === 'agent')
+}
+
 /**
  * Handle complete - agent loop finished
  *
@@ -517,6 +522,7 @@ export function handleUserMessage(
 ): ProcessResult {
   const { session, streaming } = state
   const { message, status } = event
+  const delegatesToAgentProfile = event.agentDelegated === true || isAgentProfileDelegationMessage(message)
 
   // Find existing message by ID match (backend ID, optimistic ID, or content+timestamp fallback)
   const existingIndex = session.messages.findIndex(m =>
@@ -578,8 +584,11 @@ export function handleUserMessage(
         messages: updatedMessages,
         lastMessageAt: Date.now(),
         lastMessageRole: 'user',  // Clear plan badge when user responds
-        // Set isProcessing when message is accepted/processing (enables multi-window sync)
-        isProcessing: status === 'accepted' || status === 'processing',
+        // Set isProcessing when a normal message is accepted/processing.
+        // Agent Profile mentions are delegated to child sessions, so the parent
+        // must stay in its current processing state instead of showing a stuck
+        // spinner or queueing follow-up messages.
+        isProcessing: delegatesToAgentProfile ? session.isProcessing : status === 'accepted' || status === 'processing',
       },
       streaming,
     },

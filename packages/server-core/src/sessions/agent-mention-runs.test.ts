@@ -62,9 +62,9 @@ describe('@agent mention AgentRun manifests', () => {
     writeFileSync(join(dir, 'instructions.md'), 'Follow the test instructions.')
   }
 
-  function addManagedSession(id: string, isProcessing = false) {
+  function addManagedSession(id: string, isProcessing = false, permissionMode: 'ask' | 'allow-all' | 'safe' = 'ask') {
     const managed = createManagedSession(
-      { id, name: id, permissionMode: 'ask' },
+      { id, name: id, permissionMode },
       workspace() as never,
       { messagesLoaded: true, isProcessing },
     )
@@ -74,16 +74,21 @@ describe('@agent mention AgentRun manifests', () => {
 
   it('persists a real AgentRun manifest and log without queueing the parent', async () => {
     writeProfile('orion')
-    const parent = addManagedSession('parent-1', true)
+    const parent = addManagedSession('parent-1', true, 'allow-all')
     const childIds: string[] = []
+    const childCreateOptions: Array<{ permissionMode?: string; enabledSourceSlugs?: string[] }> = []
+    const userMessageEvents: Array<{ agentDelegated?: boolean; status?: string }> = []
     const originalSendMessage = sm.sendMessage.bind(sm)
 
-    ;(sm as unknown as { sendEvent: () => void }).sendEvent = () => {}
+    ;(sm as unknown as { sendEvent: (event: { type?: string; agentDelegated?: boolean; status?: string }) => void }).sendEvent = (event) => {
+      if (event.type === 'user_message') userMessageEvents.push(event)
+    }
     ;(sm as unknown as { sendMessage: (...args: Parameters<SessionManager['sendMessage']>) => Promise<void> }).sendMessage = async (...args) => {
       if (args[0] === 'child-1') return
       return originalSendMessage(...args)
     }
     ;(sm as unknown as { createSession: (workspaceId: string, options?: { name?: string; permissionMode?: string; llmConnection?: string; model?: string; thinkingLevel?: string; enabledSourceSlugs?: string[] }) => Promise<{ id: string }> }).createSession = async (_workspaceId, options) => {
+      childCreateOptions.push({ permissionMode: options?.permissionMode, enabledSourceSlugs: options?.enabledSourceSlugs })
       const childId = `child-${childIds.length + 1}`
       childIds.push(childId)
       const child = createManagedSession(
@@ -108,6 +113,11 @@ describe('@agent mention AgentRun manifests', () => {
     expect(parent.messageQueue).toHaveLength(0)
     expect(parent.isProcessing).toBe(true)
     expect(childIds).toEqual(['child-1'])
+    expect(childCreateOptions[0]).toMatchObject({
+      permissionMode: 'allow-all',
+      enabledSourceSlugs: ['test-source'],
+    })
+    expect(userMessageEvents[0]).toMatchObject({ status: 'accepted', agentDelegated: true })
 
     const agentRunsDir = join(tmpRoot, 'sessions', 'parent-1', 'agent-runs')
     const manifestPath = await waitForManifest(agentRunsDir)
