@@ -6342,6 +6342,7 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Agent child session ${reply.childSessionId} not found`)
     }
     await this.ensureMessagesLoaded(child)
+    this.syncAgentChildWorkingDirectory(child, parent.workingDirectory)
 
     const userMessage: Message = {
       id: generateMessageId(),

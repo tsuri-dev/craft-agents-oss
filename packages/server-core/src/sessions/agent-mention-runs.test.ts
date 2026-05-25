@@ -242,8 +242,12 @@ describe('@agent mention AgentRun manifests', () => {
 
   it('routes parent replies to the same child session without blocking the parent', async () => {
     writeProfile('orion')
-    const parent = addManagedSession('parent-1', true, 'allow-all')
-    const child = addManagedSession('child-1', false, 'allow-all')
+    const parentWorkingDirectory = join(tmpRoot, 'parent-follow-up-repo')
+    const childWorkingDirectory = join(tmpRoot, 'old-child-repo')
+    mkdirSync(parentWorkingDirectory, { recursive: true })
+    mkdirSync(childWorkingDirectory, { recursive: true })
+    const parent = addManagedSession('parent-1', true, 'allow-all', parentWorkingDirectory)
+    const child = addManagedSession('child-1', false, 'allow-all', childWorkingDirectory)
     child.messages.push({
       id: 'old-child-answer',
       role: 'assistant',
@@ -314,8 +318,11 @@ describe('@agent mention AgentRun manifests', () => {
       triggerType: 'follow-up',
       triggerSummary: 'Can you refine that result?',
       status: 'running',
+      workingDirectory: parentWorkingDirectory,
     })
+    expect(child.workingDirectory).toBe(parentWorkingDirectory)
     expect(readFileSync(manifest.transcriptPath, 'utf-8')).toContain('agent_run_follow_up_requested')
+    expect(readFileSync(manifest.transcriptPath, 'utf-8')).toContain(parentWorkingDirectory)
 
     child.messages.push({
       id: 'child-follow-up-answer',
