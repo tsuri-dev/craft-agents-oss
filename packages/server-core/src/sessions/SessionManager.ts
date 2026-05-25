@@ -5695,11 +5695,33 @@ export class SessionManager implements ISessionManager {
     return stripped || 'Please handle the delegated request.'
   }
 
-  private buildAgentProfilePrompt(profileName: string, instructions: string | undefined, userPrompt: string): string {
+  private buildAgentProfilePrompt(
+    profileName: string,
+    instructions: string | undefined,
+    userPrompt: string,
+    context?: { parentSessionId: string; childSessionId: string; workingDirectory?: string },
+  ): string {
+    const parts: string[] = []
     const trimmedInstructions = instructions?.trim()
-    if (!trimmedInstructions) return userPrompt
+    if (trimmedInstructions) {
+      parts.push(`<agent-profile name="${profileName.replace(/"/g, '&quot;')}">\n${trimmedInstructions}\n</agent-profile>`)
+    }
 
-    return `<agent-profile name="${profileName.replace(/"/g, '&quot;')}">\n${trimmedInstructions}\n</agent-profile>\n\n${userPrompt}`
+    if (context) {
+      parts.push([
+        '<delegation_context>',
+        `Parent session: ${context.parentSessionId}`,
+        `Child session: ${context.childSessionId}`,
+        context.workingDirectory?.trim()
+          ? `Inherited working directory: ${context.workingDirectory.trim()}`
+          : 'Inherited working directory: session folder (no project working directory selected)',
+        'If the user asks whether this agent can access the current repository or working directory, verify from this child session (for example with pwd and git rev-parse --show-toplevel) instead of guessing.',
+        '</delegation_context>',
+      ].join('\n'))
+    }
+
+    parts.push(userPrompt)
+    return parts.join('\n\n')
   }
 
   private writeAgentProfileInstructionsFile(workspaceRootPath: string, sessionId: string, profile: AgentProfileDetail): string | undefined {
@@ -5742,6 +5764,7 @@ export class SessionManager implements ISessionManager {
     target?: AgentRun['target']
     agentProfileId: string
     childSessionId: string
+    workingDirectory?: string
     triggerSummary: string
     triggerType?: AgentRunTriggerType
   }): Promise<AgentRun> {
@@ -5760,6 +5783,7 @@ export class SessionManager implements ISessionManager {
       parentSessionId,
       ...(input.target ? { target: input.target } : input.parent ? { target: { type: 'session', sessionId: input.parent.id } as const } : {}),
       childSessionId: input.childSessionId,
+      workingDirectory: input.workingDirectory?.trim() || undefined,
       triggerType: input.triggerType ?? 'mention',
       triggerSummary: input.triggerSummary,
       status: 'running',
@@ -5780,6 +5804,7 @@ export class SessionManager implements ISessionManager {
       parentSessionId,
       target: run.target,
       childSessionId: input.childSessionId,
+      workingDirectory: run.workingDirectory,
       triggerType: run.triggerType,
       triggerSummary: input.triggerSummary,
     })
@@ -5844,6 +5869,7 @@ export class SessionManager implements ISessionManager {
       '---',
       `AgentRun: ${run.id}`,
       run.childSessionId ? `Child session: ${run.childSessionId}` : undefined,
+      run.workingDirectory ? `Working directory: ${run.workingDirectory}` : 'Working directory: session folder (no project working directory selected)',
     ].filter(Boolean).join('\n')
   }
 
@@ -6051,6 +6077,7 @@ export class SessionManager implements ISessionManager {
       target: { type: 'requirement', pluginId: input.pluginId, sourceItemId },
       agentProfileId: profile.id,
       childSessionId: session.id,
+      workingDirectory: session.workingDirectory,
       triggerSummary: input.prompt,
       triggerType: 'tapd',
     })
@@ -6109,6 +6136,7 @@ export class SessionManager implements ISessionManager {
       target: { type: 'requirement', pluginId: input.pluginId, sourceItemId },
       agentProfileId: profile.id,
       childSessionId: input.childSessionId,
+      workingDirectory: child.workingDirectory,
       triggerSummary: input.message,
       triggerType: 'follow-up',
     })
@@ -6199,6 +6227,7 @@ export class SessionManager implements ISessionManager {
       parent,
       agentProfileId: reply.agentProfileId,
       childSessionId: reply.childSessionId,
+      workingDirectory: child.workingDirectory,
       triggerSummary,
       triggerType: 'follow-up',
     })
@@ -6275,6 +6304,7 @@ export class SessionManager implements ISessionManager {
           parent,
           agentProfileId: profile.id,
           childSessionId: session.id,
+          workingDirectory: session.workingDirectory ?? parent.workingDirectory,
           triggerSummary: delegatedPrompt,
         })
 
@@ -6282,7 +6312,11 @@ export class SessionManager implements ISessionManager {
 
         this.sendEvent({ type: 'session_created', sessionId: session.id }, workspaceId)
 
-        const childPrompt = this.buildAgentProfilePrompt(profile.name, profile.instructions, delegatedPrompt)
+        const childPrompt = this.buildAgentProfilePrompt(profile.name, profile.instructions, delegatedPrompt, {
+          parentSessionId: parent.id,
+          childSessionId: session.id,
+          workingDirectory: session.workingDirectory ?? parent.workingDirectory,
+        })
         this.sendMessage(session.id, childPrompt, attachments, undefined, {
           skillSlugs: profile.skillSlugs.length > 0 ? profile.skillSlugs : undefined,
         }).then(() => {

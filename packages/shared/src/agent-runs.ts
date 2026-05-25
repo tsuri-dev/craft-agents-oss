@@ -24,6 +24,8 @@ export interface AgentRun {
   parentSessionId: string
   target?: AgentRunTarget
   childSessionId?: string
+  /** Effective project working directory inherited by the child agent session, when one is configured. */
+  workingDirectory?: string
   triggerType: AgentRunTriggerType
   triggerSummary: string
   status: AgentRunStatus

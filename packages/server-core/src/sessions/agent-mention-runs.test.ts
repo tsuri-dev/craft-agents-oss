@@ -77,11 +77,11 @@ describe('@agent mention AgentRun manifests', () => {
     writeFileSync(join(dir, 'instructions.md'), 'Follow the test instructions.')
   }
 
-  function addManagedSession(id: string, isProcessing = false, permissionMode: 'ask' | 'allow-all' | 'safe' = 'ask') {
+  function addManagedSession(id: string, isProcessing = false, permissionMode: 'ask' | 'allow-all' | 'safe' = 'ask', workingDirectory?: string) {
     const managed = createManagedSession(
-      { id, name: id, permissionMode },
+      { id, name: id, permissionMode, workingDirectory },
       workspace() as never,
-      { messagesLoaded: true, isProcessing },
+      { messagesLoaded: true, isProcessing, workingDirectory },
     )
     ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(id, managed)
     return managed
@@ -89,9 +89,12 @@ describe('@agent mention AgentRun manifests', () => {
 
   it('persists a real AgentRun manifest and log without queueing the parent', async () => {
     writeProfile('orion')
-    const parent = addManagedSession('parent-1', true, 'allow-all')
+    const parentWorkingDirectory = join(tmpRoot, 'repo')
+    mkdirSync(parentWorkingDirectory, { recursive: true })
+    const parent = addManagedSession('parent-1', true, 'allow-all', parentWorkingDirectory)
     const childIds: string[] = []
-    const childCreateOptions: Array<{ permissionMode?: string; enabledSourceSlugs?: string[]; labels?: string[] }> = []
+    const childPrompts: string[] = []
+    const childCreateOptions: Array<{ permissionMode?: string; enabledSourceSlugs?: string[]; labels?: string[]; workingDirectory?: string }> = []
     const userMessageEvents: Array<{ agentDelegated?: boolean; status?: string }> = []
     const textCompleteEvents: Array<{ text?: string; sessionId?: string; messageId?: string; agentRun?: unknown }> = []
     const originalSendMessage = sm.sendMessage.bind(sm)
@@ -101,11 +104,14 @@ describe('@agent mention AgentRun manifests', () => {
       if (event.type === 'text_complete') textCompleteEvents.push(event)
     }
     ;(sm as unknown as { sendMessage: (...args: Parameters<SessionManager['sendMessage']>) => Promise<void> }).sendMessage = async (...args) => {
-      if (args[0] === 'child-1') return
+      if (args[0] === 'child-1') {
+        childPrompts.push(args[1])
+        return
+      }
       return originalSendMessage(...args)
     }
-    ;(sm as unknown as { createSession: (workspaceId: string, options?: { name?: string; permissionMode?: string; llmConnection?: string; model?: string; thinkingLevel?: string; enabledSourceSlugs?: string[]; labels?: string[] }) => Promise<{ id: string }> }).createSession = async (_workspaceId, options) => {
-      childCreateOptions.push({ permissionMode: options?.permissionMode, enabledSourceSlugs: options?.enabledSourceSlugs, labels: options?.labels })
+    ;(sm as unknown as { createSession: (workspaceId: string, options?: { name?: string; permissionMode?: string; llmConnection?: string; model?: string; thinkingLevel?: string; enabledSourceSlugs?: string[]; labels?: string[]; workingDirectory?: string }) => Promise<{ id: string; workingDirectory?: string }> }).createSession = async (_workspaceId, options) => {
+      childCreateOptions.push({ permissionMode: options?.permissionMode, enabledSourceSlugs: options?.enabledSourceSlugs, labels: options?.labels, workingDirectory: options?.workingDirectory })
       const childId = `child-${childIds.length + 1}`
       childIds.push(childId)
       const child = createManagedSession(
@@ -118,12 +124,13 @@ describe('@agent mention AgentRun manifests', () => {
           thinkingLevel: options?.thinkingLevel as never,
           enabledSourceSlugs: options?.enabledSourceSlugs,
           labels: options?.labels,
+          workingDirectory: options?.workingDirectory,
         },
         workspace() as never,
-        { messagesLoaded: true },
+        { messagesLoaded: true, workingDirectory: options?.workingDirectory },
       )
       ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(childId, child)
-      return { id: childId }
+      return { id: childId, workingDirectory: options?.workingDirectory }
     }
 
     await sm.sendMessage('parent-1', '[agent:orion] Review the TAPD requirement')
@@ -135,6 +142,7 @@ describe('@agent mention AgentRun manifests', () => {
       permissionMode: 'ask',
       enabledSourceSlugs: ['test-source'],
       labels: [AGENT_TASK_LABEL_ID],
+      workingDirectory: parentWorkingDirectory,
     })
     expect(userMessageEvents[0]).toMatchObject({ status: 'accepted', agentDelegated: true })
 
@@ -142,6 +150,7 @@ describe('@agent mention AgentRun manifests', () => {
     expect(parent.messages.at(-1)?.role).toBe('assistant')
     expect(parent.messages.at(-1)?.content).toContain('Orion started working on the delegated task')
     expect(parent.messages.at(-1)?.content).toContain('Child session: child-1')
+    expect(parent.messages.at(-1)?.content).toContain(`Working directory: ${parentWorkingDirectory}`)
     expect(parent.messages.at(-1)?.agentRun).toMatchObject({
       agentProfileId: 'orion',
       parentSessionId: 'parent-1',
@@ -169,12 +178,16 @@ describe('@agent mention AgentRun manifests', () => {
       triggerSummary: 'Review the TAPD requirement',
       toolCount: 0,
       artifactCount: 0,
+      workingDirectory: parentWorkingDirectory,
     })
     expect(manifest.status).toBe('running')
     expect(manifest.manifestPath).toBe(manifestPath)
     expect(manifest.transcriptPath).toBe(transcriptPath)
     expect(existsSync(transcriptPath)).toBe(true)
     expect(readFileSync(transcriptPath, 'utf-8')).toContain('agent_run_started')
+    expect(readFileSync(transcriptPath, 'utf-8')).toContain(parentWorkingDirectory)
+    expect(childPrompts[0]).toContain(`Inherited working directory: ${parentWorkingDirectory}`)
+    expect(childPrompts[0]).toContain('verify from this child session')
 
     const child = (sm as unknown as { sessions: Map<string, any> }).sessions.get('child-1')
     child.messages.push({
