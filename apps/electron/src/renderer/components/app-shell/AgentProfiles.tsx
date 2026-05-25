@@ -48,6 +48,7 @@ import { agentProfilesAtom } from '@/atoms/agent-profiles'
 import { cn } from '@/lib/utils'
 import { getModelDisplayName } from '@config/models'
 import { DEFAULT_THINKING_LEVEL, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
+import type { PermissionMode } from '@craft-agent/shared/agent/mode-types'
 import {
   getActiveAgentRuns,
   getRecentFinishedAgentRuns,
@@ -114,6 +115,12 @@ const THINKING_OPTIONS: Array<{ value: ThinkingLevel; label: string }> = [
   { value: 'max', label: 'Max' },
 ]
 
+const EXECUTION_MODE_OPTIONS: Array<{ value: PermissionMode; label: string }> = [
+  { value: 'safe', label: 'Explore' },
+  { value: 'ask', label: 'Ask' },
+  { value: 'allow-all', label: 'Execute' },
+]
+
 const INSTRUCTIONS_PLACEHOLDER = `Define this agent's role, expertise, and working style.
 
 # Example
@@ -169,7 +176,7 @@ export const MOCK_AGENT_PROFILES: AgentProfileMock[] = [
     status: 'ready',
     model: 'Claude Sonnet',
     thinkingLevel: 'medium',
-    permissionMode: 'Safe',
+    permissionMode: 'Explore',
     skillSlugs: ['receiving-code-review', 'verification-before-completion'],
     sourceSlugs: [],
     connectionName: 'Claude Code',
@@ -239,7 +246,7 @@ function agentProfileToView(profile: AgentProfile, connectionOptions: AgentConne
     status: profile.status,
     model: profile.model ? getModelDisplayName(profile.model) : 'Connection default',
     thinkingLevel: profile.thinkingLevel,
-    permissionMode: profile.permissionMode === 'safe' ? 'Safe' : profile.permissionMode === 'allow-all' ? 'Execute' : 'Ask',
+    permissionMode: profile.permissionMode === 'safe' ? 'Explore' : profile.permissionMode === 'allow-all' ? 'Execute' : 'Ask',
     skillSlugs: [...profile.skillSlugs],
     sourceSlugs: [...profile.sourceSlugs],
     connectionName: connection?.name ?? profile.connectionSlug ?? base.connectionName,
@@ -431,6 +438,7 @@ function CreateAgentProfileDialog({
     : [selectedConnection.defaultModel ?? 'connection-default']
   const [model, setModel] = React.useState(modelOptions[0] ?? 'connection-default')
   const [thinkingLevel, setThinkingLevel] = React.useState<ThinkingLevel>('medium')
+  const [permissionMode, setPermissionMode] = React.useState<PermissionMode>('ask')
   const [creating, setCreating] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
@@ -459,7 +467,7 @@ function CreateAgentProfileDialog({
       connectionSlug,
       model: model === 'connection-default' ? undefined : model,
       thinkingLevel,
-      permissionMode: 'ask',
+      permissionMode,
       instructions: `You are ${trimmedName}. Describe your role, working style, and constraints here.`,
     }
 
@@ -538,18 +546,33 @@ function CreateAgentProfileDialog({
             </div>
           </div>
 
-          <div>
-            <label className="text-xs text-muted-foreground">Model</label>
-            <Select value={model} onValueChange={setModel}>
-              <SelectTrigger className="mt-1">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent style={DIALOG_SELECT_CONTENT_STYLE}>
-                {modelOptions.map(modelId => (
-                  <SelectItem key={modelId} value={modelId}>{modelId === 'connection-default' ? 'Connection default' : getModelDisplayName(modelId)}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground">Model</label>
+              <Select value={model} onValueChange={setModel}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent style={DIALOG_SELECT_CONTENT_STYLE}>
+                  {modelOptions.map(modelId => (
+                    <SelectItem key={modelId} value={modelId}>{modelId === 'connection-default' ? 'Connection default' : getModelDisplayName(modelId)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Mode</label>
+              <Select value={permissionMode} onValueChange={value => setPermissionMode(normalizeAgentPermissionMode(value))}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent style={DIALOG_SELECT_CONTENT_STYLE}>
+                  {EXECUTION_MODE_OPTIONS.map(option => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
@@ -826,7 +849,7 @@ function createFallbackProfileDetail(agent: AgentProfileMock): AgentProfileDetai
     connectionSlug: agent.connectionName.toLowerCase().replace(/\s+/g, '-'),
     model: agent.model,
     thinkingLevel: agent.thinkingLevel,
-    permissionMode: agent.permissionMode.toLowerCase() === 'safe' ? 'safe' : 'ask',
+    permissionMode: normalizeAgentPermissionMode(agent.permissionMode),
     skillSlugs: [...agent.skillSlugs],
     sourceSlugs: [...agent.sourceSlugs],
     environmentVariables: {},
@@ -938,12 +961,14 @@ function AgentDetailInspectorCard({
     : [selectedConnection.defaultModel ?? 'connection-default']
   const [model, setModel] = React.useState(() => profile.model ?? availableModels[0] ?? agent.model)
   const [thinking, setThinking] = React.useState<ThinkingLevel>(normalizeAgentThinking(profile.thinkingLevel))
+  const [permissionMode, setPermissionMode] = React.useState<PermissionMode>(normalizeAgentPermissionMode(profile.permissionMode))
 
   React.useEffect(() => {
     setConnectionSlug(profile.connectionSlug ?? defaultConnectionSlug)
     setModel(profile.model ?? availableModels[0] ?? agent.model)
     setThinking(normalizeAgentThinking(profile.thinkingLevel))
-  }, [profile.id, profile.connectionSlug, profile.model, profile.thinkingLevel, defaultConnectionSlug])
+    setPermissionMode(normalizeAgentPermissionMode(profile.permissionMode))
+  }, [profile.id, profile.connectionSlug, profile.model, profile.thinkingLevel, profile.permissionMode, defaultConnectionSlug])
 
   React.useEffect(() => {
     if (!connectionOptions.some(connection => connection.slug === connectionSlug)) {
@@ -1013,6 +1038,18 @@ function AgentDetailInspectorCard({
               void onProfileUpdate({ thinkingLevel: nextThinking })
             }}
             options={THINKING_OPTIONS}
+          />
+        </AgentPropRow>
+        <AgentPropRow label="Mode">
+          <AgentInspectorSelect
+            ariaLabel="Agent execution mode"
+            value={permissionMode}
+            onValueChange={value => {
+              const nextMode = normalizeAgentPermissionMode(value)
+              setPermissionMode(nextMode)
+              void onProfileUpdate({ permissionMode: nextMode })
+            }}
+            options={EXECUTION_MODE_OPTIONS}
           />
         </AgentPropRow>
         <AgentPropRow label="Visibility">Workspace</AgentPropRow>
@@ -1242,6 +1279,13 @@ function normalizeAgentThinking(value: string): ThinkingLevel {
   return THINKING_OPTIONS.some(option => option.value === value)
     ? value as ThinkingLevel
     : DEFAULT_THINKING_LEVEL
+}
+
+function normalizeAgentPermissionMode(value: string | undefined): PermissionMode {
+  const normalized = value?.trim().toLowerCase()
+  if (normalized === 'safe' || normalized === 'explore') return 'safe'
+  if (normalized === 'allow-all' || normalized === 'execute') return 'allow-all'
+  return 'ask'
 }
 
 function buildAgentConnectionOptions(connections?: LlmConnectionLike[] | null): AgentConnectionOption[] {

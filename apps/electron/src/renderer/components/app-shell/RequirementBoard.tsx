@@ -15,7 +15,7 @@ import {
   Link2,
   Plus,
   RefreshCw,
-  Unlink2,
+  Square,
   Workflow,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -24,7 +24,9 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { DocumentFormattedMarkdownOverlay, Spinner } from '@craft-agent/ui'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
+import { WorkingDirectoryBadge } from './input/FreeFormInput'
 import { SessionFilesSection } from '../right-sidebar/SessionFilesSection'
 import { InfoPopoverShell, InfoPopoverTriggerButton } from './SessionInfoPopover'
 import { cn } from '@/lib/utils'
@@ -33,8 +35,24 @@ import { useNavigation } from '@/contexts/NavigationContext'
 import { addSessionAtom, sessionMetaMapAtom } from '@/atoms/sessions'
 import { sessionHasGroup } from '@/utils/session-group-filter'
 import { TAPD_PLUGIN_ID } from '@/utils/session-requirement-link'
+import {
+  defaultTapdGroupName,
+  emptyTapdRequirementCache,
+  buildTapdAgentInstructionPrompt,
+  readTapdRequirementCache,
+  readTapdRequirementWorkContext,
+  resolveDefaultTapdAgent,
+  suggestTapdGroupName,
+  upsertTapdCachedItem,
+  writeTapdRequirementCache,
+  writeTapdRequirementWorkContext,
+  type TapdRequirementCache,
+  type TapdRequirementWorkContext,
+} from '@/utils/tapd-requirement-helpers'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { formatLabelEntry } from '@craft-agent/shared/labels'
+import { hasAgentTaskLabel } from '@craft-agent/shared/agent-runs'
+import { formatTokenCount, getSessionUsageTotals } from '@/utils/session-usage'
 import type {
   ExternalRequirementItem,
   RequirementBinding,
@@ -44,10 +62,15 @@ import type {
   SessionFile,
   RequirementPluginDescriptor,
   AgentProfile,
+  AgentRun,
 } from '../../../shared/types'
 
-const TAPD_CACHE_STORAGE_VERSION = 1
 const DIALOG_SELECT_CONTENT_STYLE: React.CSSProperties = { zIndex: 'calc(var(--z-modal, 200) + 1)' }
+const ACTIVE_AGENT_RUN_STATUSES = new Set<AgentRun['status']>(['queued', 'running', 'stopping'])
+const TRIGGER_MASK_STYLE: React.CSSProperties = {
+  maskImage: 'linear-gradient(to right, black calc(100% - 12px), transparent)',
+  WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 12px), transparent)',
+}
 const TAPD_DETAIL_THEME = {
   page: 'bg-background text-foreground',
   panel: 'bg-background',
@@ -67,14 +90,6 @@ const TAPD_DETAIL_THEME = {
   success: 'text-success',
   orange: 'text-info',
 } as const
-
-interface RequirementBoardCache {
-  version: 1
-  itemsById: Record<string, ExternalRequirementItem>
-  listOrder: string[]
-  lastSyncedAt?: number
-  total?: number
-}
 
 interface ParsedTapdRequirementLink {
   workspaceId?: string
@@ -105,52 +120,11 @@ function parseTapdRequirementLink(value: string): ParsedTapdRequirementLink | nu
   return sourceItemId ? { ...(workspaceId ? { workspaceId } : {}), sourceItemId } : null
 }
 
-function getCacheStorageKey(workspaceId: string | null | undefined) {
-  return `requirement-board.${TAPD_PLUGIN_ID}.cache.${workspaceId ?? 'default'}.manual`
-}
-
-function emptyCache(): RequirementBoardCache {
-  return { version: TAPD_CACHE_STORAGE_VERSION, itemsById: {}, listOrder: [] }
-}
-
-function readCache(workspaceId: string | null | undefined): RequirementBoardCache {
-  try {
-    const raw = window.localStorage.getItem(getCacheStorageKey(workspaceId))
-    if (!raw) return emptyCache()
-    const parsed = JSON.parse(raw) as Partial<RequirementBoardCache>
-    return {
-      version: TAPD_CACHE_STORAGE_VERSION,
-      itemsById: parsed.itemsById ?? {},
-      listOrder: parsed.listOrder ?? [],
-      lastSyncedAt: parsed.lastSyncedAt,
-      total: parsed.total,
-    }
-  } catch {
-    return emptyCache()
-  }
-}
-
-function writeCache(workspaceId: string | null | undefined, cache: RequirementBoardCache) {
-  try {
-    window.localStorage.setItem(getCacheStorageKey(workspaceId), JSON.stringify(cache))
-  } catch {
-    // Cache is an optimization; ignore storage failures.
-  }
-}
-
-function upsertCachedItem(workspaceId: string | null | undefined, item: ExternalRequirementItem) {
-  const current = readCache(workspaceId)
-  const listOrder = current.listOrder.includes(item.sourceItemId) ? current.listOrder : [item.sourceItemId, ...current.listOrder]
-  const next: RequirementBoardCache = {
-    ...current,
-    total: undefined,
-    itemsById: { ...current.itemsById, [item.sourceItemId]: item },
-    listOrder,
-    lastSyncedAt: Date.now(),
-  }
-  writeCache(workspaceId, next)
-  return next
-}
+const emptyCache = emptyTapdRequirementCache
+const readCache = readTapdRequirementCache
+const writeCache = writeTapdRequirementCache
+const upsertCachedItem = upsertTapdCachedItem
+const defaultGroupName = defaultTapdGroupName
 
 function toDetailFilters(workspaceId: string): RequirementListFilters {
   return {
@@ -166,11 +140,6 @@ function getTapdWorkspaceIdFromItem(item?: ExternalRequirementItem | null) {
   if (sourceUrlMatch?.[1]) return sourceUrlMatch[1]
   if (item.project && /^\d+$/.test(item.project)) return item.project
   return undefined
-}
-
-function defaultGroupName(item: ExternalRequirementItem) {
-  const title = item.title.length > 80 ? `${item.title.slice(0, 77)}…` : item.title
-  return `[TAPD-${item.sourceItemId}] ${title}`
 }
 
 function statusTone(value?: string) {
@@ -194,7 +163,7 @@ function formatSyncTime(timestamp?: number) {
   return `Synced ${new Date(timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
 }
 
-function getCachedItems(cache: RequirementBoardCache): ExternalRequirementItem[] {
+function getCachedItems(cache: TapdRequirementCache): ExternalRequirementItem[] {
   return cache.listOrder.map(id => cache.itemsById[id]).filter(Boolean)
 }
 
@@ -263,7 +232,7 @@ export function RequirementBoard() {
   // remain visible even when the source is absent or disconnected in this workspace.
   const tapdInstalled = true
   const [plugins, setPlugins] = React.useState<RequirementPluginDescriptor[]>([])
-  const [cache, setCache] = React.useState<RequirementBoardCache>(() => readCache(activeWorkspaceId))
+  const [cache, setCache] = React.useState<TapdRequirementCache>(() => readCache(activeWorkspaceId))
   const [error, setError] = React.useState<string | null>(null)
   const [linkInput, setLinkInput] = React.useState('')
   const [linkError, setLinkError] = React.useState<string | null>(null)
@@ -304,7 +273,7 @@ export function RequirementBoard() {
           itemsById[item.sourceItemId] = item
           if (!listOrder.includes(item.sourceItemId)) listOrder.unshift(item.sourceItemId)
         }
-        const next: RequirementBoardCache = {
+        const next: TapdRequirementCache = {
           ...current,
           itemsById,
           listOrder,
@@ -340,10 +309,28 @@ export function RequirementBoard() {
     setLinkError(null)
     try {
       const result = await window.electronAPI.getRequirementItemDetail(activeWorkspaceId, TAPD_PLUGIN_ID, parsed.sourceItemId, toDetailFilters(parsed.workspaceId))
-      const nextCache = upsertCachedItem(activeWorkspaceId, result.item)
+      let item = result.item
+      let linkedGroupName = item.binding?.groupName
+
+      if (!item.binding) {
+        const groupName = suggestTapdGroupName(item)
+        const binding = await window.electronAPI.createRequirementGroupFromItem(activeWorkspaceId, {
+          pluginId: TAPD_PLUGIN_ID,
+          item,
+          groupName,
+        })
+        item = { ...item, binding }
+        linkedGroupName = binding.groupName
+      }
+
+      const nextCache = upsertCachedItem(activeWorkspaceId, item)
       setCache(nextCache)
       setLinkInput('')
-      toast.success('TAPD requirement saved locally')
+      if (linkedGroupName) {
+        toast.success('TAPD requirement saved and linked', { description: `Group: ${linkedGroupName}` })
+      } else {
+        toast.success('TAPD requirement saved locally')
+      }
     } catch (err) {
       setLinkError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -436,21 +423,65 @@ export function RequirementBoard() {
   )
 }
 
-function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
+function SidebarSectionHeader({
+  title,
+  open,
+  onOpenChange,
+  trailing,
+  className,
+}: {
+  title: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  trailing?: React.ReactNode
+  className?: string
+}) {
   return (
-    <section className={cn('space-y-2.5 border-t py-4 first:border-t-0 first:pt-0', TAPD_DETAIL_THEME.borderSubtle)}>
-      <h2 className={cn('text-[13px] font-semibold tracking-[-0.006em]', TAPD_DETAIL_THEME.title)}>{title}</h2>
-      {children}
-    </section>
+    <button
+      type="button"
+      className={cn(
+        'mb-2 flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors hover:bg-accent/70',
+        !open && 'text-muted-foreground hover:text-foreground',
+        className,
+      )}
+      onClick={() => onOpenChange(!open)}
+    >
+      {title}
+      <ChevronRight className={cn('h-3 w-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform', open && 'rotate-90')} />
+      {trailing}
+    </button>
   )
 }
 
-function PropertyRow({ label, value, emptyText }: { label: string; value?: React.ReactNode; emptyText?: string }) {
+function DetailSection({ title, open, onOpenChange, children }: { title: string; open: boolean; onOpenChange: (open: boolean) => void; children: React.ReactNode }) {
+  return (
+    <div>
+      <SidebarSectionHeader title={title} open={open} onOpenChange={onOpenChange} />
+      {open && (
+        <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PropertyRow({
+  label,
+  value,
+  emptyText,
+  interactive = true,
+}: {
+  label: string
+  value?: React.ReactNode
+  emptyText?: string
+  interactive?: boolean
+}) {
   const isEmpty = value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)
   return (
-    <div className="grid min-h-7 grid-cols-[92px_minmax(0,1fr)] items-center gap-3 py-1.5 text-[13px] leading-5">
-      <div className={TAPD_DETAIL_THEME.weak}>{label}</div>
-      <div className={cn('min-w-0', TAPD_DETAIL_THEME.secondary, isEmpty && TAPD_DETAIL_THEME.disabled)}>
+    <div className={cn('-mx-2 col-span-2 grid min-h-8 grid-cols-subgrid items-center rounded-md px-2', interactive && 'transition-colors hover:bg-accent/50')}>
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <div className={cn('flex min-w-0 items-center gap-1.5 truncate text-xs', isEmpty && 'text-muted-foreground/60')}>
         {isEmpty ? emptyText ?? 'Not set' : value}
       </div>
     </div>
@@ -458,7 +489,7 @@ function PropertyRow({ label, value, emptyText }: { label: string; value?: React
 }
 
 function InlineValue({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <span className={cn('block truncate', className)}>{children}</span>
+  return <span className={cn('block min-w-0 truncate', className)}>{children}</span>
 }
 
 function formatRequirementDate(value?: string) {
@@ -472,6 +503,325 @@ function formatRequirementDate(value?: string) {
 function OptionalPropertyRow({ label, value, emptyText }: { label: string; value?: React.ReactNode; emptyText?: string }) {
   if (value === null || value === undefined || value === '') return null
   return <PropertyRow label={label} value={value} emptyText={emptyText} />
+}
+
+function HubPropertyRow({
+  label,
+  children,
+  interactive = true,
+  align = 'center',
+  valueClassName,
+}: {
+  label: string
+  children: React.ReactNode
+  interactive?: boolean
+  align?: 'center' | 'start'
+  valueClassName?: string
+}) {
+  return (
+    <div className={cn(
+      '-mx-2 col-span-2 grid min-h-8 grid-cols-subgrid rounded-md px-2 text-xs',
+      align === 'start' ? 'items-start py-1.5' : 'items-center',
+      interactive && 'transition-colors hover:bg-accent/50',
+    )}>
+      <span className={cn('text-muted-foreground', align === 'start' && 'pt-1')}>{label}</span>
+      <div className={cn(
+        'min-w-0',
+        align === 'start' ? 'flex flex-col gap-1' : 'flex items-center gap-1.5 truncate',
+        valueClassName,
+      )}>{children}</div>
+    </div>
+  )
+}
+
+function RequirementSessionsSection({
+  open,
+  onOpenChange,
+  sessions,
+  hasBinding,
+  onCreateSession,
+  onNavigateSession,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  sessions: Array<{ id: string; name?: string | null }>
+  hasBinding: boolean
+  onCreateSession: () => void
+  onNavigateSession: (sessionId: string) => void
+}) {
+  return (
+    <div className="col-span-2 mt-1">
+      <div className="mb-2 flex items-center gap-1">
+        <SidebarSectionHeader
+          title="Sessions"
+          open={open}
+          onOpenChange={onOpenChange}
+          className="mb-0 min-w-0 flex-1"
+          trailing={<span className="ml-auto font-mono tabular-nums text-muted-foreground/70">{sessions.length}</span>}
+        />
+        {hasBinding && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 rounded px-1.5 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+            onClick={onCreateSession}
+            title="Create session"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            New
+          </Button>
+        )}
+      </div>
+      {open && (
+        <div className="max-h-[168px] space-y-0.5 overflow-y-auto pl-2 pr-1">
+          {!hasBinding ? (
+            <p className="px-1 py-1.5 text-xs text-muted-foreground/60">No group linked</p>
+          ) : sessions.length === 0 ? (
+            <p className="px-1 py-1.5 text-xs italic text-muted-foreground/60">No sessions yet. Create one to start a requirement chat.</p>
+          ) : sessions.map((session, index) => (
+            <button
+              key={session.id}
+              type="button"
+              className={cn('flex w-full items-center gap-1.5 rounded px-1 py-1.5 text-left text-xs transition-colors hover:bg-accent/40', index === 0 ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}
+              onClick={() => onNavigateSession(session.id)}
+              title={session.name || 'Untitled session'}
+            >
+              <span className="truncate">{session.name || 'Untitled session'}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TokenUsageSection({
+  open,
+  onOpenChange,
+  totals,
+  runsCount,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  totals: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number }
+  runsCount: number
+}) {
+  const totalTokens = totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheCreationTokens
+  return (
+    <div>
+      <SidebarSectionHeader
+        title="Token usage"
+        open={open}
+        onOpenChange={onOpenChange}
+        trailing={<span className="ml-auto font-mono tabular-nums text-muted-foreground/70">{formatTokenCount(totalTokens)}</span>}
+      />
+      {open && (
+        <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+          <PropertyRow label="Input" value={<InlineValue className="text-muted-foreground">{formatTokenCount(totals.inputTokens)}</InlineValue>} interactive={false} />
+          <PropertyRow label="Output" value={<InlineValue className="text-muted-foreground">{formatTokenCount(totals.outputTokens)}</InlineValue>} interactive={false} />
+          <PropertyRow label="Cache" value={<InlineValue className="text-muted-foreground">{formatTokenCount(totals.cacheReadTokens)} read / {formatTokenCount(totals.cacheCreationTokens)} write</InlineValue>} interactive={false} />
+          <PropertyRow label="Runs" value={<InlineValue className="text-muted-foreground">{runsCount}</InlineValue>} interactive={false} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function getRunTimestamp(run: AgentRun): number | undefined {
+  const parsed = Date.parse(run.completedAt ?? run.startedAt ?? run.createdAt)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function getRunTitle(run: AgentRun): string {
+  if (run.triggerType === 'tapd') return 'Initial run'
+  if (run.triggerType === 'follow-up') return 'Follow-up'
+  const firstLine = run.triggerSummary.split('\n').map(line => line.trim()).find(Boolean)
+  return firstLine ? firstLine.slice(0, 64) : 'Agent run'
+}
+
+function getRunStatusPresentation(status: AgentRun['status']): { label: string; tone: string } {
+  switch (status) {
+    case 'queued': return { label: 'Queued', tone: 'text-warning' }
+    case 'running': return { label: 'Working', tone: 'text-info' }
+    case 'stopping': return { label: 'Stopping', tone: 'text-info' }
+    case 'completed': return { label: 'Completed', tone: 'text-success' }
+    case 'failed': return { label: 'Failed', tone: 'text-destructive' }
+    case 'cancelled': return { label: 'Cancelled', tone: 'text-muted-foreground' }
+    default: return { label: status, tone: 'text-muted-foreground' }
+  }
+}
+
+function RunRowActions({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 bg-gradient-to-l from-accent/95 via-accent/80 to-transparent pl-6 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+      {children}
+    </div>
+  )
+}
+
+function AgentRunRow({
+  run,
+  onOpenAgent,
+  onCancel,
+  cancelling,
+}: {
+  run: AgentRun
+  onOpenAgent: () => void
+  onCancel: (run: AgentRun) => void
+  cancelling: boolean
+}) {
+  const isActive = ACTIVE_AGENT_RUN_STATUSES.has(run.status)
+  const status = getRunStatusPresentation(run.status)
+  const isStopping = cancelling || run.status === 'stopping'
+  const timestamp = getRunTimestamp(run)
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className="group relative flex items-center gap-2 rounded px-1 py-1.5 transition-colors hover:bg-accent/40"
+      onClick={onOpenAgent}
+      onKeyDown={event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        onOpenAgent()
+      }}
+      title="Open agent Activity"
+    >
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+        {isActive ? <span className="h-1.5 w-1.5 rounded-full bg-info animate-pulse" /> : <Bot className="h-3 w-3" />}
+      </span>
+      <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-xs text-muted-foreground" style={TRIGGER_MASK_STYLE}>{getRunTitle(run)}</span>
+      <span className="shrink-0 whitespace-nowrap text-xs">
+        <span className={status.tone}>{status.label}</span>
+        {timestamp && <span className="text-muted-foreground"> · {formatRelativeRequirementTime(timestamp)}</span>}
+      </span>
+      {isActive && (
+        <RunRowActions>
+          <button
+            type="button"
+            className="flex items-center justify-center rounded p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isStopping}
+            aria-label="Cancel run"
+            title="Cancel run"
+            onClick={event => {
+              event.stopPropagation()
+              onCancel(run)
+            }}
+          >
+            {isStopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+          </button>
+        </RunRowActions>
+      )}
+    </div>
+  )
+}
+
+function AgentStarterRow({ agent, agentName, isWorking, onOpenAgent, onRun }: { agent?: AgentProfile | null; agentName: string; isWorking: boolean; onOpenAgent: () => void; onRun: () => void }) {
+  return (
+    <div className="group relative flex items-center gap-2 rounded px-1 py-1.5 transition-colors hover:bg-accent/40">
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+        <Bot className="h-3 w-3" />
+      </span>
+      <button
+        type="button"
+        className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left text-xs text-muted-foreground hover:text-foreground"
+        style={TRIGGER_MASK_STYLE}
+        onClick={onOpenAgent}
+        disabled={!agent}
+        title={agent ? `Open ${agentName} Activity` : undefined}
+      >
+        {agentName}
+      </button>
+      {isWorking && (
+        <span className="shrink-0 whitespace-nowrap text-xs text-info">Working</span>
+      )}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-6 rounded px-1.5 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+        disabled={!agent || isWorking}
+        onClick={event => {
+          event.stopPropagation()
+          onRun()
+        }}
+      >
+        {isWorking ? <Spinner className="text-[10px]" /> : 'Run'}
+      </Button>
+    </div>
+  )
+}
+
+function ExecutionLogSection({
+  open,
+  onOpenChange,
+  pastRunsOpen,
+  onPastRunsOpenChange,
+  agent,
+  runs,
+  isWorking,
+  cancellingRunId,
+  onRun,
+  onCancelRun,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  pastRunsOpen: boolean
+  onPastRunsOpenChange: (open: boolean) => void
+  agent?: AgentProfile | null
+  runs: AgentRun[]
+  isWorking: boolean
+  cancellingRunId?: string | null
+  onRun: () => void
+  onCancelRun: (run: AgentRun) => void
+}) {
+  const activeRuns = runs.filter(run => ACTIVE_AGENT_RUN_STATUSES.has(run.status))
+  const pastRuns = runs.filter(run => !ACTIVE_AGENT_RUN_STATUSES.has(run.status))
+  const agentName = agent?.name ?? 'Tapd'
+  const openAgentActivity = React.useCallback(() => {
+    if (agent?.id) navigate(routes.view.agents(agent.id))
+  }, [agent?.id])
+
+  return (
+    <div>
+      <SidebarSectionHeader
+        title="Execution log"
+        open={open}
+        onOpenChange={onOpenChange}
+        trailing={activeRuns.length > 0 ? (
+          <span className="ml-auto inline-flex items-center gap-1 text-info">
+            <span className="h-1.5 w-1.5 rounded-full bg-info animate-pulse" />
+            <span className="font-mono tabular-nums">{activeRuns.length}</span>
+          </span>
+        ) : null}
+      />
+      {open && (
+        <div className="space-y-0.5 pl-2">
+          <AgentStarterRow agent={agent} agentName={agentName} isWorking={isWorking} onOpenAgent={openAgentActivity} onRun={onRun} />
+          {activeRuns.map(run => <AgentRunRow key={run.id} run={run} onOpenAgent={openAgentActivity} onCancel={onCancelRun} cancelling={cancellingRunId === run.id} />)}
+
+          {pastRuns.length > 0 && (
+            <>
+              {activeRuns.length > 0 && <div className="my-1.5 border-t border-border/60" />}
+              <button
+                type="button"
+                onClick={() => onPastRunsOpenChange(!pastRunsOpen)}
+                className="flex w-full items-center gap-1 rounded px-1 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+              >
+                <ChevronRight className={cn('h-3 w-3 shrink-0 stroke-[2.5] transition-transform', pastRunsOpen && 'rotate-90')} />
+                {pastRunsOpen ? 'Hide' : 'Show'} past runs ({pastRuns.length})
+              </button>
+              {pastRunsOpen && (
+                <div className="mt-0.5 space-y-0.5">
+                  {pastRuns.map(run => <AgentRunRow key={run.id} run={run} onOpenAgent={openAgentActivity} onCancel={onCancelRun} cancelling={false} />)}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 const TAPD_ALLOWED_HTML_TAGS = new Set([
@@ -688,6 +1038,186 @@ function RequirementContent({ item, onOpenUrl }: { item: ExternalRequirementItem
   return <TapdMarkdownContent content={content} onOpenUrl={onOpenUrl} />
 }
 
+function isExternalHref(href: string): boolean {
+  return /^(https?:|mailto:|craftagents:)/i.test(href.trim())
+}
+
+function stripHrefDecorations(value: string): string {
+  return value.split('#')[0]!.split('?')[0]!.trim()
+}
+
+function decodeLocalHref(href: string): string | null {
+  const trimmed = href.trim()
+  if (!trimmed || trimmed.startsWith('#')) return null
+  if (/^file:\/\//i.test(trimmed)) {
+    try {
+      return decodeURIComponent(new URL(trimmed).pathname)
+    } catch {
+      return decodeURIComponent(stripHrefDecorations(trimmed.replace(/^file:\/\//i, '')))
+    }
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return null
+  return decodeURIComponent(stripHrefDecorations(trimmed))
+}
+
+function isAbsoluteLocalPath(path: string): boolean {
+  return path.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(path)
+}
+
+function normalizeJoinedLocalPath(path: string): string {
+  const usesRoot = path.startsWith('/')
+  const parts: string[] = []
+  for (const part of path.replace(/\\/g, '/').split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') parts.pop()
+    else parts.push(part)
+  }
+  return `${usesRoot ? '/' : ''}${parts.join('/')}`
+}
+
+function joinLocalPath(baseDir: string, relativePath: string): string {
+  if (isAbsoluteLocalPath(relativePath)) return normalizeJoinedLocalPath(relativePath)
+  return normalizeJoinedLocalPath(`${baseDir.replace(/[\\/]+$/g, '')}/${relativePath.replace(/^\.\//, '')}`)
+}
+
+function looksLikeFilePath(path: string): boolean {
+  const name = path.replace(/\\/g, '/').split('/').pop() ?? ''
+  return /\.[a-zA-Z0-9]{1,12}$/.test(name)
+}
+
+function dirnameLocalPath(path: string): string {
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/g, '')
+  if (!looksLikeFilePath(normalized)) return normalized
+  const slashIndex = normalized.lastIndexOf('/')
+  return slashIndex > 0 ? normalized.slice(0, slashIndex) : normalized
+}
+
+function getRequirementBaseDirFromPath(path?: string): string | undefined {
+  if (!path) return undefined
+  const normalized = path.replace(/\\/g, '/')
+  const marker = '/agent-runs/'
+  const markerIndex = normalized.indexOf(marker)
+  return markerIndex > 0 ? normalized.slice(0, markerIndex) : undefined
+}
+
+function getCommentLinkBaseDirs(comment: RequirementComment): string[] {
+  const dirs = new Set<string>()
+  const paths = [comment.summaryPath, comment.transcriptPath, ...(comment.artifactPaths ?? [])].filter((value): value is string => Boolean(value))
+  for (const path of paths) {
+    dirs.add(dirnameLocalPath(path))
+    const requirementBase = getRequirementBaseDirFromPath(path)
+    if (requirementBase) {
+      dirs.add(requirementBase)
+      dirs.add(`${requirementBase}/info`)
+    }
+  }
+  return Array.from(dirs)
+}
+
+function getCommentLinkCandidates(comment: RequirementComment, localHref: string): string[] {
+  const candidates = new Set<string>()
+  if (isAbsoluteLocalPath(localHref)) candidates.add(normalizeJoinedLocalPath(localHref))
+  for (const baseDir of getCommentLinkBaseDirs(comment)) {
+    candidates.add(joinLocalPath(baseDir, localHref))
+  }
+  if (!candidates.size) candidates.add(localHref)
+  return Array.from(candidates)
+}
+
+async function openRequirementCommentHref(comment: RequirementComment, href: string, onOpenUrl: (url: string) => void) {
+  if (isExternalHref(href)) {
+    onOpenUrl(href)
+    return
+  }
+
+  const localHref = decodeLocalHref(href)
+  if (!localHref) {
+    onOpenUrl(href)
+    return
+  }
+
+  const candidates = getCommentLinkCandidates(comment, localHref)
+  let lastError: unknown
+  for (const candidate of candidates) {
+    try {
+      await window.electronAPI.openFile(candidate)
+      return
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  toast.error('Failed to open file', {
+    description: lastError instanceof Error ? lastError.message : candidates[0] ?? href,
+  })
+}
+
+function AgentCommentMarkdownBlock({ content, comment, onOpenUrl }: { content: string; comment: RequirementComment; onOpenUrl: (url: string) => void }) {
+  const [expanded, setExpanded] = React.useState(true)
+  const [markdownOpen, setMarkdownOpen] = React.useState(false)
+  const [copied, setCopied] = React.useState(false)
+  const preview = content.replace(/\s+/g, ' ').trim().slice(0, 180)
+  const openCommentHref = React.useCallback((href: string) => {
+    void openRequirementCommentHref(comment, href, onOpenUrl)
+  }, [comment, onOpenUrl])
+  const copyMarkdown = React.useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopied(true)
+      toast.success('Copied Markdown')
+      window.setTimeout(() => setCopied(false), 1200)
+    } catch (error) {
+      toast.error('Could not copy Markdown', { description: error instanceof Error ? error.message : String(error) })
+    }
+  }, [content])
+
+  return (
+    <div className="mt-2 rounded-[12px] border border-foreground/[0.08] bg-background/70">
+      <div className="flex items-center justify-between gap-2 border-b border-foreground/[0.06] px-3 py-1.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            type="button"
+            className="text-[12px] font-medium text-accent transition-colors hover:text-accent/80"
+            onClick={() => void copyMarkdown()}
+          >
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+          <button
+            type="button"
+            className="text-[12px] font-medium text-accent transition-colors hover:text-accent/80"
+            onClick={() => setMarkdownOpen(true)}
+          >
+            Markdown
+          </button>
+        </div>
+        <Button size="sm" variant="ghost" className="h-6 rounded-[6px] px-1.5 text-[11px] text-muted-foreground" onClick={() => setExpanded(open => !open)}>
+          {expanded ? 'Collapse' : 'Expand'}
+        </Button>
+      </div>
+      {expanded ? (
+        <div className="max-h-[320px] overflow-y-auto px-3 py-2">
+          <TapdMarkdownContent content={content} onOpenUrl={openCommentHref} compact />
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="block w-full truncate px-3 py-2 text-left text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+          onClick={() => setExpanded(true)}
+          title={preview}
+        >
+          {preview || 'Markdown output collapsed.'}
+        </button>
+      )}
+      <DocumentFormattedMarkdownOverlay
+        isOpen={markdownOpen}
+        onClose={() => setMarkdownOpen(false)}
+        content={content}
+        onOpenUrl={openCommentHref}
+      />
+    </div>
+  )
+}
+
 function formatRelativeRequirementTime(timestamp?: number) {
   if (!timestamp) return 'No activity'
   const diffMs = Date.now() - timestamp
@@ -720,35 +1250,110 @@ function avatarTone(name: string) {
   return tones[hash % tones.length]
 }
 
-function CommentActivityRow({ comment, onOpenUrl }: { comment: RequirementComment; onOpenUrl: (url: string) => void }) {
+function CommentActivityRow({
+  comment,
+  onOpenUrl,
+  onReplyToAgent,
+}: {
+  comment: RequirementComment
+  onOpenUrl: (url: string) => void
+  onReplyToAgent?: (comment: RequirementComment, message: string) => Promise<void>
+}) {
   const body = React.useMemo(() => prepareCommentMarkdown(comment), [comment])
-  const timestamp = parseTapdTimestamp(comment.createdAt)
-  const initial = (comment.author.trim()[0] || '?').toUpperCase()
+  const timestamp = parseTapdTimestamp(comment.updatedAt ?? comment.createdAt)
+  const initial = comment.origin === 'agent' ? null : (comment.author.trim()[0] || '?').toUpperCase()
+  const [commentOpen, setCommentOpen] = React.useState(true)
+  const [replyOpen, setReplyOpen] = React.useState(false)
+  const [replyText, setReplyText] = React.useState('')
+  const [replying, setReplying] = React.useState(false)
+  const canReply = comment.origin === 'agent' && Boolean(comment.agentProfileId && comment.childSessionId && onReplyToAgent)
+  const statusTone = comment.status === 'completed'
+    ? 'bg-success/[0.08] text-success/90'
+    : comment.status === 'failed'
+      ? 'bg-destructive/[0.08] text-destructive/90'
+      : comment.status === 'cancelled'
+        ? 'bg-foreground/[0.06] text-foreground/55'
+        : 'bg-accent/[0.08] text-accent/90'
+
+  const submitReply = async () => {
+    const message = replyText.trim()
+    if (!message || !onReplyToAgent) return
+    setReplying(true)
+    try {
+      await onReplyToAgent(comment, message)
+      setReplyText('')
+      setReplyOpen(false)
+    } finally {
+      setReplying(false)
+    }
+  }
+
   return (
-    <div className={cn('grid grid-cols-[18px_36px_minmax(0,1fr)] gap-3 rounded-[18px] border px-4 py-3.5', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.border)}>
-      <ChevronRight className={cn('mt-2 h-4 w-4', TAPD_DETAIL_THEME.weak)} />
-      <div className={cn('mt-0.5 flex h-9 w-9 items-center justify-center rounded-full text-[14px] font-semibold', avatarTone(comment.author))}>
-        {initial}
+    <div className={cn('grid grid-cols-[28px_36px_minmax(0,1fr)] gap-2 rounded-[18px] border px-4 py-3.5', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.border)}>
+      <button
+        type="button"
+        className={cn('mt-1.5 flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-foreground/[0.055]', TAPD_DETAIL_THEME.weak)}
+        onClick={() => setCommentOpen(open => !open)}
+        aria-label={commentOpen ? 'Collapse comment' : 'Expand comment'}
+        title={commentOpen ? 'Collapse comment' : 'Expand comment'}
+      >
+        <ChevronRight className={cn('h-4 w-4 transition-transform', commentOpen && 'rotate-90')} />
+      </button>
+      <div className={cn('mt-0.5 flex h-9 w-9 items-center justify-center rounded-full text-[14px] font-semibold', comment.origin === 'agent' ? 'bg-foreground/[0.07] text-foreground/70' : avatarTone(comment.author))}>
+        {comment.origin === 'agent' ? <Bot className="h-4 w-4" /> : initial}
       </div>
       <div className="min-w-0">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <span className={cn('text-[14px] font-semibold tracking-[-0.01em]', TAPD_DETAIL_THEME.title)}>{comment.author}</span>
+          {comment.status && <span className={cn('rounded-full px-1.5 py-0.5 text-[10px] font-medium capitalize leading-none', statusTone)}>{comment.status}</span>}
           <span className={cn('text-[13px]', TAPD_DETAIL_THEME.weak)}>{formatRelativeRequirementTime(timestamp)}</span>
         </div>
-        {body ? (
-          <div className="mt-1">
-            <TapdMarkdownContent content={body} onOpenUrl={onOpenUrl} compact />
+        {commentOpen && (
+          <>
+            {body ? (
+              comment.origin === 'agent'
+                ? <AgentCommentMarkdownBlock content={body} comment={comment} onOpenUrl={onOpenUrl} />
+                : (
+                  <div className="mt-1">
+                    <TapdMarkdownContent content={body} onOpenUrl={onOpenUrl} compact />
+                  </div>
+                )
+            ) : (
+              <div className={cn('mt-1 text-[13px]', TAPD_DETAIL_THEME.weak)}>Comment has no visible content.</div>
+            )}
+            {comment.origin === 'agent' && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {canReply && <Button size="sm" variant="ghost" className="h-7 rounded-[7px] px-2 text-[12px]" onClick={() => setReplyOpen(open => !open)}>Reply to Agent</Button>}
+                {comment.summaryPath && <Button size="sm" variant="ghost" className="h-7 rounded-[7px] px-2 text-[12px]" onClick={() => void window.electronAPI.openFile(comment.summaryPath!)}>Open summary</Button>}
+                {comment.artifactPaths?.[0] && <Button size="sm" variant="ghost" className="h-7 rounded-[7px] px-2 text-[12px]" onClick={() => void window.electronAPI.showInFolder(comment.artifactPaths![0])}>Show files</Button>}
+              </div>
+            )}
+          </>
+        )}
+        {commentOpen && replyOpen && (
+          <div className="mt-2 space-y-2">
+            <textarea
+              value={replyText}
+              onChange={event => setReplyText(event.target.value)}
+              placeholder="Reply to this agent…"
+              className={cn('min-h-[72px] w-full resize-none rounded-[10px] border bg-background px-3 py-2 text-[13px] outline-none focus:ring-1 focus:ring-foreground/20', TAPD_DETAIL_THEME.border)}
+            />
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="ghost" className="h-7 rounded-[7px] px-2 text-[12px]" onClick={() => setReplyOpen(false)} disabled={replying}>Cancel</Button>
+              <Button size="sm" variant="secondary" className="h-7 rounded-[7px] px-2 text-[12px]" onClick={() => void submitReply()} disabled={replying || !replyText.trim()}>{replying ? 'Sending…' : 'Send'}</Button>
+            </div>
           </div>
-        ) : (
-          <div className={cn('mt-1 text-[13px]', TAPD_DETAIL_THEME.weak)}>Comment has no visible content.</div>
         )}
       </div>
     </div>
   )
 }
 
-function RequirementActivity({ item, onOpenUrl }: { item: ExternalRequirementItem; onOpenUrl: (url: string) => void }) {
-  const comments = item.comments ?? []
+function RequirementActivity({ item, localComments, onOpenUrl, onReplyToAgent }: { item: ExternalRequirementItem; localComments: RequirementComment[]; onOpenUrl: (url: string) => void; onReplyToAgent: (comment: RequirementComment, message: string) => Promise<void> }) {
+  const comments = React.useMemo(() => [
+    ...(item.comments ?? []).map(comment => ({ ...comment, origin: comment.origin ?? 'source' as const })),
+    ...localComments,
+  ].sort((a, b) => (parseTapdTimestamp(b.updatedAt ?? b.createdAt) ?? 0) - (parseTapdTimestamp(a.updatedAt ?? a.createdAt) ?? 0)), [item.comments, localComments])
   return (
     <section className={cn('mt-10 border-t pt-7', TAPD_DETAIL_THEME.borderSubtle)}>
       <div className="flex items-center justify-between gap-3">
@@ -756,7 +1361,7 @@ function RequirementActivity({ item, onOpenUrl }: { item: ExternalRequirementIte
         <span className={cn('text-[12px]', TAPD_DETAIL_THEME.weak)}>{comments.length ? `${comments.length} comment${comments.length > 1 ? 's' : ''}` : 'No comments'}</span>
       </div>
       <div className="mt-4 space-y-2.5">
-        {comments.length ? comments.map(comment => <CommentActivityRow key={comment.id} comment={comment} onOpenUrl={onOpenUrl} />) : (
+        {comments.length ? comments.map(comment => <CommentActivityRow key={comment.id} comment={comment} onOpenUrl={onOpenUrl} onReplyToAgent={onReplyToAgent} />) : (
           <div className={cn('rounded-[16px] border px-4 py-3 text-[13px]', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.border, TAPD_DETAIL_THEME.weak)}>
             No TAPD comments yet. Refresh item to pull the latest activity.
           </div>
@@ -858,28 +1463,8 @@ function RequirementInfoPopover({
   )
 }
 
-function RequirementSessionLogRow({ session }: { session: { id: string; name?: string; preview?: string; lastMessageAt?: number } }) {
-  const preview = session.preview?.trim() || session.name || 'Session started'
-  return (
-    <button
-      type="button"
-      onClick={() => navigate(routes.view.allSessions(session.id))}
-      className={cn('grid w-full grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 rounded-[10px] px-2 py-2 text-left transition-colors', TAPD_DETAIL_THEME.hover)}
-    >
-      <span className={cn('flex h-7 w-7 items-center justify-center rounded-full', TAPD_DETAIL_THEME.pill)}>
-        <Bot className="h-3.5 w-3.5" />
-      </span>
-      <span className="min-w-0">
-        <span className={cn('block truncate text-[13px]', TAPD_DETAIL_THEME.secondary)}>{session.name || 'Untitled session'}</span>
-        <span className={cn('mt-0.5 block truncate text-[12px]', TAPD_DETAIL_THEME.weak)}>{preview}</span>
-      </span>
-      <span className={cn('whitespace-nowrap text-[12px]', TAPD_DETAIL_THEME.weak)}>{formatRelativeRequirementTime(session.lastMessageAt)}</span>
-    </button>
-  )
-}
-
 export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }) {
-  const { activeWorkspaceId, onOpenUrl, onSessionLabelsChange, onSessionOptionsChange, onInputChange } = useAppShellContext()
+  const { activeWorkspaceId, onOpenUrl, onSessionLabelsChange, onSessionOptionsChange } = useAppShellContext()
   const { navigateToSession } = useNavigation()
   // Keep synced cached requirements readable even when tapd-mcp-http is not enabled in this workspace.
   const tapdInstalled = true
@@ -892,12 +1477,26 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
   const [editingGroup, setEditingGroup] = React.useState(false)
   const [infoFiles, setInfoFiles] = React.useState<RequirementInfoFilesResult | null>(null)
   const [infoFilesError, setInfoFilesError] = React.useState<string | null>(null)
+  const [localComments, setLocalComments] = React.useState<RequirementComment[]>([])
   const [creatingSession, setCreatingSession] = React.useState(false)
+  const [workContext, setWorkContext] = React.useState<TapdRequirementWorkContext>(() => readTapdRequirementWorkContext(activeWorkspaceId, sourceItemId))
+  const [agents, setAgents] = React.useState<AgentProfile[]>([])
+  const [agentRuns, setAgentRuns] = React.useState<AgentRun[]>([])
+  const [startingTapdAgent, setStartingTapdAgent] = React.useState(false)
+  const [propertiesOpen, setPropertiesOpen] = React.useState(true)
+  const [workOpen, setWorkOpen] = React.useState(true)
+  const [sessionsOpen, setSessionsOpen] = React.useState(true)
+  const [executionLogOpen, setExecutionLogOpen] = React.useState(true)
+  const [pastRunsOpen, setPastRunsOpen] = React.useState(false)
+  const [tokenUsageOpen, setTokenUsageOpen] = React.useState(false)
+  const [cancellingRunId, setCancellingRunId] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     const cached = tapdInstalled ? readCache(activeWorkspaceId).itemsById[sourceItemId] : undefined
     setItem(cached ?? null)
     setGroupName(cached ? cached.binding?.groupName ?? defaultGroupName(cached) : '')
+    const nextWorkContext = readTapdRequirementWorkContext(activeWorkspaceId, sourceItemId)
+    setWorkContext(nextWorkContext)
   }, [activeWorkspaceId, sourceItemId, tapdInstalled])
 
   React.useEffect(() => {
@@ -940,11 +1539,40 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     void refreshInfoFiles()
   }, [refreshInfoFiles])
 
+  const loadLocalComments = React.useCallback(async () => {
+    if (!activeWorkspaceId || typeof window === 'undefined' || !window.electronAPI?.listRequirementComments) {
+      setLocalComments([])
+      return
+    }
+    try {
+      const comments = await window.electronAPI.listRequirementComments(activeWorkspaceId, TAPD_PLUGIN_ID, sourceItemId)
+      setLocalComments(comments)
+    } catch {
+      setLocalComments([])
+    }
+  }, [activeWorkspaceId, sourceItemId])
+
   React.useEffect(() => {
-    const onFocus = () => { void refreshInfoFiles() }
+    void loadLocalComments()
+  }, [loadLocalComments])
+
+  React.useEffect(() => {
+    const onFocus = () => {
+      void refreshInfoFiles()
+      void loadLocalComments()
+    }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [refreshInfoFiles])
+  }, [loadLocalComments, refreshInfoFiles])
+
+  React.useEffect(() => {
+    let cancelled = false
+    if (!activeWorkspaceId || typeof window === 'undefined' || !window.electronAPI?.listAgentProfiles) return
+    window.electronAPI.listAgentProfiles(activeWorkspaceId)
+      .then(profiles => { if (!cancelled) setAgents(profiles) })
+      .catch(() => { if (!cancelled) setAgents([]) })
+    return () => { cancelled = true }
+  }, [activeWorkspaceId])
 
   const groupSessions = React.useMemo(() => {
     if (!item?.binding) return []
@@ -956,6 +1584,64 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
       .sort((a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0))
   }, [activeWorkspaceId, item?.binding, sessionMetaMap])
   const groupSessionCount = groupSessions.length
+  const mainSession = React.useMemo(
+    () => groupSessions.find(session => !hasAgentTaskLabel(session.labels)) ?? null,
+    [groupSessions],
+  )
+  const sessionsForDisplay = React.useMemo(
+    () => mainSession ? [mainSession, ...groupSessions.filter(session => session.id !== mainSession.id)] : [],
+    [groupSessions, mainSession],
+  )
+  const workSessionsForDisplay = React.useMemo(
+    () => mainSession ? [mainSession, ...groupSessions.filter(session => session.id !== mainSession.id && !hasAgentTaskLabel(session.labels))] : [],
+    [groupSessions, mainSession],
+  )
+  const tapdAgent = React.useMemo(() => resolveDefaultTapdAgent(agents), [agents])
+  const mainSessionIds = React.useMemo(() => new Set(sessionsForDisplay.map(session => session.id)), [sessionsForDisplay])
+  const relevantAgentRuns = React.useMemo(() => agentRuns.filter(run => {
+    if (run.target?.type === 'requirement') {
+      return run.target.pluginId === TAPD_PLUGIN_ID && run.target.sourceItemId === sourceItemId
+    }
+    if (!mainSessionIds.has(run.parentSessionId)) return false
+    const summary = run.triggerSummary.toLowerCase()
+    return summary.includes(sourceItemId.toLowerCase()) || summary.includes(`tapd-${sourceItemId}`.toLowerCase())
+  }), [agentRuns, mainSessionIds, sourceItemId])
+  const activeTapdRun = React.useMemo(() => relevantAgentRuns.find(run => ACTIVE_AGENT_RUN_STATUSES.has(run.status)) ?? null, [relevantAgentRuns])
+  const agentIsWorking = startingTapdAgent || Boolean(activeTapdRun)
+  const usageTotals = React.useMemo(() => groupSessions.reduce((totals, session) => {
+    const usage = getSessionUsageTotals(session)
+    totals.inputTokens += usage.inputTokens
+    totals.outputTokens += usage.outputTokens
+    totals.cacheReadTokens += usage.cacheReadTokens
+    totals.cacheCreationTokens += usage.cacheCreationTokens
+    return totals
+  }, { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }), [groupSessions])
+
+  const loadAgentRuns = React.useCallback(async () => {
+    if (!activeWorkspaceId || !tapdAgent || typeof window === 'undefined' || !window.electronAPI?.listAgentRuns) {
+      setAgentRuns([])
+      return
+    }
+    try {
+      const runs = await window.electronAPI.listAgentRuns(activeWorkspaceId, { agentProfileId: tapdAgent.id, target: { type: 'requirement', pluginId: TAPD_PLUGIN_ID, sourceItemId } })
+      setAgentRuns(runs)
+    } catch {
+      setAgentRuns([])
+    }
+  }, [activeWorkspaceId, sourceItemId, tapdAgent])
+
+  React.useEffect(() => {
+    void loadAgentRuns()
+  }, [loadAgentRuns])
+
+  React.useEffect(() => {
+    if (!tapdAgent) return
+    const interval = window.setInterval(() => {
+      void loadAgentRuns()
+      void loadLocalComments()
+    }, activeTapdRun ? 2500 : 5000)
+    return () => window.clearInterval(interval)
+  }, [activeTapdRun, loadAgentRuns, loadLocalComments, tapdAgent])
 
   const refreshDetail = React.useCallback(async () => {
     if (!activeWorkspaceId || !tapdInstalled) return
@@ -1009,23 +1695,78 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     toast.success(previousGroupName ? 'Group renamed' : 'Requirement linked', { description: binding.groupName })
   }, [activeWorkspaceId, applyBinding, groupName, item, renameLinkedGroupSessions])
 
-  const handleUnlink = React.useCallback(async () => {
-    if (!activeWorkspaceId || !item?.binding) return
-    await window.electronAPI.unlinkRequirementItemFromGroup(activeWorkspaceId, { pluginId: TAPD_PLUGIN_ID, sourceItemId: item.sourceItemId })
-    const next = { ...item }
-    delete next.binding
-    setItem(next)
-    upsertCachedItem(activeWorkspaceId, next)
-    setGroupName(defaultGroupName(next))
-    setEditingGroup(false)
-    toast.success('Requirement unlinked')
-  }, [activeWorkspaceId, item])
+  const saveWorkContext = React.useCallback((value: string) => {
+    const next = writeTapdRequirementWorkContext(activeWorkspaceId, sourceItemId, { workingDirectory: value })
+    setWorkContext(next)
+    toast.success(next.workingDirectory ? 'Working directory saved' : 'Working directory cleared')
+  }, [activeWorkspaceId, sourceItemId])
 
-  const openGroup = React.useCallback(() => {
-    if (!item?.binding || groupSessionCount === 0) return
-    window.dispatchEvent(new CustomEvent('craft:open-session-group', { detail: { groupName: item.binding.groupName } }))
-    navigate(routes.view.allSessions())
-  }, [groupSessionCount, item?.binding])
+  const runTapdAgent = React.useCallback(async () => {
+    if (!activeWorkspaceId || !item || !tapdAgent || agentIsWorking) return
+    const prompt = buildTapdAgentInstructionPrompt(tapdAgent.id, item, workContext)
+    setStartingTapdAgent(true)
+    try {
+      const result = await window.electronAPI.startRequirementAgentRun(activeWorkspaceId, {
+        pluginId: TAPD_PLUGIN_ID,
+        item,
+        agentProfileId: tapdAgent.id,
+        prompt,
+        workingDirectory: workContext.workingDirectory,
+        groupName: item.binding?.groupName,
+      })
+      setLocalComments(current => [
+        ...current.filter(comment => comment.id !== result.comment.id),
+        result.comment,
+      ])
+      await Promise.all([loadAgentRuns(), loadLocalComments()])
+    } catch (err) {
+      toast.error('Could not start Tapd Agent', { description: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setStartingTapdAgent(false)
+    }
+  }, [activeWorkspaceId, agentIsWorking, item, loadAgentRuns, loadLocalComments, tapdAgent, workContext])
+
+  const replyToAgentComment = React.useCallback(async (comment: RequirementComment, message: string) => {
+    if (!activeWorkspaceId || !comment.agentProfileId || !comment.childSessionId) return
+    try {
+      const result = await window.electronAPI.replyToRequirementAgent(activeWorkspaceId, {
+        pluginId: TAPD_PLUGIN_ID,
+        sourceItemId,
+        agentProfileId: comment.agentProfileId,
+        childSessionId: comment.childSessionId,
+        runId: comment.agentRunId,
+        message,
+        workingDirectory: workContext.workingDirectory,
+      })
+      setLocalComments(current => [
+        ...current.filter(existing => existing.id !== result.comment.id),
+        result.comment,
+      ])
+      await Promise.all([loadAgentRuns(), loadLocalComments()])
+    } catch (err) {
+      toast.error('Could not reply to Tapd Agent', { description: err instanceof Error ? err.message : String(err) })
+    }
+  }, [activeWorkspaceId, loadAgentRuns, loadLocalComments, sourceItemId, workContext.workingDirectory])
+
+  const cancelTapdAgentRun = React.useCallback(async (run: AgentRun) => {
+    if (!activeWorkspaceId || !window.electronAPI?.cancelAgentRun || cancellingRunId) return
+    setCancellingRunId(run.id)
+    try {
+      const cancelledRun = await window.electronAPI.cancelAgentRun(activeWorkspaceId, {
+        runId: run.id,
+        parentSessionId: run.parentSessionId,
+        childSessionId: run.childSessionId,
+      })
+      if (cancelledRun) {
+        setAgentRuns(current => current.map(candidate => candidate.id === cancelledRun.id ? cancelledRun : candidate))
+      }
+      await Promise.all([loadAgentRuns(), loadLocalComments()])
+    } catch (err) {
+      toast.error('Could not cancel Agent run', { description: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setCancellingRunId(null)
+    }
+  }, [activeWorkspaceId, cancellingRunId, loadAgentRuns, loadLocalComments])
 
   const openCreateSessionDialog = React.useCallback(() => {
     if (!item?.binding) {
@@ -1035,7 +1776,7 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     setCreatingSession(true)
   }, [item?.binding])
 
-  const handleCreateSession = React.useCallback(async (options: { sessionName: string; agent?: AgentProfile | null }) => {
+  const handleCreateSession = React.useCallback(async (options: { sessionName: string; llmConnection?: string; model?: string; workingDirectory?: string }) => {
     if (!activeWorkspaceId || !item) return
     if (!item.binding) {
       toast.error('Link a Session Group first', { description: 'Create or bind a group before creating a session from this requirement.' })
@@ -1046,7 +1787,9 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
       item,
       groupName: item.binding.groupName,
       sessionName: options.sessionName,
-      agentProfileId: options.agent?.id,
+      llmConnection: options.llmConnection,
+      model: options.model,
+      workingDirectory: options.workingDirectory,
     })
     // The generic session_created broadcast can arrive slightly after this RPC
     // returns. Add the session to local atoms immediately so navigation's
@@ -1059,15 +1802,15 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     // make the UI and injected <session_state> disagree.
     onSessionOptionsChange(result.sessionId, {
       permissionMode: result.session.permissionMode ?? 'ask',
-      thinkingLevel: options.agent?.thinkingLevel,
     })
-    if (options.agent) {
-      onInputChange(result.sessionId, `@${options.agent.name} `)
+    if (options.workingDirectory !== undefined) {
+      const next = writeTapdRequirementWorkContext(activeWorkspaceId, item.sourceItemId, { workingDirectory: options.workingDirectory })
+      setWorkContext(next)
     }
-    toast.success('Session created for requirement')
+    toast.success('Session created')
     setCreatingSession(false)
     navigateToSession(result.sessionId)
-  }, [activeWorkspaceId, addSession, item, navigateToSession, onInputChange, onSessionOptionsChange])
+  }, [activeWorkspaceId, addSession, item, navigateToSession, onSessionOptionsChange])
 
   if (!tapdInstalled) return <PluginUnavailableState />
 
@@ -1162,7 +1905,7 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
                 <div className={cn('mt-7 border-t pt-6', TAPD_DETAIL_THEME.borderSubtle)}>
                   <h2 className="sr-only">Requirement content</h2>
                   <RequirementContent item={item} onOpenUrl={onOpenUrl} />
-                  <RequirementActivity item={item} onOpenUrl={onOpenUrl} />
+                  <RequirementActivity item={item} localComments={localComments} onOpenUrl={onOpenUrl} onReplyToAgent={replyToAgentComment} />
                 </div>
               </article>
             )}
@@ -1170,105 +1913,86 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
         </ScrollArea>
       </div>
 
-      <aside className={cn('hidden h-full min-h-0 w-[340px] shrink-0 overflow-y-auto overscroll-contain border-l px-5 py-6 lg:block', TAPD_DETAIL_THEME.panel, TAPD_DETAIL_THEME.border)}>
+      <aside className={cn('hidden h-full min-h-0 w-80 shrink-0 overflow-y-auto overscroll-contain border-l p-4 lg:block', TAPD_DETAIL_THEME.panel, TAPD_DETAIL_THEME.border)}>
         {item ? (
-          <div className="space-y-1">
-            <DetailSection title="Properties">
-              <PropertyRow label="Status" value={item.status ? <InlineValue>{item.status}</InlineValue> : undefined} emptyText="No status" />
-              <PropertyRow label="Priority" value={item.priority ? <InlineValue>{item.priority}</InlineValue> : undefined} emptyText="No priority" />
-              <PropertyRow label="Assignee" value={assigneeText ? <InlineValue>{assigneeText}</InlineValue> : undefined} emptyText="Unassigned" />
-              <PropertyRow label="Due date" value={dueText} emptyText="No due date" />
-              <PropertyRow label="Project" value={item.project ? <InlineValue>{item.project}</InlineValue> : undefined} emptyText="No project" />
-              <PropertyRow label="Type" value={item.type ? <InlineValue>{item.type}</InlineValue> : undefined} emptyText="No type" />
+          <div className="space-y-5">
+            <DetailSection title="Properties" open={propertiesOpen} onOpenChange={setPropertiesOpen}>
+              <OptionalPropertyRow label="Status" value={item.status ? <MetaPill className={statusTone(item.status)}>{item.status}</MetaPill> : undefined} />
+              <OptionalPropertyRow label="Priority" value={item.priority ? <MetaPill className={TAPD_DETAIL_THEME.pill}>{item.priority}</MetaPill> : undefined} />
+              <OptionalPropertyRow label="Assignee" value={assigneeText ? <InlineValue>{assigneeText}</InlineValue> : undefined} />
+              <OptionalPropertyRow label="Due date" value={dueText} />
+              <OptionalPropertyRow label="Project" value={item.project ? <InlineValue>{item.project}</InlineValue> : undefined} />
+              <OptionalPropertyRow label="Type" value={item.type ? <InlineValue>{item.type}</InlineValue> : undefined} />
               <OptionalPropertyRow label="Category" value={item.category ? <InlineValue>{item.category}</InlineValue> : undefined} />
               <OptionalPropertyRow label="Version" value={item.version ? <InlineValue>{item.version}</InlineValue> : undefined} />
               <OptionalPropertyRow label="Release" value={item.release ? <InlineValue>{item.release}</InlineValue> : undefined} />
             </DetailSection>
 
-            <DetailSection title="Craft linkage">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className={cn('text-[12px]', TAPD_DETAIL_THEME.weak)}>Group</div>
-                    <div className={cn('mt-1 truncate text-[13px] font-medium', item.binding ? TAPD_DETAIL_THEME.secondary : TAPD_DETAIL_THEME.disabled)}>
-                      {item.binding ? item.binding.groupName : 'No group linked'}
-                    </div>
+            <DetailSection title="Work" open={workOpen} onOpenChange={setWorkOpen}>
+              <HubPropertyRow label="Group">
+                {editingGroup ? (
+                  <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                    <Input value={groupName} onChange={event => setGroupName(event.target.value)} placeholder="Group name" className="h-7 min-w-0 rounded-md px-2 text-[12px]" />
+                    <Button size="sm" variant="secondary" className="h-7 rounded-md px-2 text-[12px]" onClick={handleCreateGroup} disabled={!groupName.trim()}>Save</Button>
+                    <Button size="sm" variant="ghost" className={cn('h-7 rounded-md px-2 text-[12px]', TAPD_DETAIL_THEME.weak)} onClick={() => setEditingGroup(false)}>Cancel</Button>
                   </div>
-                  {item.binding ? (
-                    <Button size="sm" variant="ghost" className={cn('h-7 rounded-[7px] px-2 text-[12px]', TAPD_DETAIL_THEME.secondary)} onClick={() => setEditingGroup(value => !value)}>Rename</Button>
-                  ) : (
-                    <Button size="sm" variant="secondary" className="h-7 rounded-[7px] px-2 text-[12px]" onClick={() => setEditingGroup(true)}>New group</Button>
-                  )}
-                </div>
-
-                {editingGroup && (
-                  <div className={cn('space-y-2 rounded-[10px] border px-3 py-3', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.borderSubtle)}>
-                    <div className={cn('text-[12px] font-medium', TAPD_DETAIL_THEME.weak)}>{item.binding ? 'Rename group' : 'New group name'}</div>
-                    <Input value={groupName} onChange={event => setGroupName(event.target.value)} placeholder="Group name" className="h-8 rounded-[8px] text-[13px]" />
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="secondary" className="h-7 rounded-[7px] px-2 text-[12px]" onClick={handleCreateGroup} disabled={!groupName.trim()}>
-                        {item.binding ? 'Save name' : 'Create group'}
-                      </Button>
-                      <Button size="sm" variant="ghost" className={cn('h-7 rounded-[7px] px-2 text-[12px]', TAPD_DETAIL_THEME.weak)} onClick={() => setEditingGroup(false)}>Cancel</Button>
-                    </div>
-                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className={cn('-ml-1 max-w-full truncate rounded-md px-1.5 py-1 text-left transition-colors', TAPD_DETAIL_THEME.hover, item.binding ? 'text-foreground/80' : TAPD_DETAIL_THEME.disabled)}
+                    onClick={() => setEditingGroup(true)}
+                    title={item.binding?.groupName}
+                  >
+                    {item.binding ? item.binding.groupName : 'not linked'}
+                  </button>
                 )}
+              </HubPropertyRow>
 
-                {item.binding && (
-                  <div className="space-y-2 pt-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={openGroup}
-                        disabled={groupSessionCount === 0}
-                        className={cn('text-[13px] font-medium disabled:cursor-default', groupSessionCount > 0 ? TAPD_DETAIL_THEME.secondary : TAPD_DETAIL_THEME.disabled)}
-                      >
-                        Sessions ({groupSessionCount})
-                      </button>
-                      <Button size="sm" variant="secondary" className="h-7 rounded-[7px] px-2 text-[12px]" onClick={openCreateSessionDialog}>New session</Button>
-                    </div>
+              <HubPropertyRow label="Context" valueClassName="overflow-visible">
+                <WorkingDirectoryBadge
+                  workingDirectory={workContext.workingDirectory}
+                  onWorkingDirectoryChange={saveWorkContext}
+                  workspaceId={activeWorkspaceId ?? undefined}
+                />
+              </HubPropertyRow>
 
-                    {groupSessionCount > 0 ? (
-                      <div className="space-y-1">
-                        {groupSessions.slice(0, 3).map(session => <RequirementSessionLogRow key={session.id} session={session} />)}
-                      </div>
-                    ) : (
-                      <p className={cn('rounded-[10px] px-3 py-2 text-[12px] leading-5', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.weak)}>
-                        No sessions yet. Create one to start working from this requirement.
-                      </p>
-                    )}
+              <RequirementSessionsSection
+                open={sessionsOpen}
+                onOpenChange={setSessionsOpen}
+                sessions={workSessionsForDisplay}
+                hasBinding={Boolean(item.binding)}
+                onCreateSession={openCreateSessionDialog}
+                onNavigateSession={navigateToSession}
+              />
 
-                    <div className="flex justify-end">
-                      <Button size="sm" variant="ghost" className={cn('h-7 rounded-[7px] px-2 text-[12px]', TAPD_DETAIL_THEME.weak)} onClick={handleUnlink}>
-                        <Unlink2 className="h-3.5 w-3.5" />
-                        Unlink
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
             </DetailSection>
 
+            <ExecutionLogSection
+              open={executionLogOpen}
+              onOpenChange={setExecutionLogOpen}
+              pastRunsOpen={pastRunsOpen}
+              onPastRunsOpenChange={setPastRunsOpen}
+              agent={tapdAgent}
+              runs={relevantAgentRuns}
+              isWorking={agentIsWorking}
+              cancellingRunId={cancellingRunId}
+              onRun={runTapdAgent}
+              onCancelRun={cancelTapdAgentRun}
+            />
 
-            <DetailSection title="TAPD details">
-              <PropertyRow label="Created by" value={item.creator ? <InlineValue>{item.creator}</InlineValue> : undefined} emptyText="Unknown" />
-              <PropertyRow label="Created" value={createdText} emptyText="Unknown" />
-              <PropertyRow label="Updated" value={updatedText} emptyText="Unknown" />
-              <PropertyRow label="Begin date" value={beginText} emptyText="No begin date" />
-              <PropertyRow label="Source ID" value={<InlineValue>{item.sourceItemId}</InlineValue>} />
-              <PropertyRow label="Workspace" value={getTapdWorkspaceIdFromItem(item) ? <InlineValue>{getTapdWorkspaceIdFromItem(item)}</InlineValue> : undefined} emptyText="Unknown" />
-              {item.sourceUrl && (
-                <div className="pt-2">
-                  <Button className="h-7 w-full justify-start rounded-[7px] px-2 text-[12px]" variant="ghost" size="sm" onClick={() => onOpenUrl(item.sourceUrl!)}>
-                    <ArrowUpRight className="h-3.5 w-3.5" />
-                    Open in TAPD
-                  </Button>
-                </div>
-              )}
-            </DetailSection>
+            {!tapdAgent && (
+              <div className="px-8 pb-1 text-[11px] leading-4 text-destructive">No Tapd Agent profile found.</div>
+            )}
+
+            <TokenUsageSection
+              open={tokenUsageOpen}
+              onOpenChange={setTokenUsageOpen}
+              totals={usageTotals}
+              runsCount={relevantAgentRuns.length}
+            />
           </div>
         ) : (
-          <div className={cn('text-[13px]', TAPD_DETAIL_THEME.weak)}>Refresh the item to load TAPD properties.</div>
+          <div className={cn('px-5 py-6 text-[13px]', TAPD_DETAIL_THEME.weak)}>Refresh the item to load TAPD properties.</div>
         )}
       </aside>
 
@@ -1276,6 +2000,7 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
         <RequirementCreateSessionDialog
           item={item}
           defaultName={item.binding.groupName}
+          defaultWorkingDirectory={workContext.workingDirectory}
           onClose={() => setCreatingSession(false)}
           onCreate={handleCreateSession}
         />
@@ -1287,18 +2012,47 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
 function RequirementCreateSessionDialog({
   item,
   defaultName,
+  defaultWorkingDirectory,
   onClose,
   onCreate,
 }: {
   item: ExternalRequirementItem
   defaultName: string
+  defaultWorkingDirectory?: string
   onClose: () => void
-  onCreate: (options: { sessionName: string; agent?: AgentProfile | null }) => Promise<void>
+  onCreate: (options: { sessionName: string; llmConnection?: string; model?: string; workingDirectory?: string }) => Promise<void>
 }) {
-  const { activeWorkspaceId } = useAppShellContext()
+  const { llmConnections, workspaceDefaultLlmConnection } = useAppShellContext()
+  const connectionOptions = React.useMemo(() => {
+    return (llmConnections ?? []).map(connection => {
+      const models = (connection.models ?? []).map(model => {
+        if (typeof model === 'string') return { id: model, name: model }
+        return { id: model.id, name: model.name || model.shortName || model.id }
+      }).filter(model => model.id)
+      const dedupedModels = Array.from(new Map([
+        ...(connection.defaultModel ? [[connection.defaultModel, { id: connection.defaultModel, name: connection.defaultModel }] as const] : []),
+        ...models.map(model => [model.id, model] as const),
+      ]).values())
+      return {
+        slug: connection.slug,
+        name: connection.name || connection.slug,
+        defaultModel: connection.defaultModel,
+        models: dedupedModels,
+      }
+    })
+  }, [llmConnections])
+  const initialConnectionSlug = React.useMemo(() => {
+    if (workspaceDefaultLlmConnection && connectionOptions.some(connection => connection.slug === workspaceDefaultLlmConnection)) return workspaceDefaultLlmConnection
+    return connectionOptions[0]?.slug ?? 'workspace-default'
+  }, [connectionOptions, workspaceDefaultLlmConnection])
   const [name, setName] = React.useState(defaultName)
-  const [agents, setAgents] = React.useState<AgentProfile[]>([])
-  const [agentId, setAgentId] = React.useState('none')
+  const [connectionSlug, setConnectionSlug] = React.useState(initialConnectionSlug)
+  const selectedConnection = connectionOptions.find(connection => connection.slug === connectionSlug) ?? connectionOptions[0] ?? null
+  const modelOptions = selectedConnection?.models.length
+    ? selectedConnection.models
+    : [{ id: 'connection-default', name: selectedConnection?.defaultModel ?? 'Connection default' }]
+  const [model, setModel] = React.useState(modelOptions[0]?.id ?? 'connection-default')
+  const [workingDirectory, setWorkingDirectory] = React.useState(defaultWorkingDirectory ?? '')
   const [creating, setCreating] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
@@ -1307,28 +2061,41 @@ function RequirementCreateSessionDialog({
   }, [defaultName])
 
   React.useEffect(() => {
-    let cancelled = false
-    if (!activeWorkspaceId || typeof window === 'undefined' || !window.electronAPI?.listAgentProfiles) return
-    window.electronAPI.listAgentProfiles(activeWorkspaceId)
-      .then(profiles => {
-        if (!cancelled) setAgents(profiles)
-      })
-      .catch(() => {
-        if (!cancelled) setAgents([])
-      })
-    return () => { cancelled = true }
-  }, [activeWorkspaceId])
+    setWorkingDirectory(defaultWorkingDirectory ?? '')
+  }, [defaultWorkingDirectory])
 
-  const selectedAgent = agentId === 'none' ? null : agents.find(agent => agent.id === agentId) ?? null
+  React.useEffect(() => {
+    if (connectionOptions.length === 0) {
+      setConnectionSlug('workspace-default')
+      setModel('connection-default')
+      return
+    }
+    if (!connectionOptions.some(connection => connection.slug === connectionSlug)) {
+      const nextConnection = connectionOptions.find(connection => connection.slug === initialConnectionSlug) ?? connectionOptions[0]!
+      setConnectionSlug(nextConnection.slug)
+      setModel(nextConnection.defaultModel ?? nextConnection.models[0]?.id ?? 'connection-default')
+    }
+  }, [connectionOptions, connectionSlug, initialConnectionSlug])
+
+  const handleConnectionChange = React.useCallback((value: string) => {
+    setConnectionSlug(value)
+    const nextConnection = connectionOptions.find(connection => connection.slug === value)
+    setModel(nextConnection?.defaultModel ?? nextConnection?.models[0]?.id ?? 'connection-default')
+  }, [connectionOptions])
 
   const handleSubmit = async () => {
     if (!name.trim() || creating) return
     setCreating(true)
     setError(null)
     try {
-      await onCreate({ sessionName: name.trim(), agent: selectedAgent })
+      await onCreate({
+        sessionName: name.trim(),
+        llmConnection: selectedConnection?.slug,
+        model: model === 'connection-default' ? undefined : model,
+        workingDirectory: workingDirectory.trim(),
+      })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create session')
+      setError(err instanceof Error ? err.message : 'Failed to create main session')
       setCreating(false)
     }
   }
@@ -1337,9 +2104,9 @@ function RequirementCreateSessionDialog({
     <Dialog open onOpenChange={(open) => { if (!open && !creating) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>New requirement session</DialogTitle>
+          <DialogTitle>Create session</DialogTitle>
           <DialogDescription>
-            Start from TAPD-{item.sourceItemId}. Select an agent to prefill the new chat input with an @mention.
+            Create a linked TAPD-{item.sourceItemId} chat session. No prompt will be sent yet.
           </DialogDescription>
         </DialogHeader>
 
@@ -1356,24 +2123,50 @@ function RequirementCreateSessionDialog({
             />
           </div>
 
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="text-xs text-muted-foreground">Connection</label>
+              <Select value={connectionSlug} onValueChange={handleConnectionChange}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Workspace default" />
+                </SelectTrigger>
+                <SelectContent style={DIALOG_SELECT_CONTENT_STYLE}>
+                  {connectionOptions.length === 0 ? (
+                    <SelectItem value="workspace-default">Workspace default</SelectItem>
+                  ) : connectionOptions.map(connection => (
+                    <SelectItem key={connection.slug} value={connection.slug}>{connection.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="text-xs text-muted-foreground">Model</label>
+              <Select value={model} onValueChange={setModel}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Connection default" />
+                </SelectTrigger>
+                <SelectContent style={DIALOG_SELECT_CONTENT_STYLE}>
+                  {modelOptions.map(option => (
+                    <SelectItem key={option.id} value={option.id}>{option.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
           <div>
-            <label className="text-xs text-muted-foreground">Agent</label>
-            <Select value={agentId} onValueChange={setAgentId}>
-              <SelectTrigger className="mt-1">
-                <SelectValue placeholder="No agent" />
-              </SelectTrigger>
-              <SelectContent style={DIALOG_SELECT_CONTENT_STYLE}>
-                <SelectItem value="none">No agent</SelectItem>
-                {agents.map(agent => (
-                  <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {selectedAgent && (
-              <p className="mt-2 rounded-md bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
-                The new chat input will start with <span className="font-mono text-foreground/80">@{selectedAgent.name}</span>. You can continue typing your question there.
-              </p>
-            )}
+            <label className="text-xs text-muted-foreground">Working directory</label>
+            <Input
+              value={workingDirectory}
+              onChange={event => setWorkingDirectory(event.target.value)}
+              placeholder="Workspace default, or /Users/name/path/to/repo"
+              className="mt-1"
+              onKeyDown={event => { if (event.key === 'Enter') void handleSubmit() }}
+            />
+            <p className="mt-2 rounded-md bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
+              This creates a linked requirement chat session only. Use Agent tasks from the Execution log.
+            </p>
           </div>
 
           {error && <p className="text-xs text-destructive">{error}</p>}
