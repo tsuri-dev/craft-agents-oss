@@ -1,10 +1,12 @@
 import { appendFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
+import { RPC_CHANNELS, type RequirementComment } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import type { AgentRun, AgentRunStatus, AgentRunTriggerType } from '@craft-agent/shared/agent-runs'
+import { getTapdRequirementBaseDir, upsertTapdRequirementLocalComment } from '../../requirements/tapd-storage'
+import { readAgentProfileDetail } from './agent-profiles'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.agentRuns.LIST,
@@ -16,6 +18,7 @@ const VALID_TRIGGER_TYPES = new Set<AgentRunTriggerType>(['mention', 'follow-up'
 
 interface ListAgentRunsInput {
   agentProfileId?: string
+  target?: { type: 'requirement'; pluginId: string; sourceItemId: string } | { type: 'session'; sessionId: string }
 }
 
 interface CancelAgentRunInput {
@@ -32,7 +35,7 @@ export function registerAgentRunsHandlers(server: RpcServer, deps: HandlerDeps):
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
 
     try {
-      return scanWorkspaceAgentRuns(workspace.rootPath, input.agentProfileId)
+      return scanWorkspaceAgentRuns(workspace.rootPath, input.agentProfileId, input.target)
     } catch (error) {
       log.warn?.('[agent-runs] failed to scan workspace agent runs', {
         workspaceId,
@@ -63,21 +66,24 @@ export function registerAgentRunsHandlers(server: RpcServer, deps: HandlerDeps):
       }
     }
 
-    return updateAgentRunStatus(run, 'cancelled', 'Cancelled from Agent Activity')
+    const updated = updateAgentRunStatus(run, 'cancelled', 'Cancelled by user')
+    upsertRequirementAgentRunComment(workspace.rootPath, updated)
+    return updated
   })
 }
 
 export function cancelAgentRunManifest(workspaceRootPath: string, input: CancelAgentRunInput): AgentRun | null {
   const run = findAgentRun(workspaceRootPath, input)
   if (!run) return null
-  return updateAgentRunStatus(run, 'cancelled', 'Cancelled from Agent Activity')
+  const updated = updateAgentRunStatus(run, 'cancelled', 'Cancelled by user')
+  upsertRequirementAgentRunComment(workspaceRootPath, updated)
+  return updated
 }
 
-export function scanWorkspaceAgentRuns(workspaceRootPath: string, agentProfileId?: string): AgentRun[] {
-  const sessionsDir = join(workspaceRootPath, 'sessions')
-  if (!existsSync(sessionsDir)) return []
-
+export function scanWorkspaceAgentRuns(workspaceRootPath: string, agentProfileId?: string, target?: ListAgentRunsInput['target']): AgentRun[] {
   const runs: AgentRun[] = []
+  const sessionsDir = join(workspaceRootPath, 'sessions')
+
   for (const sessionId of safeReadDir(sessionsDir)) {
     const agentRunsDir = join(sessionsDir, sessionId, 'agent-runs')
     if (!safeIsDirectory(agentRunsDir)) continue
@@ -88,11 +94,74 @@ export function scanWorkspaceAgentRuns(workspaceRootPath: string, agentProfileId
       const run = readAgentRunManifest(manifestPath, sessionId, runId)
       if (!run) continue
       if (agentProfileId && run.agentProfileId !== agentProfileId) continue
+      if (target && !agentRunMatchesTarget(run, target)) continue
       runs.push(run)
     }
   }
 
+  const requirementsDir = join(workspaceRootPath, 'requirements', 'tapd')
+  if (existsSync(requirementsDir)) {
+    for (const sourceItemId of safeReadDir(requirementsDir)) {
+      const agentRunsDir = join(requirementsDir, sourceItemId, 'agent-runs')
+      if (!safeIsDirectory(agentRunsDir)) continue
+      for (const runId of safeReadDir(agentRunsDir)) {
+        const manifestPath = join(agentRunsDir, runId, 'manifest.json')
+        if (!existsSync(manifestPath)) continue
+        const run = readAgentRunManifest(manifestPath, `requirement:tapd:${sourceItemId}`, runId)
+        if (!run) continue
+        if (agentProfileId && run.agentProfileId !== agentProfileId) continue
+        if (target && !agentRunMatchesTarget(run, target)) continue
+        runs.push(run)
+      }
+    }
+  }
+
   return runs.sort((a, b) => getRunSortTime(b) - getRunSortTime(a))
+}
+
+function agentRunMatchesTarget(run: AgentRun, target: NonNullable<ListAgentRunsInput['target']>): boolean {
+  if (target.type === 'session') {
+    return run.target?.type === 'session'
+      ? run.target.sessionId === target.sessionId
+      : run.parentSessionId === target.sessionId
+  }
+  return run.target?.type === 'requirement'
+    && run.target.pluginId === target.pluginId
+    && run.target.sourceItemId === target.sourceItemId
+}
+
+function upsertRequirementAgentRunComment(workspaceRootPath: string, run: AgentRun): void {
+  if (run.target?.type !== 'requirement') return
+  const profile = readAgentProfileDetail(workspaceRootPath, run.agentProfileId)
+  const profileName = profile?.name ?? run.agentProfileId
+  const now = new Date().toISOString()
+  const artifactPaths = [
+    join(getTapdRequirementBaseDir(workspaceRootPath, run.target.sourceItemId), 'agent-runs', run.id),
+    run.summaryPath,
+    run.transcriptPath,
+  ].filter((value): value is string => Boolean(value))
+  const statusLabel = run.status === 'cancelled' ? 'was cancelled' : run.status
+  const body = run.failureReason
+    ? `${profileName} ${statusLabel}: ${run.failureReason}`
+    : `${profileName} ${statusLabel}.`
+  const comment: RequirementComment = {
+    id: `agent-run-${run.id}`,
+    origin: 'agent',
+    author: profileName,
+    title: `${profileName} ${statusLabel}`,
+    body,
+    createdAt: run.createdAt,
+    updatedAt: now,
+    agentRunId: run.id,
+    agentProfileId: run.agentProfileId,
+    status: run.status,
+    childSessionId: run.childSessionId,
+    artifactPaths,
+    ...(run.summaryPath ? { summaryPath: run.summaryPath } : {}),
+    ...(run.transcriptPath ? { transcriptPath: run.transcriptPath } : {}),
+    raw: { runId: run.id, target: run.target, manifestPath: run.manifestPath },
+  }
+  upsertTapdRequirementLocalComment(workspaceRootPath, run.target.sourceItemId, comment)
 }
 
 function readAgentRunManifest(manifestPath: string, parentSessionIdFallback: string, runIdFallback: string): AgentRun | null {
@@ -108,6 +177,7 @@ function readAgentRunManifest(manifestPath: string, parentSessionIdFallback: str
       id: parsed.id || runIdFallback,
       agentProfileId: parsed.agentProfileId,
       parentSessionId: parsed.parentSessionId || parentSessionIdFallback,
+      target: parsed.target,
       childSessionId: parsed.childSessionId,
       triggerType,
       triggerSummary: parsed.triggerSummary,

@@ -3,7 +3,7 @@ import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput
 import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@craft-agent/server-core/runtime'
 import { basename, dirname, join } from 'path'
-import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { appendFile, readFile, writeFile, mkdir } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary } from '@craft-agent/shared/agent'
@@ -79,7 +79,7 @@ import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { collectDirectoryFiles, restoreFiles, type BundleFile } from '@craft-agent/shared/utils/bundle-files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SessionUsageEntry, type UsageStats, type UsageStatsRange, type UsageTotals, type RequirementBinding, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
+import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SessionUsageEntry, type UsageStats, type UsageStatsRange, type UsageTotals, type RequirementBinding, type RequirementStartAgentRunInput, type RequirementReplyToAgentInput, type RequirementAgentRunResult, type RequirementComment, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { withAgentTaskLabel } from '@craft-agent/shared/agent-runs'
 import type { AgentRun, AgentRunStatus, AgentRunTriggerType } from '@craft-agent/shared/agent-runs'
 import type { AgentProfileDetail } from '@craft-agent/shared/agent-profiles'
@@ -93,12 +93,13 @@ import type { SummarizeCallback } from '@craft-agent/shared/sources'
 import { type ThinkingLevel, DEFAULT_THINKING_LEVEL, normalizeThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { evaluateAutoLabels } from '@craft-agent/shared/labels/auto'
 import { listLabels, loadLabelConfig } from '@craft-agent/shared/labels/storage'
-import { extractLabelId, resolveSessionLabels } from '@craft-agent/shared/labels'
+import { extractLabelId, formatLabelEntry, resolveSessionLabels } from '@craft-agent/shared/labels'
 import { ensureLabelsExist } from '@craft-agent/shared/labels/crud'
 import { loadStatusConfig } from '@craft-agent/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot } from '@craft-agent/shared/automations'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
 import { readAgentProfileDetail } from '../handlers/rpc/agent-profiles'
+import { ensureTapdRequirementInfoDir, getTapdRequirementAgentRunsDir, getTapdRequirementBaseDir, getTapdRequirementSnapshotPath, upsertTapdRequirementLocalComment } from '../requirements/tapd-storage'
 
 // Import from server-core domain utilities
 import { sanitizeForTitle, shouldActivateBrowserOverlay, normalizeBrowserToolName, rollbackFailedBranchCreation, releaseBrowserOwnershipOnForcedStop } from '@craft-agent/server-core/domain'
@@ -5701,13 +5702,23 @@ export class SessionManager implements ISessionManager {
     return `<agent-profile name="${profileName.replace(/"/g, '&quot;')}">\n${trimmedInstructions}\n</agent-profile>\n\n${userPrompt}`
   }
 
-  private resolveAgentProfileChildPermissionMode(parent: ManagedSession, profile: AgentProfileDetail): PermissionMode {
-    // Profiles created from the original MVP default to `ask`. When the parent
-    // turn is explicitly in Execute/allow-all, keep delegated agents equally
-    // capable instead of unexpectedly downgrading them and blocking MCP calls.
-    if (parent.permissionMode === 'allow-all' && profile.permissionMode === 'ask') {
-      return parent.permissionMode
+  private writeAgentProfileInstructionsFile(workspaceRootPath: string, sessionId: string, profile: AgentProfileDetail): string | undefined {
+    const instructions = profile.instructions?.trim()
+    if (!instructions) return undefined
+    try {
+      const sessionPath = ensureSessionDir(workspaceRootPath, sessionId)
+      const profileDir = join(sessionPath, 'agent-profile')
+      mkdirSync(profileDir, { recursive: true })
+      const instructionsPath = join(profileDir, 'instructions.md')
+      writeFileSync(instructionsPath, `${instructions}\n`, 'utf-8')
+      return instructionsPath
+    } catch (error) {
+      sessionLog.warn(`Failed to write Agent Profile instructions for child session ${sessionId}:`, error)
+      return undefined
     }
+  }
+
+  private resolveAgentProfileChildPermissionMode(parent: ManagedSession, profile: AgentProfileDetail): PermissionMode {
     return profile.permissionMode ?? parent.permissionMode
   }
 
@@ -5724,21 +5735,30 @@ export class SessionManager implements ISessionManager {
   }
 
   private async createAgentRunManifest(input: {
-    parent: ManagedSession
+    parent?: ManagedSession
+    workspaceRootPath?: string
+    runBaseDir?: string
+    parentSessionId?: string
+    target?: AgentRun['target']
     agentProfileId: string
     childSessionId: string
     triggerSummary: string
     triggerType?: AgentRunTriggerType
   }): Promise<AgentRun> {
     const runId = `run-${input.agentProfileId}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`
-    const runDir = join(getSessionStoragePath(input.parent.workspace.rootPath, input.parent.id), 'agent-runs', runId)
+    const workspaceRootPath = input.workspaceRootPath ?? input.parent?.workspace.rootPath
+    if (!workspaceRootPath) throw new Error('workspaceRootPath is required to create an AgentRun manifest')
+    const parentSessionId = input.parentSessionId ?? input.parent?.id ?? (input.target?.type === 'requirement' ? `requirement:${input.target.pluginId}:${input.target.sourceItemId}` : undefined)
+    if (!parentSessionId) throw new Error('parentSessionId is required to create an AgentRun manifest')
+    const runDir = join(input.runBaseDir ?? join(getSessionStoragePath(workspaceRootPath, parentSessionId), 'agent-runs'), runId)
     const manifestPath = join(runDir, 'manifest.json')
     const transcriptPath = join(runDir, 'transcript.jsonl')
     const now = new Date().toISOString()
     const run: AgentRun = {
       id: runId,
       agentProfileId: input.agentProfileId,
-      parentSessionId: input.parent.id,
+      parentSessionId,
+      ...(input.target ? { target: input.target } : input.parent ? { target: { type: 'session', sessionId: input.parent.id } as const } : {}),
       childSessionId: input.childSessionId,
       triggerType: input.triggerType ?? 'mention',
       triggerSummary: input.triggerSummary,
@@ -5757,7 +5777,8 @@ export class SessionManager implements ISessionManager {
       type: 'agent_run_started',
       runId,
       agentProfileId: input.agentProfileId,
-      parentSessionId: input.parent.id,
+      parentSessionId,
+      target: run.target,
       childSessionId: input.childSessionId,
       triggerType: run.triggerType,
       triggerSummary: input.triggerSummary,
@@ -5862,6 +5883,54 @@ export class SessionManager implements ISessionManager {
     await this.postParentAgentRunMessage(parent, run, content, 'finished')
   }
 
+  private buildRequirementAgentComment(workspaceRootPath: string, run: AgentRun, profileName: string, body?: string): RequirementComment | null {
+    if (run.target?.type !== 'requirement') return null
+    const now = new Date().toISOString()
+    const statusLabel = run.status === 'completed'
+      ? 'completed'
+      : run.status === 'failed'
+        ? 'failed'
+        : run.status === 'cancelled'
+          ? 'was cancelled'
+          : run.status
+    const content = body?.trim()
+    const fallbackBody = run.status === 'completed'
+      ? `${profileName} completed the requirement-scoped task.`
+      : run.failureReason
+        ? `${profileName} ${statusLabel}: ${run.failureReason}`
+        : `${profileName} ${statusLabel}.`
+    const artifactPaths = [
+      join(getTapdRequirementBaseDir(workspaceRootPath, run.target.sourceItemId), 'agent-runs', run.id),
+      run.summaryPath,
+      run.transcriptPath,
+    ].filter((value): value is string => Boolean(value))
+    return {
+      id: `agent-run-${run.id}`,
+      origin: 'agent',
+      author: profileName,
+      title: `${profileName} ${statusLabel}`,
+      body: content || fallbackBody,
+      createdAt: run.createdAt,
+      updatedAt: now,
+      agentRunId: run.id,
+      agentProfileId: run.agentProfileId,
+      status: run.status,
+      childSessionId: run.childSessionId,
+      artifactPaths,
+      ...(run.summaryPath ? { summaryPath: run.summaryPath } : {}),
+      ...(run.transcriptPath ? { transcriptPath: run.transcriptPath } : {}),
+      raw: { runId: run.id, target: run.target, manifestPath: run.manifestPath },
+    }
+  }
+
+  private async upsertRequirementAgentComment(workspaceRootPath: string, run: AgentRun, body?: string): Promise<RequirementComment | null> {
+    if (run.target?.type !== 'requirement') return null
+    const profile = readAgentProfileDetail(workspaceRootPath, run.agentProfileId)
+    const comment = this.buildRequirementAgentComment(workspaceRootPath, run, profile?.name ?? run.agentProfileId, body)
+    if (!comment) return null
+    return upsertTapdRequirementLocalComment(workspaceRootPath, run.target.sourceItemId, comment)
+  }
+
   private async updateAgentRunForChildSession(childSessionId: string, status: AgentRunStatus, failureReason?: string): Promise<void> {
     const manifestPath = this.agentRunManifestByChildSessionId.get(childSessionId)
     if (!manifestPath || !existsSync(manifestPath)) return
@@ -5903,11 +5972,181 @@ export class SessionManager implements ISessionManager {
       })
 
       if (isFinished && !wasAlreadyFinished) {
-        await this.notifyParentOfAgentRunCompletion(updated, lastAssistant?.content)
+        if (updated.target?.type === 'requirement') {
+          const workspaceRootPath = child?.workspace.rootPath
+          if (workspaceRootPath) {
+            await this.upsertRequirementAgentComment(workspaceRootPath, updated, lastAssistant?.content)
+          }
+        } else {
+          await this.notifyParentOfAgentRunCompletion(updated, lastAssistant?.content)
+        }
       }
     } catch (err) {
       sessionLog.warn(`Failed to update AgentRun manifest for child session ${childSessionId}:`, err)
     }
+  }
+
+  private buildRequirementScopedAgentPrompt(input: {
+    profileName: string
+    instructionsPath?: string
+    prompt: string
+    sourceItemId: string
+    snapshotPath: string
+    infoDirPath: string
+    requirementDirPath: string
+  }): string {
+    const delegatedPrompt = this.stripAgentMentionsForChildPrompt(input.prompt)
+    const lines = [
+      delegatedPrompt,
+      '',
+      '---',
+      'Requirement-scoped execution context:',
+      `- Agent: ${input.profileName}`,
+      ...(input.instructionsPath ? [`- Agent profile instructions: ${input.instructionsPath}`] : []),
+      `- TAPD requirement: TAPD-${input.sourceItemId}`,
+      `- Requirement folder: ${input.requirementDirPath}`,
+      `- TAPD requirement snapshot: ${input.snapshotPath}`,
+      `- Shared info/artifact folder: ${input.infoDirPath}`,
+      `- Local comments log: ${join(input.requirementDirPath, 'comments.jsonl')}`,
+      '',
+      'Read the Agent profile instructions file, TAPD requirement snapshot, and shared info files directly from the paths above before working. The user message intentionally does not embed Agent Profile instructions or TAPD source details.',
+      'Work in the configured code Context when inspecting or editing code. Save requirement-specific notes, plans, and artifacts into the requirement folder or its info folder so the main session and other agents can see them.',
+      'When you finish, provide a concise comment-ready summary with links/paths to any files you created or updated. Do not assume the main session will receive your result directly.',
+    ]
+    return lines.join('\n')
+  }
+
+  async startRequirementAgentRun(workspaceId: string, input: RequirementStartAgentRunInput): Promise<RequirementAgentRunResult> {
+    if (input.pluginId !== 'tapd') throw new Error(`Unknown requirement plugin: ${input.pluginId}`)
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace ${workspaceId} not found`)
+    const profile = readAgentProfileDetail(workspace.rootPath, input.agentProfileId)
+    if (!profile) throw new Error(`Agent Profile not found: ${input.agentProfileId}`)
+    const sourceItemId = input.item.sourceItemId
+    const infoDirPath = ensureTapdRequirementInfoDir(workspace.rootPath, sourceItemId)
+    const requirementDirPath = getTapdRequirementBaseDir(workspace.rootPath, sourceItemId)
+    const snapshotPath = getTapdRequirementSnapshotPath(workspace.rootPath, sourceItemId)
+    const runBaseDir = getTapdRequirementAgentRunsDir(workspace.rootPath, sourceItemId)
+    const promptSnippet = sanitizeForTitle(input.item.title || input.prompt).slice(0, 48)
+    const labels = [
+      ...(input.groupName || input.item.binding?.groupName ? [formatLabelEntry('group', input.groupName || input.item.binding!.groupName)] : []),
+      formatLabelEntry('source', 'tapd'),
+      formatLabelEntry('tapd', sourceItemId),
+    ]
+
+    const session = await this.createSession(workspaceId, {
+      name: `${profile.name}: TAPD-${sourceItemId}${promptSnippet ? ` ${promptSnippet}` : ''}`,
+      llmConnection: profile.connectionSlug,
+      model: profile.model,
+      thinkingLevel: profile.thinkingLevel,
+      permissionMode: profile.permissionMode ?? 'ask',
+      enabledSourceSlugs: profile.sourceSlugs,
+      workingDirectory: input.workingDirectory?.trim() || undefined,
+      labels: withAgentTaskLabel(labels),
+    })
+
+    const run = await this.createAgentRunManifest({
+      workspaceRootPath: workspace.rootPath,
+      runBaseDir,
+      target: { type: 'requirement', pluginId: input.pluginId, sourceItemId },
+      agentProfileId: profile.id,
+      childSessionId: session.id,
+      triggerSummary: input.prompt,
+      triggerType: 'tapd',
+    })
+
+    const runningComment = await this.upsertRequirementAgentComment(workspace.rootPath, run, `${profile.name} is working on this requirement. Results will appear here when the run finishes.`)
+    this.sendEvent({ type: 'session_created', sessionId: session.id }, workspaceId)
+    const instructionsPath = this.writeAgentProfileInstructionsFile(workspace.rootPath, session.id, profile)
+
+    const childPrompt = this.buildRequirementScopedAgentPrompt({
+      profileName: profile.name,
+      instructionsPath,
+      prompt: input.prompt,
+      sourceItemId,
+      snapshotPath,
+      infoDirPath,
+      requirementDirPath,
+    })
+    this.sendMessage(session.id, childPrompt, undefined, undefined, {
+      skillSlugs: profile.skillSlugs.length > 0 ? profile.skillSlugs : undefined,
+    }).then(() => {
+      void this.appendAgentRunLog(run.transcriptPath, {
+        type: 'requirement_agent_run_prompt_accepted',
+        runId: run.id,
+        childSessionId: session.id,
+        sourceItemId,
+      })
+    }).catch(err => {
+      sessionLog.error(`Failed to send requirement-scoped agent prompt to child session ${session.id}:`, err)
+      void this.updateAgentRunForChildSession(session.id, 'failed', err instanceof Error ? err.message : String(err))
+    })
+
+    return { run, comment: runningComment ?? this.buildRequirementAgentComment(workspace.rootPath, run, profile.name)!, sessionId: session.id }
+  }
+
+  async replyToRequirementAgent(workspaceId: string, input: RequirementReplyToAgentInput): Promise<RequirementAgentRunResult> {
+    if (input.pluginId !== 'tapd') throw new Error(`Unknown requirement plugin: ${input.pluginId}`)
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace ${workspaceId} not found`)
+    const profile = readAgentProfileDetail(workspace.rootPath, input.agentProfileId)
+    if (!profile) throw new Error(`Agent Profile not found: ${input.agentProfileId}`)
+    const child = this.sessions.get(input.childSessionId)
+    if (!child) throw new Error(`Agent child session ${input.childSessionId} not found`)
+    if (profile.permissionMode && child.permissionMode !== profile.permissionMode) {
+      this.setSessionPermissionMode(input.childSessionId, profile.permissionMode)
+    }
+    await this.ensureMessagesLoaded(child)
+
+    const sourceItemId = input.sourceItemId
+    const infoDirPath = ensureTapdRequirementInfoDir(workspace.rootPath, sourceItemId)
+    const requirementDirPath = getTapdRequirementBaseDir(workspace.rootPath, sourceItemId)
+    const snapshotPath = getTapdRequirementSnapshotPath(workspace.rootPath, sourceItemId)
+    const runBaseDir = getTapdRequirementAgentRunsDir(workspace.rootPath, sourceItemId)
+    const run = await this.createAgentRunManifest({
+      workspaceRootPath: workspace.rootPath,
+      runBaseDir,
+      target: { type: 'requirement', pluginId: input.pluginId, sourceItemId },
+      agentProfileId: profile.id,
+      childSessionId: input.childSessionId,
+      triggerSummary: input.message,
+      triggerType: 'follow-up',
+    })
+    await this.appendAgentRunLog(run.transcriptPath, {
+      type: 'requirement_agent_run_follow_up_requested',
+      runId: run.id,
+      sourceRunId: input.runId,
+      childSessionId: input.childSessionId,
+      sourceItemId,
+    })
+    const runningComment = await this.upsertRequirementAgentComment(workspace.rootPath, run, `${profile.name} is working on your follow-up. Results will appear here when the run finishes.`)
+
+    const instructionsPath = this.writeAgentProfileInstructionsFile(workspace.rootPath, input.childSessionId, profile)
+    const childPrompt = this.buildRequirementScopedAgentPrompt({
+      profileName: profile.name,
+      instructionsPath,
+      prompt: input.message,
+      sourceItemId,
+      snapshotPath,
+      infoDirPath,
+      requirementDirPath,
+    })
+    this.sendMessage(input.childSessionId, childPrompt, undefined, undefined, {
+      skillSlugs: profile.skillSlugs.length > 0 ? profile.skillSlugs : undefined,
+    }).then(() => {
+      void this.appendAgentRunLog(run.transcriptPath, {
+        type: 'requirement_agent_run_follow_up_prompt_accepted',
+        runId: run.id,
+        sourceRunId: input.runId,
+        childSessionId: input.childSessionId,
+        sourceItemId,
+      })
+    }).catch(err => {
+      sessionLog.error(`Failed to send requirement-scoped agent follow-up to child session ${input.childSessionId}:`, err)
+      void this.updateAgentRunForChildSession(input.childSessionId, 'failed', err instanceof Error ? err.message : String(err))
+    })
+
+    return { run, comment: runningComment ?? this.buildRequirementAgentComment(workspace.rootPath, run, profile.name)!, sessionId: input.childSessionId }
   }
 
   private async sendAgentRunFollowUp(

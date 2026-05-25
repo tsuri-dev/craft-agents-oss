@@ -6,6 +6,7 @@ import { loadWorkspaceSources } from '@craft-agent/shared/sources'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient } from '@craft-agent/shared/mcp'
 import { formatLabelEntry } from '@craft-agent/shared/labels'
+import { readTapdRequirementLocalComments } from '../../requirements/tapd-storage'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import type {
@@ -13,6 +14,8 @@ import type {
   RequirementBindInput,
   RequirementBinding,
   RequirementCreateSessionInput,
+  RequirementStartAgentRunInput,
+  RequirementReplyToAgentInput,
   RequirementInfoFile,
   RequirementListFilters,
   RequirementListResult,
@@ -31,6 +34,9 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.requirements.LIST_ITEMS,
   RPC_CHANNELS.requirements.GET_ITEM_DETAIL,
   RPC_CHANNELS.requirements.LIST_INFO_FILES,
+  RPC_CHANNELS.requirements.LIST_COMMENTS,
+  RPC_CHANNELS.requirements.START_AGENT_RUN,
+  RPC_CHANNELS.requirements.REPLY_TO_AGENT,
   RPC_CHANNELS.requirements.CREATE_GROUP_FROM_ITEM,
   RPC_CHANNELS.requirements.BIND_ITEM_TO_GROUP,
   RPC_CHANNELS.requirements.UNLINK_ITEM_FROM_GROUP,
@@ -733,6 +739,27 @@ export function registerRequirementsHandlers(server: RpcServer, deps: HandlerDep
     }
   })
 
+  server.handle(RPC_CHANNELS.requirements.LIST_COMMENTS, async (_ctx, workspaceId: string, pluginId: string, sourceItemId: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+    if (pluginId !== TAPD_PLUGIN_ID) throw new Error(`Unknown requirement plugin: ${pluginId}`)
+    return readTapdRequirementLocalComments(workspace.rootPath, sourceItemId)
+  })
+
+  server.handle(RPC_CHANNELS.requirements.START_AGENT_RUN, async (_ctx, workspaceId: string, input: RequirementStartAgentRunInput) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+    if (!input || input.pluginId !== TAPD_PLUGIN_ID) throw new Error(`Unknown requirement plugin: ${input?.pluginId}`)
+    return deps.sessionManager.startRequirementAgentRun(workspaceId, input)
+  })
+
+  server.handle(RPC_CHANNELS.requirements.REPLY_TO_AGENT, async (_ctx, workspaceId: string, input: RequirementReplyToAgentInput) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+    if (!input || input.pluginId !== TAPD_PLUGIN_ID) throw new Error(`Unknown requirement plugin: ${input?.pluginId}`)
+    return deps.sessionManager.replyToRequirementAgent(workspaceId, input)
+  })
+
   server.handle(RPC_CHANNELS.requirements.CREATE_GROUP_FROM_ITEM, async (_ctx, workspaceId: string, input: RequirementBindInput) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
@@ -769,8 +796,9 @@ export function registerRequirementsHandlers(server: RpcServer, deps: HandlerDep
       // use its concrete runtime settings for the session shell.
       permissionMode: agentProfile?.permissionMode ?? 'ask',
       thinkingLevel: agentProfile?.thinkingLevel,
-      model: agentProfile?.model,
-      llmConnection: agentProfile?.connectionSlug,
+      model: agentProfile?.model ?? input.model,
+      llmConnection: agentProfile?.connectionSlug ?? input.llmConnection,
+      workingDirectory: input.workingDirectory?.trim() || undefined,
       // The TAPD requirement snapshot is stored once at workspace scope and the
       // session references it through its tapd::<id> label. Do not enable
       // tapd-mcp-http by default here unless the selected profile explicitly asks

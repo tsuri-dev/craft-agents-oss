@@ -24,6 +24,9 @@ import type {
   ShareResult,
   UsageStats,
   UsageStatsRange,
+  RequirementStartAgentRunInput,
+  RequirementReplyToAgentInput,
+  RequirementAgentRunResult,
 } from '@craft-agent/shared/protocol'
 import type { SessionBundle, DispatchMode } from '@craft-agent/shared/sessions'
 import type { EventSink } from '../transport'
@@ -196,6 +199,8 @@ export interface ISessionManager {
   refreshBadge(): void
   getUnreadSummary(): UnreadSummary
   getUsageStats(workspaceId: string, range?: UsageStatsRange): Promise<UsageStats>
+  startRequirementAgentRun(workspaceId: string, input: RequirementStartAgentRunInput): Promise<RequirementAgentRunResult>
+  replyToRequirementAgent(workspaceId: string, input: RequirementReplyToAgentInput): Promise<RequirementAgentRunResult>
 
   // ---------------------------------------------------------------------------
   // Workspace

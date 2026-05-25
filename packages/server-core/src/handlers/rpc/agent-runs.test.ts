@@ -38,6 +38,37 @@ describe('agent-runs RPC scanner', () => {
     expect(runs[0]?.manifestPath).toContain('manifest.json')
   })
 
+  it('scans requirement-scoped agent run manifests and filters by target', () => {
+    const workspace = tempWorkspace()
+    const runDir = join(workspace, 'requirements', 'tapd', '1010045201134475108', 'agent-runs', 'run-tapd')
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(join(runDir, 'manifest.json'), JSON.stringify({
+      id: 'run-tapd',
+      agentProfileId: 'orion',
+      parentSessionId: 'requirement:tapd:1010045201134475108',
+      target: { type: 'requirement', pluginId: 'tapd', sourceItemId: '1010045201134475108' },
+      childSessionId: 'child-tapd',
+      triggerType: 'tapd',
+      triggerSummary: 'Work on TAPD requirement',
+      status: 'running',
+      createdAt: '2026-05-20T10:00:00+08:00',
+      startedAt: '2026-05-20T10:00:30+08:00',
+    }))
+
+    const runs = scanWorkspaceAgentRuns(workspace, 'orion', { type: 'requirement', pluginId: 'tapd', sourceItemId: '1010045201134475108' })
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({
+      id: 'run-tapd',
+      parentSessionId: 'requirement:tapd:1010045201134475108',
+      target: { type: 'requirement', pluginId: 'tapd', sourceItemId: '1010045201134475108' },
+      childSessionId: 'child-tapd',
+      status: 'running',
+    })
+
+    const unrelated = scanWorkspaceAgentRuns(workspace, 'orion', { type: 'requirement', pluginId: 'tapd', sourceItemId: 'other' })
+    expect(unrelated).toHaveLength(0)
+  })
+
   it('cancels a running manifest and appends a transcript log record', () => {
     const workspace = tempWorkspace()
     const runDir = join(workspace, 'sessions', 'parent-1', 'agent-runs', 'run-running')
@@ -64,12 +95,64 @@ describe('agent-runs RPC scanner', () => {
     expect(updated).toMatchObject({
       id: 'run-running',
       status: 'cancelled',
-      failureReason: 'Cancelled from Agent Activity',
+      failureReason: 'Cancelled by user',
     })
     expect(typeof updated?.completedAt).toBe('string')
     const persisted = JSON.parse(readFileSync(manifestPath, 'utf-8'))
     expect(persisted.status).toBe('cancelled')
     expect(readFileSync(transcriptPath, 'utf-8')).toContain('agent_run_cancelled')
+  })
+
+  it('updates requirement local comments when cancelling a requirement-scoped manifest', () => {
+    const workspace = tempWorkspace()
+    const sourceItemId = '1010045201134475108'
+    const runDir = join(workspace, 'requirements', 'tapd', sourceItemId, 'agent-runs', 'run-tapd')
+    mkdirSync(runDir, { recursive: true })
+    const manifestPath = join(runDir, 'manifest.json')
+    const transcriptPath = join(runDir, 'transcript.jsonl')
+    writeFileSync(manifestPath, JSON.stringify({
+      id: 'run-tapd',
+      agentProfileId: 'orion',
+      parentSessionId: `requirement:tapd:${sourceItemId}`,
+      target: { type: 'requirement', pluginId: 'tapd', sourceItemId },
+      childSessionId: 'child-tapd',
+      triggerSummary: 'Work on requirement',
+      triggerType: 'tapd',
+      status: 'running',
+      createdAt: '2026-05-20T10:00:00+08:00',
+      startedAt: '2026-05-20T10:00:00+08:00',
+      manifestPath,
+      transcriptPath,
+    }))
+    writeFileSync(transcriptPath, '')
+    writeFileSync(join(workspace, 'requirements', 'tapd', sourceItemId, 'comments.jsonl'), `${JSON.stringify({
+      id: 'agent-run-run-tapd',
+      origin: 'agent',
+      author: 'orion',
+      title: 'orion running',
+      body: 'orion is working.',
+      createdAt: '2026-05-20T10:00:00+08:00',
+      updatedAt: '2026-05-20T10:00:00+08:00',
+      agentRunId: 'run-tapd',
+      agentProfileId: 'orion',
+      status: 'running',
+      childSessionId: 'child-tapd',
+    })}\n`)
+
+    const updated = cancelAgentRunManifest(workspace, { runId: 'run-tapd', childSessionId: 'child-tapd' })
+
+    expect(updated?.status).toBe('cancelled')
+    const comments = readFileSync(join(workspace, 'requirements', 'tapd', sourceItemId, 'comments.jsonl'), 'utf-8')
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line))
+    expect(comments).toHaveLength(1)
+    expect(comments[0]).toMatchObject({
+      id: 'agent-run-run-tapd',
+      status: 'cancelled',
+      title: 'orion was cancelled',
+      body: 'orion was cancelled: Cancelled by user',
+    })
   })
 
   it('filters by agent profile id and ignores invalid manifests', () => {

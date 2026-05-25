@@ -2,6 +2,10 @@ export type AgentRunStatus = 'queued' | 'running' | 'stopping' | 'completed' | '
 
 export type AgentRunTriggerType = 'mention' | 'follow-up' | 'manual' | 'automation' | 'tapd'
 
+export type AgentRunTarget =
+  | { type: 'session'; sessionId: string }
+  | { type: 'requirement'; pluginId: string; sourceItemId: string }
+
 export const AGENT_TASK_LABEL_ID = 'agent-task'
 
 export function hasAgentTaskLabel(labels?: readonly string[]): boolean {
@@ -16,7 +20,9 @@ export function withAgentTaskLabel(labels?: readonly string[]): string[] {
 export interface AgentRun {
   id: string
   agentProfileId: string
+  /** Backward-compatible parent session id for session-scoped runs. Requirement-scoped runs use a synthetic id and `target`. */
   parentSessionId: string
+  target?: AgentRunTarget
   childSessionId?: string
   triggerType: AgentRunTriggerType
   triggerSummary: string

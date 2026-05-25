@@ -237,6 +237,10 @@ import type {
   RequirementUnlinkInput,
   RequirementCreateSessionInput,
   RequirementCreateSessionResult,
+  RequirementStartAgentRunInput,
+  RequirementReplyToAgentInput,
+  RequirementAgentRunResult,
+  RequirementComment,
 } from '@craft-agent/shared/protocol'
 
 export interface ElectronAPI {
@@ -255,7 +259,7 @@ export interface ElectronAPI {
   getAgentProfile(workspaceId: string, agentProfileId: string): Promise<AgentProfileDetail>
   createAgentProfile(workspaceId: string, input: AgentProfileCreateInput): Promise<AgentProfileDetail>
   updateAgentProfile(workspaceId: string, agentProfileId: string, input: AgentProfileUpdateInput): Promise<AgentProfileDetail>
-  listAgentRuns(workspaceId: string, input?: { agentProfileId?: string }): Promise<AgentRun[]>
+  listAgentRuns(workspaceId: string, input?: { agentProfileId?: string; target?: { type: 'requirement'; pluginId: string; sourceItemId: string } | { type: 'session'; sessionId: string } }): Promise<AgentRun[]>
   cancelAgentRun(workspaceId: string, input: { runId: string; parentSessionId?: string; childSessionId?: string }): Promise<AgentRun | null>
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
@@ -268,6 +272,9 @@ export interface ElectronAPI {
   listRequirementItems(workspaceId: string, pluginId: string, filters: RequirementListFilters): Promise<RequirementListResult>
   getRequirementItemDetail(workspaceId: string, pluginId: string, sourceItemId: string, filters?: RequirementListFilters): Promise<RequirementDetailResult>
   listRequirementInfoFiles(workspaceId: string, pluginId: string, sourceItemId: string): Promise<RequirementInfoFilesResult>
+  listRequirementComments(workspaceId: string, pluginId: string, sourceItemId: string): Promise<RequirementComment[]>
+  startRequirementAgentRun(workspaceId: string, input: RequirementStartAgentRunInput): Promise<RequirementAgentRunResult>
+  replyToRequirementAgent(workspaceId: string, input: RequirementReplyToAgentInput): Promise<RequirementAgentRunResult>
   createRequirementGroupFromItem(workspaceId: string, input: RequirementBindInput): Promise<RequirementBinding>
   bindRequirementItemToGroup(workspaceId: string, input: RequirementBindInput): Promise<RequirementBinding>
   unlinkRequirementItemFromGroup(workspaceId: string, input: RequirementUnlinkInput): Promise<{ removed: boolean }>

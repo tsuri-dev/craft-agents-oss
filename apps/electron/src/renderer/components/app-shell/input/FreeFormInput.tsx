@@ -2601,7 +2601,7 @@ function formatPathForDisplay(path: string | undefined, homeDir: string): string
  * WorkingDirectoryBadge - Context badge for selecting working directory
  * Uses cmdk for filterable folder list when there are more than 5 recent folders.
  */
-function WorkingDirectoryBadge({
+export function WorkingDirectoryBadge({
   workingDirectory,
   onWorkingDirectoryChange,
   sessionFolderPath,

@@ -132,7 +132,7 @@ describe('@agent mention AgentRun manifests', () => {
     expect(parent.isProcessing).toBe(true)
     expect(childIds).toEqual(['child-1'])
     expect(childCreateOptions[0]).toMatchObject({
-      permissionMode: 'allow-all',
+      permissionMode: 'ask',
       enabledSourceSlugs: ['test-source'],
       labels: [AGENT_TASK_LABEL_ID],
     })

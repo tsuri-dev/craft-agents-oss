@@ -23,6 +23,7 @@ import type {
   CredentialInputMode as SharedCredentialInputMode,
   CredentialAuthRequest as SharedCredentialAuthRequest,
 } from '../agent/index'
+import type { AgentRun, AgentRunStatus } from '../agent-runs'
 
 // Re-export generateMessageId for handler convenience
 export { generateMessageId } from '@craft-agent/core/types'
@@ -234,6 +235,14 @@ export interface RequirementComment {
   updatedAt?: string
   contentImages?: RequirementContentImage[]
   raw?: unknown
+  origin?: 'source' | 'local' | 'agent'
+  agentRunId?: string
+  agentProfileId?: string
+  status?: AgentRunStatus
+  artifactPaths?: string[]
+  transcriptPath?: string
+  summaryPath?: string
+  childSessionId?: string
 }
 
 export interface RequirementBinding {
@@ -305,11 +314,39 @@ export interface RequirementCreateSessionInput {
   groupName: string
   sessionName?: string
   agentProfileId?: string
+  llmConnection?: string
+  model?: string
+  workingDirectory?: string
 }
 
 export interface RequirementCreateSessionResult {
   sessionId: string
   session: Session
+}
+
+export interface RequirementStartAgentRunInput {
+  pluginId: string
+  item: ExternalRequirementItem
+  agentProfileId: string
+  prompt: string
+  workingDirectory?: string
+  groupName?: string
+}
+
+export interface RequirementReplyToAgentInput {
+  pluginId: string
+  sourceItemId: string
+  agentProfileId: string
+  childSessionId: string
+  runId?: string
+  message: string
+  workingDirectory?: string
+}
+
+export interface RequirementAgentRunResult {
+  run: AgentRun
+  comment: RequirementComment
+  sessionId: string
 }
 
 export interface CreateSessionOptions {
