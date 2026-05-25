@@ -5744,6 +5744,12 @@ export class SessionManager implements ISessionManager {
     return profile.permissionMode ?? parent.permissionMode
   }
 
+  private syncAgentChildWorkingDirectory(child: ManagedSession, workingDirectory?: string): void {
+    const nextWorkingDirectory = workingDirectory?.trim()
+    if (!nextWorkingDirectory || child.workingDirectory === nextWorkingDirectory) return
+    this.updateWorkingDirectory(child.id, nextWorkingDirectory)
+  }
+
   private async writeAgentRunManifest(run: AgentRun): Promise<void> {
     if (!run.manifestPath) return
     await mkdir(dirname(run.manifestPath), { recursive: true })
@@ -6124,6 +6130,7 @@ export class SessionManager implements ISessionManager {
       this.setSessionPermissionMode(input.childSessionId, profile.permissionMode)
     }
     await this.ensureMessagesLoaded(child)
+    this.syncAgentChildWorkingDirectory(child, input.workingDirectory)
 
     const sourceItemId = input.sourceItemId
     const infoDirPath = ensureTapdRequirementInfoDir(workspace.rootPath, sourceItemId)
