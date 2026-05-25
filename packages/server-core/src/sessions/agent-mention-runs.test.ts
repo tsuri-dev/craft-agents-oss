@@ -217,6 +217,29 @@ describe('@agent mention AgentRun manifests', () => {
     })
   })
 
+  it('syncs reused requirement child sessions to the latest requirement working directory', () => {
+    const oldWorkingDirectory = join(tmpRoot, 'old-repo')
+    const nextWorkingDirectory = join(tmpRoot, 'next-repo')
+    mkdirSync(oldWorkingDirectory, { recursive: true })
+    mkdirSync(nextWorkingDirectory, { recursive: true })
+    const child = addManagedSession('child-requirement-1', false, 'ask', oldWorkingDirectory)
+    const workingDirectoryEvents: Array<{ type?: string; sessionId?: string; workingDirectory?: string }> = []
+
+    ;(sm as unknown as { sendEvent: (event: { type?: string; sessionId?: string; workingDirectory?: string }) => void }).sendEvent = (event) => {
+      if (event.type === 'working_directory_changed') workingDirectoryEvents.push(event)
+    }
+
+    ;(sm as unknown as { syncAgentChildWorkingDirectory: (child: unknown, workingDirectory?: string) => void })
+      .syncAgentChildWorkingDirectory(child, nextWorkingDirectory)
+
+    expect(child.workingDirectory).toBe(nextWorkingDirectory)
+    expect(workingDirectoryEvents[0]).toMatchObject({
+      type: 'working_directory_changed',
+      sessionId: 'child-requirement-1',
+      workingDirectory: nextWorkingDirectory,
+    })
+  })
+
   it('routes parent replies to the same child session without blocking the parent', async () => {
     writeProfile('orion')
     const parent = addManagedSession('parent-1', true, 'allow-all')
