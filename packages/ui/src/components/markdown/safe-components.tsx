@@ -27,28 +27,54 @@ export const UnknownTag: React.FC<{ tagName: string; children?: React.ReactNode 
   </span>
 )
 
-/** Matches valid lowercase HTML tags: div, span, h1, etc. */
-const VALID_HTML_TAG = /^[a-z][a-z0-9]*$/
+/** Matches valid lowercase tag names: div, span, h1, value, etc. */
+const VALID_LOWERCASE_TAG = /^[a-z][a-z0-9]*$/
 
 /** Matches valid PascalCase React components: MyComponent, Button, etc. */
 const VALID_COMPONENT_NAME = /^[A-Z][a-zA-Z0-9_]*$/
 
+/** Standard HTML/SVG tags React can render without browser warnings. */
+const STANDARD_TAGS = new Set([
+  'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio', 'b', 'base', 'bdi', 'bdo',
+  'blockquote', 'body', 'br', 'button', 'canvas', 'caption', 'cite', 'code', 'col',
+  'colgroup', 'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl',
+  'dt', 'em', 'embed', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2',
+  'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html', 'i', 'iframe', 'img',
+  'input', 'ins', 'kbd', 'label', 'legend', 'li', 'link', 'main', 'map', 'mark', 'menu',
+  'meta', 'meter', 'nav', 'noscript', 'object', 'ol', 'optgroup', 'option', 'output', 'p',
+  'picture', 'pre', 'progress', 'q', 'rp', 'rt', 'ruby', 's', 'samp', 'script', 'search',
+  'section', 'select', 'slot', 'small', 'source', 'span', 'strong', 'style', 'sub', 'summary',
+  'sup', 'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time',
+  'title', 'tr', 'track', 'u', 'ul', 'var', 'video', 'wbr',
+  // SVG/math tags that may appear in rendered math or pasted HTML.
+  'svg', 'path', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'rect', 'g', 'defs',
+  'use', 'symbol', 'text', 'tspan', 'lineargradient', 'radialgradient', 'stop', 'clipPath',
+  'mask', 'math', 'mi', 'mn', 'mo', 'ms', 'mtext', 'mrow', 'msup', 'msub', 'msubsup',
+  'mfrac', 'msqrt', 'mroot', 'mtable', 'mtr', 'mtd', 'semantics', 'annotation',
+])
+
 /**
- * Checks if a tag name is valid for React/HTML rendering.
- * Invalid tags contain characters like +, @, -, spaces, etc.
+ * Checks if a tag name is syntactically valid for React rendering.
+ * Invalid tags contain characters like +, @, spaces, etc.
  */
 export function isValidTagName(tagName: string): boolean {
-  return VALID_HTML_TAG.test(tagName) || VALID_COMPONENT_NAME.test(tagName)
+  return VALID_LOWERCASE_TAG.test(tagName) || VALID_COMPONENT_NAME.test(tagName)
+}
+
+function isStandardTagName(tagName: string): boolean {
+  return STANDARD_TAGS.has(tagName) || STANDARD_TAGS.has(tagName.toLowerCase())
 }
 
 /**
  * Determines if a tag should use our fallback component.
- * Returns true for invalid tags not explicitly defined in components.
+ * Returns true for invalid tags and for syntactically-valid-but-unknown tags
+ * such as `<value>`, which browsers warn about when rendered as DOM nodes.
  */
 function shouldUseFallback(prop: string | symbol, target: object): boolean {
   if (typeof prop === 'symbol') return false
   if (prop in target) return false
-  return !isValidTagName(prop)
+  if (VALID_COMPONENT_NAME.test(prop)) return false
+  return !isValidTagName(prop) || !isStandardTagName(prop)
 }
 
 /** Descriptor returned for invalid tags to make hasOwnProperty return true */
