@@ -44,7 +44,13 @@ import {
   sessionHasGroup,
   type SessionGroupFilterOption,
 } from "@/utils/session-group-filter"
-import { buildSessionProjectFilterOptions, getSessionProjectValue, type SessionProjectFilterOption } from "@/utils/session-project-filter"
+import {
+  addSessionProjectLabel,
+  buildSessionProjectFilterOptions,
+  getSessionProjectValue,
+  resolveUniqueSessionProjectName,
+  type SessionProjectFilterOption,
+} from "@/utils/session-project-filter"
 
 export interface SessionListRow {
   item: SessionMeta
@@ -201,6 +207,9 @@ export function SessionList({
   const [groupDialogOpen, setGroupDialogOpen] = useState(false)
   const [groupDialogSession, setGroupDialogSession] = useState<SessionMeta | null>(null)
   const [newGroupName, setNewGroupName] = useState("")
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false)
+  const [projectDialogSession, setProjectDialogSession] = useState<SessionMeta | null>(null)
+  const [newProjectName, setNewProjectName] = useState("")
   // Track if search input has actual DOM focus (for proper keyboard navigation gating)
   const [isSearchInputFocused, setIsSearchInputFocused] = useState(false)
 
@@ -733,6 +742,28 @@ export function SessionList({
     setRenameName("")
   }
 
+  const handleCreateProjectForSession = useCallback((item: SessionMeta) => {
+    setProjectDialogSession(item)
+    setNewProjectName('')
+    requestAnimationFrame(() => setProjectDialogOpen(true))
+  }, [])
+
+  const handleConfirmCreateProjectForSession = useCallback(() => {
+    if (!projectDialogSession || !onLabelsChange) return
+    const trimmed = newProjectName.trim()
+    if (!trimmed) return
+    const projectName = resolveUniqueSessionProjectName(
+      trimmed,
+      resolvedProjectOptions.map(option => option.value).filter((value): value is string => Boolean(value)),
+    )
+    const nextLabels = addSessionProjectLabel(projectDialogSession.labels, projectName)
+    onLabelsChange(projectDialogSession.id, nextLabels)
+    setProjectDialogOpen(false)
+    setProjectDialogSession(null)
+    setNewProjectName('')
+    toast.success(`Moved “${projectDialogSession.name || 'Session'}” to “${projectName}”`)
+  }, [newProjectName, onLabelsChange, projectDialogSession, resolvedProjectOptions])
+
   const handleCreateGroupForSession = useCallback((item: SessionMeta) => {
     setGroupDialogSession(item)
     setNewGroupName('')
@@ -792,6 +823,7 @@ export function SessionList({
     onDelete: handleDeleteWithToast,
     onLabelsChange,
     projectOptions: resolvedProjectOptions,
+    onCreateProjectForSession: onLabelsChange ? handleCreateProjectForSession : undefined,
     groupOptions: resolvedGroupOptions,
     onCreateGroupForSession: onLabelsChange ? handleCreateGroupForSession : undefined,
     onToggleGroupForSession: onLabelsChange ? handleToggleGroupForSession : undefined,
@@ -815,7 +847,7 @@ export function SessionList({
     onFlag, handleFlagWithToast, onUnflag, handleUnflagWithToast,
     onArchive, handleArchiveWithToast, onUnarchive, handleUnarchiveWithToast,
     onMarkUnread, handleDeleteWithToast, onLabelsChange,
-    resolvedProjectOptions, resolvedGroupOptions, handleCreateGroupForSession, handleToggleGroupForSession,
+    resolvedProjectOptions, handleCreateProjectForSession, resolvedGroupOptions, handleCreateGroupForSession, handleToggleGroupForSession,
     handleSelectSessionById, handleOpenInNewWindow, setSendToWorkspace, handleFocusZone, handleKeyDown,
     sessionStatuses, flatLabels, labels, resolvedSearchQuery,
     focusedSessionId, selectionStore.state.selected, isMultiSelectActive,
@@ -959,6 +991,39 @@ export function SessionList({
         onSubmit={handleRenameSubmit}
         placeholder={t("session.enterSessionName")}
       />
+
+      <Dialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New Project</DialogTitle>
+            <DialogDescription>
+              Move “{projectDialogSession?.name || 'Session'}” to a new project.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault()
+              handleConfirmCreateProjectForSession()
+            }}
+          >
+            <Input
+              value={newProjectName}
+              onChange={(event) => setNewProjectName(event.target.value)}
+              placeholder="Project name"
+              autoFocus
+            />
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setProjectDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!newProjectName.trim()}>
+                Create Project
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>
         <DialogContent>

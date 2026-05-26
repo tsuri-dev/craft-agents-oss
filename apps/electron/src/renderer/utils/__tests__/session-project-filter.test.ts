@@ -2,10 +2,12 @@ import { describe, expect, it } from 'bun:test'
 import type { SessionMeta } from '../../atoms/sessions'
 import {
   NO_PROJECT_FILTER_ID,
+  addSessionProjectLabel,
   buildSessionProjectFilterOptions,
   filterSessionProjectOptions,
   filterSessionsByProjectFilter,
   getSessionProjectValue,
+  resolveUniqueSessionProjectName,
 } from '../session-project-filter'
 
 function session(id: string, labels?: string[]): SessionMeta {
@@ -22,6 +24,18 @@ describe('getSessionProjectValue', () => {
     meta.workingDirectory = '/Users/me/projects/wrong-directory'
 
     expect(getSessionProjectValue(meta)).toBe('Craft Agents OSS')
+  })
+})
+
+describe('addSessionProjectLabel', () => {
+  it('replaces any existing project label with the new project value', () => {
+    expect(addSessionProjectLabel(['bug', 'project::Old'], 'New')).toEqual(['bug', 'project::New'])
+  })
+})
+
+describe('resolveUniqueSessionProjectName', () => {
+  it('appends a numeric suffix when a project already exists', () => {
+    expect(resolveUniqueSessionProjectName('Craft', ['Craft', 'Craft 2'])).toBe('Craft 3')
   })
 })
 
