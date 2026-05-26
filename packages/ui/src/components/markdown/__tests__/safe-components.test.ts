@@ -150,7 +150,11 @@ describe('wrapWithSafeProxy', () => {
     })
   })
 
-  describe('returns fallback for invalid tag names', () => {
+  describe('returns fallback for invalid or unknown tag names', () => {
+    it('returns fallback function for unknown lowercase tags that browsers warn about', () => {
+      expect(typeof getComponent(safeComponents, 'value')).toBe('function')
+    })
+
     it('returns fallback function for tag with plus sign', () => {
       expect(typeof getComponent(safeComponents, 'sq+qr')).toBe('function')
     })
@@ -214,7 +218,11 @@ describe('wrapWithSafeProxy has trap', () => {
     })
   })
 
-  describe('returns true for invalid tag names (so get trap provides fallback)', () => {
+  describe('returns true for invalid or unknown tag names (so get trap provides fallback)', () => {
+    it('returns true for unknown lowercase tags that browsers warn about', () => {
+      expect('value' in safeComponents).toBe(true)
+    })
+
     it('returns true for tags with plus sign', () => {
       expect('sq+qr' in safeComponents).toBe(true)
       expect('SQ+QR' in safeComponents).toBe(true)
@@ -276,7 +284,8 @@ describe('wrapWithSafeProxy getOwnPropertyDescriptor trap', () => {
       expect(Object.hasOwnProperty.call(safeComponents, 'MyComponent')).toBe(false)
     })
 
-    it('returns true for invalid tag names (so fallback is used)', () => {
+    it('returns true for invalid or unknown lowercase tag names (so fallback is used)', () => {
+      expect(Object.hasOwnProperty.call(safeComponents, 'value')).toBe(true)
       expect(Object.hasOwnProperty.call(safeComponents, 'sq+qr')).toBe(true)
       expect(Object.hasOwnProperty.call(safeComponents, 'SQ+QR')).toBe(true)
       expect(Object.hasOwnProperty.call(safeComponents, 'P 150')).toBe(true)
@@ -332,6 +341,12 @@ describe('real-world scenarios', () => {
   it('handles TypeScript generic syntax in text', () => {
     // If someone types <T> it might be parsed - valid uppercase, let React handle
     expect(getComponent(safeComponents, 'T')).toBeUndefined()
+  })
+
+  it('handles placeholder-like lowercase tags such as <value>', () => {
+    expect(isValidTagName('value')).toBe(true)
+    expect('value' in safeComponents).toBe(true)
+    expect(typeof getComponent(safeComponents, 'value')).toBe('function')
   })
 
   it('handles arrow expressions like <=>', () => {
