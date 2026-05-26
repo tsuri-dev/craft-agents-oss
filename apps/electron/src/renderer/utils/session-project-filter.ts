@@ -1,5 +1,5 @@
 import type { SessionMeta } from '@/atoms/sessions'
-import { parseLabelEntry } from '@craft-agent/shared/labels'
+import { formatLabelEntry, parseLabelEntry } from '@craft-agent/shared/labels'
 
 export type ProjectFilterMode = 'include' | 'exclude'
 
@@ -32,6 +32,26 @@ export function getSessionProjectFilterId(
   projectLabelId: string = PROJECT_LABEL_ID,
 ): string {
   return getSessionProjectValue(session, projectLabelId) ?? NO_PROJECT_FILTER_ID
+}
+
+export function addSessionProjectLabel(labels: string[] | undefined, projectName: string): string[] {
+  const trimmed = projectName.trim()
+  const nextLabels = (labels ?? []).filter(entry => parseLabelEntry(entry).id !== PROJECT_LABEL_ID)
+  if (trimmed) nextLabels.push(formatLabelEntry(PROJECT_LABEL_ID, trimmed))
+  return nextLabels
+}
+
+export function resolveUniqueSessionProjectName(projectName: string, existingProjectNames: readonly string[]): string {
+  const base = projectName.trim()
+  if (!base) return ''
+  const existing = new Set(existingProjectNames.map(name => name.trim().toLowerCase()).filter(Boolean))
+  if (!existing.has(base.toLowerCase())) return base
+
+  let suffix = 2
+  while (existing.has(`${base} ${suffix}`.toLowerCase())) {
+    suffix += 1
+  }
+  return `${base} ${suffix}`
 }
 
 export function buildSessionProjectFilterOptions(

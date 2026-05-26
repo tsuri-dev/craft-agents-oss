@@ -27,6 +27,7 @@ import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/
 import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadedSessionsAtom, sessionMetaMapAtom } from '@/atoms/sessions'
 import { agentProfilesAtom } from '@/atoms/agent-profiles'
 import { getSessionTitle } from '@/utils/session'
+import { addSessionProjectLabel, resolveUniqueSessionProjectName } from '@/utils/session-project-filter'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
 import { resolveEffectiveConnectionSlug, isSessionConnectionUnavailable } from '@config/llm-connections'
 
@@ -420,9 +421,11 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Use isAsyncOperationOngoing for shimmer effect (sharing, updating share, revoking, title regeneration)
   const isAsyncOperationOngoing = session?.isAsyncOperationOngoing || sessionMeta?.isAsyncOperationOngoing || false
 
-  // Rename dialog state
+  // Rename / project dialog state
   const [renameDialogOpen, setRenameDialogOpen] = React.useState(false)
   const [renameName, setRenameName] = React.useState('')
+  const [projectDialogOpen, setProjectDialogOpen] = React.useState(false)
+  const [newProjectName, setNewProjectName] = React.useState('')
 
   // Session action handlers
   const handleRename = React.useCallback(() => {
@@ -464,6 +467,25 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const handleLabelsChange = React.useCallback((newLabels: string[]) => {
     onSessionLabelsChange?.(sessionId, newLabels)
   }, [sessionId, onSessionLabelsChange])
+
+  const handleCreateProject = React.useCallback(() => {
+    setNewProjectName('')
+    setProjectDialogOpen(true)
+  }, [])
+
+  const handleProjectSubmit = React.useCallback(() => {
+    if (!sessionMeta || !onSessionLabelsChange) return
+    const trimmed = newProjectName.trim()
+    if (!trimmed) return
+    const projectName = resolveUniqueSessionProjectName(
+      trimmed,
+      (projectOptions ?? []).map(option => option.value).filter((value): value is string => Boolean(value)),
+    )
+    onSessionLabelsChange(sessionId, addSessionProjectLabel(sessionMeta.labels, projectName))
+    setProjectDialogOpen(false)
+    setNewProjectName('')
+    toast.success(`Moved “${sessionMeta.name || 'Session'}” to “${projectName}”`)
+  }, [newProjectName, onSessionLabelsChange, projectOptions, sessionId, sessionMeta])
 
   const handleDelete = React.useCallback(async () => {
     await onDeleteSession(sessionId)
@@ -615,6 +637,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       sessionStatuses={sessionStatuses ?? []}
       labels={labels ?? []}
       projectOptions={projectOptions ?? []}
+      onCreateProject={handleCreateProject}
       onLabelsChange={handleLabelsChange}
       onRename={handleRename}
       onFlag={handleFlag}
@@ -631,6 +654,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     isCompactMode,
     sessionStatuses,
     labels,
+    projectOptions,
+    handleCreateProject,
     handleLabelsChange,
     handleRename,
     handleFlag,
@@ -759,6 +784,15 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onSubmit={handleRenameSubmit}
             placeholder={t('chat.enterSessionName')}
           />
+          <RenameDialog
+            open={projectDialogOpen}
+            onOpenChange={setProjectDialogOpen}
+            title="New Project"
+            value={newProjectName}
+            onValueChange={setNewProjectName}
+            onSubmit={handleProjectSubmit}
+            placeholder="Project name"
+          />
         </>
       )
     }
@@ -841,6 +875,15 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onValueChange={setRenameName}
         onSubmit={handleRenameSubmit}
         placeholder={t('chat.enterSessionName')}
+      />
+      <RenameDialog
+        open={projectDialogOpen}
+        onOpenChange={setProjectDialogOpen}
+        title="New Project"
+        value={newProjectName}
+        onValueChange={setNewProjectName}
+        onSubmit={handleProjectSubmit}
+        placeholder="Project name"
       />
     </>
   )

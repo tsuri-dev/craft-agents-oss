@@ -74,6 +74,8 @@ export interface SessionMenuProps {
   onLabelsChange?: (labels: string[]) => void
   /** Existing workspace projects available for the Project label shortcut */
   projectOptions?: SessionProjectFilterOption[]
+  /** Callback to create a new project and add this session */
+  onCreateProject?: () => void
   /** Existing session groups available in the workspace */
   groupOptions?: SessionGroupFilterOption[]
   /** Callback to create a new group and add this session */
@@ -105,6 +107,7 @@ export function SessionMenu({
   labels = [],
   onLabelsChange,
   projectOptions = [],
+  onCreateProject,
   groupOptions = [],
   onCreateGroup,
   onToggleGroup,
@@ -237,6 +240,7 @@ export function SessionMenu({
               projectOptions={projectOptions}
               activeProjectValue={activeProjectValue}
               onProjectSelect={handleProjectSelect}
+              onCreateProject={onCreateProject}
               menu={{ MenuItem, Separator }}
             />
           </SubContent>

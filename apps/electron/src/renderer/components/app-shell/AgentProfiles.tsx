@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useSetAtom } from 'jotai'
+import { useAtomValue, useSetAtom } from 'jotai'
 import {
   Activity,
   ArrowLeft,
@@ -45,8 +45,10 @@ import { deriveConnectionStatus } from '@/components/ui/source-status-indicator'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { useNavigation } from '@/contexts/NavigationContext'
 import { agentProfilesAtom } from '@/atoms/agent-profiles'
+import { sessionMetaMapAtom, type SessionMeta } from '@/atoms/sessions'
 import { cn } from '@/lib/utils'
 import { getModelDisplayName } from '@config/models'
+import { formatTokenCount, formatUsd } from '@/utils/session-usage'
 import { DEFAULT_THINKING_LEVEL, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import type { PermissionMode } from '@craft-agent/shared/agent/mode-types'
 import {
@@ -75,6 +77,14 @@ type AgentRunsState = {
   runs: AgentRun[]
   isLoading: boolean
   reload: () => Promise<void>
+}
+
+type AgentUsageSummary = {
+  sessions: number
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  costUsd: number
 }
 
 export interface AgentProfileMock {
@@ -311,6 +321,46 @@ function getAgentWorkloadLabel(activity: AgentActivitySummary): string {
   return `${activity.activeRuns.length} active`
 }
 
+function syncAgentRunsWithChildSessionState(runs: readonly AgentRun[], sessionMetaMap: Map<string, SessionMeta>): AgentRun[] {
+  return runs.map(run => {
+    if (!run.childSessionId) return run
+    const childSession = sessionMetaMap.get(run.childSessionId)
+    if (!childSession?.isProcessing) return run
+    if (run.status === 'queued' || run.status === 'running' || run.status === 'stopping') return run
+    return {
+      ...run,
+      status: 'running',
+      startedAt: run.startedAt ?? run.createdAt,
+      completedAt: undefined,
+    }
+  })
+}
+
+function summarizeAgentUsage(activity: AgentActivitySummary, sessionMetaMap: Map<string, SessionMeta>): AgentUsageSummary {
+  const childSessionIds = new Set<string>()
+  const usage: AgentUsageSummary = {
+    sessions: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    costUsd: 0,
+  }
+
+  for (const run of activity.allRuns) {
+    if (!run.childSessionId || childSessionIds.has(run.childSessionId)) continue
+    childSessionIds.add(run.childSessionId)
+    const tokenUsage = sessionMetaMap.get(run.childSessionId)?.tokenUsage
+    if (!tokenUsage) continue
+    usage.sessions += 1
+    usage.inputTokens += tokenUsage.inputTokens ?? 0
+    usage.outputTokens += tokenUsage.outputTokens ?? 0
+    usage.totalTokens += tokenUsage.totalTokens ?? 0
+    usage.costUsd += tokenUsage.costUsd ?? 0
+  }
+
+  return usage
+}
+
 function useAgentProfileViews(): AgentProfileMock[] {
   const appShell = useOptionalAppShellContext()
   const setAgentProfilesAtom = useSetAtom(agentProfilesAtom)
@@ -350,6 +400,7 @@ function useAgentProfileViews(): AgentProfileMock[] {
 
 function useWorkspaceAgentRuns(agentProfileId?: string): AgentRunsState {
   const appShell = useOptionalAppShellContext()
+  const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   const [runs, setRuns] = React.useState<AgentRun[]>([])
   const [isLoading, setIsLoading] = React.useState(false)
   const mountedRef = React.useRef(true)
@@ -384,7 +435,12 @@ function useWorkspaceAgentRuns(agentProfileId?: string): AgentRunsState {
     void reload()
   }, [reload])
 
-  return React.useMemo(() => ({ runs, isLoading, reload }), [runs, isLoading, reload])
+  const syncedRuns = React.useMemo(
+    () => syncAgentRunsWithChildSessionState(runs, sessionMetaMap),
+    [runs, sessionMetaMap],
+  )
+
+  return React.useMemo(() => ({ runs: syncedRuns, isLoading, reload }), [syncedRuns, isLoading, reload])
 }
 
 export function AgentProfilesOverviewPage({ onAgentClick }: { onAgentClick: (agentId: string) => void }) {
@@ -926,7 +982,9 @@ export function AgentProfileDetailPage({
     [profileState.profile, connectionOptions],
   )
   const runsState = useWorkspaceAgentRuns(agent.id)
+  const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   const activity = React.useMemo(() => summarizeAgentActivity(agent.id, runsState.runs), [agent.id, runsState.runs])
+  const usage = React.useMemo(() => summarizeAgentUsage(activity, sessionMetaMap), [activity, sessionMetaMap])
   const displayStatus = getAgentDisplayStatus(agent, activity)
 
   return (
@@ -956,7 +1014,7 @@ export function AgentProfileDetailPage({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[320px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6">
-        <AgentDetailInspectorCard agent={agent} profile={profileState.profile} displayStatus={displayStatus} onProfileUpdate={profileState.saveProfilePatch} />
+        <AgentDetailInspectorCard agent={agent} profile={profileState.profile} displayStatus={displayStatus} usage={usage} onProfileUpdate={profileState.saveProfilePatch} />
         <AgentOverviewPaneMock
           agent={agent}
           runsState={runsState}
@@ -1070,11 +1128,13 @@ function AgentDetailInspectorCard({
   agent,
   profile,
   displayStatus,
+  usage,
   onProfileUpdate,
 }: {
   agent: AgentProfileMock
   profile: AgentProfileDetail
   displayStatus: AgentDisplayStatus
+  usage: AgentUsageSummary
   onProfileUpdate: (patch: NonNullable<AgentProfileUpdateInput['profile']>) => Promise<void>
 }) {
   const Icon = agent.icon
@@ -1212,6 +1272,14 @@ function AgentDetailInspectorCard({
           <p className="text-xs italic text-muted-foreground/60">No skills attached.</p>
         )}
       </div>
+
+      <AgentInspectorSection label="Usage">
+        <AgentPropRow label="Sessions">{usage.sessions}</AgentPropRow>
+        <AgentPropRow label="Tokens">{formatTokenCount(usage.totalTokens)}</AgentPropRow>
+        <AgentPropRow label="Input">{formatTokenCount(usage.inputTokens)}</AgentPropRow>
+        <AgentPropRow label="Output">{formatTokenCount(usage.outputTokens)}</AgentPropRow>
+        <AgentPropRow label="Cost">{formatUsd(usage.costUsd)}</AgentPropRow>
+      </AgentInspectorSection>
     </aside>
   )
 }
@@ -2349,10 +2417,15 @@ function AgentSourcesTab({
   const workspaceSources = React.useMemo(() => {
     const bySlug = new Map<string, LoadedSource>()
     for (const source of [...localSources, ...(appShell?.enabledSources ?? [])]) {
-      if (!source.config.slug || source.isBuiltin) continue
-      bySlug.set(source.config.slug, source)
+      const slug = source.config?.slug
+      if (!slug || source.isBuiltin) continue
+      bySlug.set(slug, source)
     }
-    return Array.from(bySlug.values()).sort((a, b) => a.config.name.localeCompare(b.config.name))
+    return Array.from(bySlug.values()).sort((a, b) => {
+      const aName = a.config.name || a.config.slug
+      const bName = b.config.name || b.config.slug
+      return aName.localeCompare(bName)
+    })
   }, [appShell?.enabledSources, localSources])
 
   const sourceBySlug = React.useMemo(() => {
@@ -2366,10 +2439,11 @@ function AgentSourcesTab({
     if (!normalizedSourceQuery) return workspaceSources
     return workspaceSources.filter(source => {
       const fields = [
-        source.config.name,
-        source.config.slug,
-        source.config.provider,
-        source.config.tagline ?? '',
+        source.config.name || '',
+        source.config.slug || '',
+        source.config.provider || '',
+        source.config.type || '',
+        source.config.tagline || '',
       ]
       return fields.some(field => field.toLowerCase().includes(normalizedSourceQuery))
     })
@@ -2411,7 +2485,11 @@ function AgentSourcesTab({
 
   const openSourceConfig = React.useCallback((slug?: string) => {
     setError(null)
-    navigateToSource(slug)
+    try {
+      navigateToSource(slug)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to open source configuration')
+    }
   }, [navigateToSource])
 
   return (
@@ -2489,8 +2567,8 @@ function AgentSourcesTab({
                     <SourceAvatar source={source} size="md" showStatus />
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2">
-                        <span className="truncate text-sm font-medium">{source.config.name}</span>
-                        <AgentSmallToken>{source.config.type}</AgentSmallToken>
+                        <span className="truncate text-sm font-medium">{source.config.name || slug}</span>
+                        <AgentSmallToken>{source.config.type || 'source'}</AgentSmallToken>
                         {!source.config.enabled && <AgentSmallToken>disabled</AgentSmallToken>}
                       </div>
                       <div className="mt-0.5 truncate text-xs text-muted-foreground">
@@ -2514,7 +2592,7 @@ function AgentSourcesTab({
                         <Switch
                           checked={enabledForAgent}
                           onCheckedChange={checked => toggleSource(slug, checked)}
-                          aria-label={`${enabledForAgent ? 'Disable' : 'Enable'} ${source.config.name} for agent`}
+                          aria-label={`${enabledForAgent ? 'Disable' : 'Enable'} ${source.config.name || slug} for agent`}
                           disabled={savingSlug !== null}
                         />
                       )}

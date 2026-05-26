@@ -19,6 +19,7 @@ export interface SessionListContextValue {
   onDelete: (sessionId: string, skipConfirmation?: boolean) => Promise<boolean>
   onLabelsChange?: (sessionId: string, labels: string[]) => void
   projectOptions?: SessionProjectFilterOption[]
+  onCreateProjectForSession?: (item: SessionMeta) => void
   groupOptions?: SessionGroupFilterOption[]
   onCreateGroupForSession?: (item: SessionMeta) => void
   onToggleGroupForSession?: (item: SessionMeta, groupName: string) => void

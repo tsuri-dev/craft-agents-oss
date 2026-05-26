@@ -193,7 +193,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
 
         if (!isMounted) return
 
-        const found = sources.find((s) => s.config.slug === sourceSlug)
+        const found = sources.find((s) => s.config?.slug === sourceSlug)
         if (found) {
           setSource(found)
 
@@ -274,7 +274,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
 
     const cleanup = window.electronAPI.onSourcesChanged((changedWorkspaceId, sources) => {
       if (changedWorkspaceId !== workspaceId) return
-      const updated = sources.find((s) => s.config.slug === sourceSlug)
+      const updated = sources.find((s) => s.config?.slug === sourceSlug)
 
       if (updated) {
         setSource(updated)
@@ -381,7 +381,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
           {/* Hero: Avatar, title, and tagline */}
           <Info_Page.Hero
             avatar={<SourceAvatar source={source} fluid />}
-            title={source.config.name}
+            title={source.config.name || sourceSlug}
             tagline={source.config.tagline}
           />
 
@@ -421,7 +421,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
                 </div>
               )}
             >
-              <Info_Table.Row label={t('common.type')} value={source.config.type.toUpperCase()} />
+              <Info_Table.Row label={t('common.type')} value={(source.config.type || 'source').toUpperCase()} />
               {sourceUrl && (
                 <Info_Table.Row label={t('common.url')}>
                   <button
