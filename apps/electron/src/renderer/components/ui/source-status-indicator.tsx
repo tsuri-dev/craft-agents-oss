@@ -76,17 +76,25 @@ const SIZE_CONFIG: Record<'xs' | 'sm' | 'md', string> = {
   md: 'h-2.5 w-2.5',
 }
 
+function normalizeSourceConnectionStatus(status: string | undefined): SourceConnectionStatus {
+  if (status && status in STATUS_CONFIG) return status as SourceConnectionStatus
+  // Older source configs used `error`; render it as a failed connection instead of crashing.
+  if (status === 'error') return 'failed'
+  return 'untested'
+}
+
 export function SourceStatusIndicator({
   status = 'untested',
   errorMessage,
   size = 'sm',
   className,
 }: SourceStatusIndicatorProps) {
-  const config = STATUS_CONFIG[status]
+  const normalizedStatus = normalizeSourceConnectionStatus(status)
+  const config = STATUS_CONFIG[normalizedStatus]
   const sizeClass = SIZE_CONFIG[size]
 
   // Build tooltip description
-  const tooltipDescription = status === 'failed' && errorMessage
+  const tooltipDescription = normalizedStatus === 'failed' && errorMessage
     ? `${config.description}: ${errorMessage}`
     : config.description
 
@@ -100,7 +108,7 @@ export function SourceStatusIndicator({
           )}
         >
           {/* Pulse animation for connected status */}
-          {status === 'connected' && (
+          {normalizedStatus === 'connected' && (
             <span
               className={cn(
                 'absolute inline-flex rounded-full opacity-75 animate-ping',
@@ -152,9 +160,10 @@ export function deriveConnectionStatus(source: {
     return 'local_disabled'
   }
 
-  // If explicit status is set, use it
+  // If explicit status is set, normalize it before use. Older configs may
+  // contain legacy values such as `error`; never pass unknown values to UI.
   if (source.config.connectionStatus) {
-    return source.config.connectionStatus
+    return normalizeSourceConnectionStatus(source.config.connectionStatus)
   }
 
   // Derive from auth state

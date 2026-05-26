@@ -63,10 +63,15 @@ export function SourcesListPanel({
   const [sendResourceSlug, setSendResourceSlug] = React.useState<string | null>(null)
   const [sendResourceLabel, setSendResourceLabel] = React.useState('')
 
+  const safeSources = React.useMemo(
+    () => sources.filter(source => Boolean(source?.config?.slug)),
+    [sources],
+  )
+
   const filteredSources = React.useMemo(() => {
-    if (!sourceFilter) return sources
-    return sources.filter(s => s.config.type === sourceFilter.sourceType)
-  }, [sources, sourceFilter])
+    if (!sourceFilter) return safeSources
+    return safeSources.filter(s => s.config.type === sourceFilter.sourceType)
+  }, [safeSources, sourceFilter])
 
   const emptyMessage = React.useMemo(() => {
     if (sourceFilter?.kind === 'type') {
@@ -111,13 +116,16 @@ export function SourcesListPanel({
         </EntityListEmptyScreen>
       }
       mapItem={(source) => {
+        const slug = source.config.slug
+        const name = source.config.name || slug
+        const type = source.config.type || 'source'
         const connectionStatus = deriveConnectionStatus(source, localMcpEnabled)
-        const typeConfig = SOURCE_TYPE_CONFIG[source.config.type]
+        const typeConfig = SOURCE_TYPE_CONFIG[type]
         const statusConfig = SOURCE_STATUS_CONFIG[connectionStatus]
         const subtitle = source.config.tagline || source.config.provider || ''
         return {
           icon: <SourceAvatar source={source} size="sm" />,
-          title: source.config.name,
+          title: name,
           badges: (
             <>
               {typeConfig && <EntityListBadge colorClass={typeConfig.colorClass}>{t(typeConfig.labelKey)}</EntityListBadge>}
@@ -131,14 +139,14 @@ export function SourcesListPanel({
           ),
           menu: (
             <SourceMenu
-              sourceSlug={source.config.slug}
-              sourceName={source.config.name}
-              onOpenInNewWindow={() => window.electronAPI.openUrl(`craftagents://sources/source/${source.config.slug}?window=focused`)}
+              sourceSlug={slug}
+              sourceName={name}
+              onOpenInNewWindow={() => window.electronAPI.openUrl(`craftagents://sources/source/${encodeURIComponent(slug)}?window=focused`)}
               onShowInFinder={() => window.electronAPI.showInFolder(source.folderPath)}
-              onDelete={() => onDeleteSource(source.config.slug)}
+              onDelete={() => onDeleteSource(slug)}
               onSendToWorkspace={hasOtherWorkspaces ? () => {
-                setSendResourceSlug(source.config.slug)
-                setSendResourceLabel(source.config.name)
+                setSendResourceSlug(slug)
+                setSendResourceLabel(name)
                 setSendDialogOpen(true)
               } : undefined}
             />

@@ -61,6 +61,44 @@ import {
   resolveUniqueSessionGroupName,
 } from '@/utils/session-group-filter'
 
+class SourceDetailErrorBoundary extends React.Component<{
+  sourceSlug: string
+  children: React.ReactNode
+}, { error: Error | null }> {
+  state: { error: Error | null } = { error: null }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[SourceDetailErrorBoundary] Source detail crashed:', error, info)
+  }
+
+  componentDidUpdate(prevProps: { sourceSlug: string }) {
+    if (prevProps.sourceSlug !== this.props.sourceSlug && this.state.error) {
+      this.setState({ error: null })
+    }
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center">
+        <div className="max-w-md rounded-lg border border-border bg-background p-5 shadow-sm">
+          <div className="text-sm font-medium text-foreground">Source failed to open</div>
+          <div className="mt-2 text-xs leading-5 text-muted-foreground">
+            {this.state.error.message || 'The source detail page crashed while rendering.'}
+          </div>
+          <Button size="sm" variant="outline" className="mt-4" onClick={() => this.setState({ error: null })}>
+            Try again
+          </Button>
+        </div>
+      </div>
+    )
+  }
+}
+
 export interface MainContentPanelProps {
   /** Whether both sidebar and navigator are hidden (focus mode / CMD+.) */
   isSidebarAndNavigatorHidden?: boolean
@@ -384,10 +422,12 @@ export function MainContentPanel({
     if (navState.details) {
       return wrapWithStoplight(
         <Panel variant="grow" className={className}>
-          <SourceInfoPage
-            sourceSlug={navState.details.sourceSlug}
-            workspaceId={activeWorkspaceId || ''}
-          />
+          <SourceDetailErrorBoundary sourceSlug={navState.details.sourceSlug}>
+            <SourceInfoPage
+              sourceSlug={navState.details.sourceSlug}
+              workspaceId={activeWorkspaceId || ''}
+            />
+          </SourceDetailErrorBoundary>
         </Panel>
       )
     }
