@@ -57,9 +57,25 @@ import {
   summarizeAgentRunsLast30Days,
   type AgentRun,
   type AgentRunBucket,
+  type AgentRunSummary,
 } from '../../../shared/agent-runs'
 import type { AgentProfile, AgentProfileCreateInput, AgentProfileDetail, AgentProfileUpdateInput } from '../../../shared/agent-profiles'
 import type { LoadedSkill, LoadedSource } from '../../../shared/types'
+
+type AgentDisplayStatus = 'running' | 'ready' | 'draft'
+
+type AgentActivitySummary = {
+  allRuns: AgentRun[]
+  activeRuns: AgentRun[]
+  recentFinishedRuns: AgentRun[]
+  summary: AgentRunSummary
+}
+
+type AgentRunsState = {
+  runs: AgentRun[]
+  isLoading: boolean
+  reload: () => Promise<void>
+}
 
 export interface AgentProfileMock {
   id: string
@@ -264,10 +280,35 @@ function agentStatusToAvailability(status: AgentProfile['status']): AgentProfile
   return status === 'ready' ? 'online' : 'unstable'
 }
 
-function getAgentStatusPresentation(status: AgentProfile['status']): { label: string; dot: string; className: string } {
-  return status === 'ready'
-    ? { label: 'Ready', dot: 'bg-success', className: 'text-success' }
-    : { label: 'Draft', dot: 'bg-warning', className: 'text-warning' }
+function getAgentStatusPresentation(status: AgentDisplayStatus): { label: string; dot: string; className: string; badgeClassName: string } {
+  switch (status) {
+    case 'running':
+      return { label: 'Running', dot: 'bg-info', className: 'text-info', badgeClassName: 'bg-info/10 text-info' }
+    case 'ready':
+      return { label: 'Ready', dot: 'bg-success', className: 'text-success', badgeClassName: 'bg-success/10 text-success' }
+    case 'draft':
+      return { label: 'Draft', dot: 'bg-warning', className: 'text-warning', badgeClassName: 'bg-warning/10 text-warning' }
+  }
+}
+
+function summarizeAgentActivity(agentProfileId: string, runs: readonly AgentRun[]): AgentActivitySummary {
+  return {
+    allRuns: listAgentRuns(agentProfileId, runs),
+    activeRuns: getActiveAgentRuns(agentProfileId, runs),
+    recentFinishedRuns: getRecentFinishedAgentRuns(agentProfileId, 10, runs),
+    summary: summarizeAgentRunsLast30Days(agentProfileId, runs, Date.now()),
+  }
+}
+
+function getAgentDisplayStatus(agent: AgentProfileMock, activity: AgentActivitySummary): AgentDisplayStatus {
+  if (activity.activeRuns.length > 0) return 'running'
+  if (activity.allRuns.length > 0) return 'ready'
+  return agent.status
+}
+
+function getAgentWorkloadLabel(activity: AgentActivitySummary): string {
+  if (activity.activeRuns.length === 0) return 'Idle'
+  return `${activity.activeRuns.length} active`
 }
 
 function useAgentProfileViews(): AgentProfileMock[] {
@@ -307,9 +348,49 @@ function useAgentProfileViews(): AgentProfileMock[] {
   )
 }
 
+function useWorkspaceAgentRuns(agentProfileId?: string): AgentRunsState {
+  const appShell = useOptionalAppShellContext()
+  const [runs, setRuns] = React.useState<AgentRun[]>([])
+  const [isLoading, setIsLoading] = React.useState(false)
+  const mountedRef = React.useRef(true)
+
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+
+  const reload = React.useCallback(async () => {
+    const workspaceId = appShell?.activeWorkspaceId
+    if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.listAgentRuns) {
+      if (mountedRef.current) setRuns([])
+      return
+    }
+
+    if (mountedRef.current) setIsLoading(true)
+    try {
+      const nextRuns = await window.electronAPI.listAgentRuns(
+        workspaceId,
+        agentProfileId ? { agentProfileId } : {},
+      )
+      if (mountedRef.current) setRuns(nextRuns)
+    } catch {
+      if (mountedRef.current) setRuns([])
+    } finally {
+      if (mountedRef.current) setIsLoading(false)
+    }
+  }, [agentProfileId, appShell?.activeWorkspaceId])
+
+  React.useEffect(() => {
+    void reload()
+  }, [reload])
+
+  return React.useMemo(() => ({ runs, isLoading, reload }), [runs, isLoading, reload])
+}
+
 export function AgentProfilesOverviewPage({ onAgentClick }: { onAgentClick: (agentId: string) => void }) {
   const appShell = useOptionalAppShellContext()
   const agents = useAgentProfileViews()
+  const runsState = useWorkspaceAgentRuns()
   const connectionOptions = React.useMemo(
     () => buildAgentConnectionOptions(appShell?.llmConnections),
     [appShell?.llmConnections],
@@ -317,22 +398,28 @@ export function AgentProfilesOverviewPage({ onAgentClick }: { onAgentClick: (age
   const [query, setQuery] = React.useState('')
   const [showCreate, setShowCreate] = React.useState(false)
   const [scope, setScope] = React.useState<'mine' | 'all'>('mine')
-  const [statusFilter, setStatusFilter] = React.useState<'all' | AgentProfileMock['status']>('all')
+  const [statusFilter, setStatusFilter] = React.useState<'all' | AgentDisplayStatus>('all')
+
+  const rows = React.useMemo(() => agents.map(agent => {
+    const activity = summarizeAgentActivity(agent.id, runsState.runs)
+    return { agent, activity, displayStatus: getAgentDisplayStatus(agent, activity) }
+  }), [agents, runsState.runs])
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase()
-    return agents.filter(agent => {
-      if (statusFilter !== 'all' && agent.status !== statusFilter) return false
+    return rows.filter(row => {
+      if (statusFilter !== 'all' && row.displayStatus !== statusFilter) return false
       if (!q) return true
-      return agent.name.toLowerCase().includes(q) || agent.description.toLowerCase().includes(q)
+      return row.agent.name.toLowerCase().includes(q) || row.agent.description.toLowerCase().includes(q)
     })
-  }, [agents, query, statusFilter])
+  }, [rows, query, statusFilter])
 
   const counts = React.useMemo(() => ({
-    all: agents.length,
-    ready: agents.filter(agent => agent.status === 'ready').length,
-    draft: agents.filter(agent => agent.status === 'draft').length,
-  }), [agents])
+    all: rows.length,
+    running: rows.filter(row => row.displayStatus === 'running').length,
+    ready: rows.filter(row => row.displayStatus === 'ready').length,
+    draft: rows.filter(row => row.displayStatus === 'draft').length,
+  }), [rows])
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -382,6 +469,7 @@ export function AgentProfilesOverviewPage({ onAgentClick }: { onAgentClick: (age
 
           <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
             <FilterChip active={statusFilter === 'all'} onClick={() => setStatusFilter('all')}>All {counts.all}</FilterChip>
+            <FilterChip active={statusFilter === 'running'} dot="bg-info" onClick={() => setStatusFilter('running')}>Running {counts.running}</FilterChip>
             <FilterChip active={statusFilter === 'ready'} dot="bg-success" onClick={() => setStatusFilter('ready')}>Ready {counts.ready}</FilterChip>
             <FilterChip active={statusFilter === 'draft'} dot="bg-warning" onClick={() => setStatusFilter('draft')}>Draft {counts.draft}</FilterChip>
           </div>
@@ -397,8 +485,15 @@ export function AgentProfilesOverviewPage({ onAgentClick }: { onAgentClick: (age
           </div>
 
           <div className="min-h-0 flex-1 divide-y divide-border overflow-auto">
-            {filtered.map(agent => (
-              <AgentTableRow key={agent.id} agent={agent} onClick={() => onAgentClick(agent.id)} />
+            {filtered.map(row => (
+              <AgentTableRow
+                key={row.agent.id}
+                agent={row.agent}
+                activity={row.activity}
+                isLoadingActivity={runsState.isLoading}
+                displayStatus={row.displayStatus}
+                onClick={() => onAgentClick(row.agent.id)}
+              />
             ))}
             {filtered.length === 0 && (
               <div className="px-5 py-12 text-center text-sm text-muted-foreground">No agents match this filter.</div>
@@ -659,9 +754,22 @@ function FilterChip({
   )
 }
 
-function AgentTableRow({ agent, onClick }: { agent: AgentProfileMock; onClick: () => void }) {
+function AgentTableRow({
+  agent,
+  activity,
+  displayStatus,
+  isLoadingActivity,
+  onClick,
+}: {
+  agent: AgentProfileMock
+  activity: AgentActivitySummary
+  displayStatus: AgentDisplayStatus
+  isLoadingActivity: boolean
+  onClick: () => void
+}) {
   const Icon = agent.icon
-  const status = getAgentStatusPresentation(agent.status)
+  const status = getAgentStatusPresentation(displayStatus)
+  const runsLabel = isLoadingActivity && activity.allRuns.length === 0 ? '…' : String(activity.allRuns.length)
 
   return (
     <button
@@ -686,13 +794,13 @@ function AgentTableRow({ agent, onClick }: { agent: AgentProfileMock; onClick: (
         <span className={cn('h-1.5 w-1.5 rounded-full', status.dot)} />
         {status.label}
       </div>
-      <div className="text-xs text-muted-foreground">{agent.workload}</div>
+      <div className="text-xs text-muted-foreground">{getAgentWorkloadLabel(activity)}</div>
       <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
         <Monitor className="h-3.5 w-3.5 shrink-0" />
         <span className="truncate">{agent.connectionName}</span>
       </div>
-      <div className="h-px w-20 bg-border" />
-      <div className="text-right font-mono text-xs tabular-nums text-muted-foreground">{agent.recentRuns}</div>
+      <AgentRunSparkline buckets={activity.summary.buckets.slice(-7)} compact />
+      <div className="text-right font-mono text-xs tabular-nums text-muted-foreground">{runsLabel}</div>
       <div className="flex justify-end text-muted-foreground">
         <MoreHorizontal className="h-4 w-4" />
       </div>
@@ -708,17 +816,22 @@ export function AgentProfilesListPanel({
   onAgentClick: (agentId: string) => void
 }) {
   const agents = useAgentProfileViews()
+  const runsState = useWorkspaceAgentRuns()
   const [query, setQuery] = React.useState('')
+  const rows = React.useMemo(() => agents.map(agent => {
+    const activity = summarizeAgentActivity(agent.id, runsState.runs)
+    return { agent, activity, displayStatus: getAgentDisplayStatus(agent, activity) }
+  }), [agents, runsState.runs])
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return agents
-    return agents.filter(agent =>
-      agent.name.toLowerCase().includes(q) ||
-      agent.description.toLowerCase().includes(q) ||
-      agent.skillSlugs.some(skill => skill.toLowerCase().includes(q)) ||
-      agent.sourceSlugs.some(source => source.toLowerCase().includes(q)),
+    if (!q) return rows
+    return rows.filter(row =>
+      row.agent.name.toLowerCase().includes(q) ||
+      row.agent.description.toLowerCase().includes(q) ||
+      row.agent.skillSlugs.some(skill => skill.toLowerCase().includes(q)) ||
+      row.agent.sourceSlugs.some(source => source.toLowerCase().includes(q)),
     )
-  }, [agents, query])
+  }, [rows, query])
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -737,12 +850,13 @@ export function AgentProfilesListPanel({
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-1 p-2">
-          {filtered.map(agent => (
+          {filtered.map(row => (
             <AgentProfileRow
-              key={agent.id}
-              agent={agent}
-              selected={selectedAgentId === agent.id}
-              onClick={() => onAgentClick(agent.id)}
+              key={row.agent.id}
+              agent={row.agent}
+              displayStatus={row.displayStatus}
+              selected={selectedAgentId === row.agent.id}
+              onClick={() => onAgentClick(row.agent.id)}
             />
           ))}
         </div>
@@ -751,8 +865,9 @@ export function AgentProfilesListPanel({
   )
 }
 
-function AgentProfileRow({ agent, selected, onClick }: { agent: AgentProfileMock; selected: boolean; onClick: () => void }) {
+function AgentProfileRow({ agent, displayStatus, selected, onClick }: { agent: AgentProfileMock; displayStatus: AgentDisplayStatus; selected: boolean; onClick: () => void }) {
   const Icon = agent.icon
+  const status = getAgentStatusPresentation(displayStatus)
   return (
     <button
       type="button"
@@ -772,11 +887,8 @@ function AgentProfileRow({ agent, selected, onClick }: { agent: AgentProfileMock
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <span className="truncate text-[13px] font-medium">{agent.name}</span>
-            <span className={cn(
-              'shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium',
-              agent.status === 'ready' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning',
-            )}>
-              {agent.status}
+            <span className={cn('shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium', status.badgeClassName)}>
+              {status.label}
             </span>
           </div>
           <p className="mt-1 line-clamp-2 text-[12px] leading-4 text-muted-foreground">{agent.description}</p>
@@ -813,6 +925,9 @@ export function AgentProfileDetailPage({
     () => agentProfileToView(profileState.profile, connectionOptions),
     [profileState.profile, connectionOptions],
   )
+  const runsState = useWorkspaceAgentRuns(agent.id)
+  const activity = React.useMemo(() => summarizeAgentActivity(agent.id, runsState.runs), [agent.id, runsState.runs])
+  const displayStatus = getAgentDisplayStatus(agent, activity)
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -829,7 +944,7 @@ export function AgentProfileDetailPage({
           </button>
           <span className="text-muted-foreground/40">/</span>
           <h1 className="truncate text-sm font-medium">{profileState.profile.name}</h1>
-          <AgentStatusBadge status={profileState.profile.status} />
+          <AgentStatusBadge status={displayStatus} />
         </div>
         <button
           type="button"
@@ -841,9 +956,10 @@ export function AgentProfileDetailPage({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[320px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6">
-        <AgentDetailInspectorCard agent={agent} profile={profileState.profile} onProfileUpdate={profileState.saveProfilePatch} />
+        <AgentDetailInspectorCard agent={agent} profile={profileState.profile} displayStatus={displayStatus} onProfileUpdate={profileState.saveProfilePatch} />
         <AgentOverviewPaneMock
           agent={agent}
+          runsState={runsState}
           profile={profileState.profile}
           onInstructionsSave={profileState.saveInstructions}
           onEnvironmentSave={profileState.saveEnvironmentVariables}
@@ -953,10 +1069,12 @@ function useAgentProfileDetail(agent: AgentProfileMock) {
 function AgentDetailInspectorCard({
   agent,
   profile,
+  displayStatus,
   onProfileUpdate,
 }: {
   agent: AgentProfileMock
   profile: AgentProfileDetail
+  displayStatus: AgentDisplayStatus
   onProfileUpdate: (patch: NonNullable<AgentProfileUpdateInput['profile']>) => Promise<void>
 }) {
   const Icon = agent.icon
@@ -1014,7 +1132,7 @@ function AgentDetailInspectorCard({
             onSave={description => onProfileUpdate({ description })}
           />
         </div>
-        <AgentStatusBadge status={profile.status} />
+        <AgentStatusBadge status={displayStatus} />
       </div>
 
       <AgentInspectorSection label="Properties">
@@ -1388,12 +1506,14 @@ const AGENT_DETAIL_TABS: Array<{ id: AgentDetailTab; label: string; icon: typeof
 
 function AgentOverviewPaneMock({
   agent,
+  runsState,
   profile,
   onInstructionsSave,
   onEnvironmentSave,
   onProfileUpdate,
 }: {
   agent: AgentProfileMock
+  runsState: AgentRunsState
   profile: AgentProfileDetail
   onInstructionsSave: (instructions: string) => Promise<void>
   onEnvironmentSave: (environmentVariables: Record<string, string>) => Promise<void>
@@ -1423,7 +1543,7 @@ function AgentOverviewPaneMock({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {activeTab === 'activity' && <AgentActivityTab agent={agent} />}
+        {activeTab === 'activity' && <AgentActivityTab agent={agent} runsState={runsState} />}
         {activeTab === 'instructions' && <AgentInstructionsTab profile={profile} onSave={onInstructionsSave} />}
         {activeTab === 'skills' && <AgentSkillsTab profile={profile} onProfileUpdate={onProfileUpdate} />}
         {activeTab === 'sources' && <AgentSourcesTab profile={profile} onProfileUpdate={onProfileUpdate} />}
@@ -1433,11 +1553,9 @@ function AgentOverviewPaneMock({
   )
 }
 
-function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
+function AgentActivityTab({ agent, runsState }: { agent: AgentProfileMock; runsState: AgentRunsState }) {
   const appShell = useOptionalAppShellContext()
   const { navigateToSession } = useNavigation()
-  const [workspaceRuns, setWorkspaceRuns] = React.useState<AgentRun[]>([])
-  const [isLoadingRuns, setIsLoadingRuns] = React.useState(false)
   const [isAllRunsOpen, setIsAllRunsOpen] = React.useState(false)
   const [cancellingRunId, setCancellingRunId] = React.useState<string | null>(null)
   const [logRun, setLogRun] = React.useState<AgentRun | null>(null)
@@ -1445,29 +1563,7 @@ function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
   const [logError, setLogError] = React.useState<string | null>(null)
   const [isLogLoading, setIsLogLoading] = React.useState(false)
 
-  const loadRuns = React.useCallback(async () => {
-    const workspaceId = appShell?.activeWorkspaceId
-    if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.listAgentRuns) {
-      setWorkspaceRuns([])
-      return
-    }
-
-    setIsLoadingRuns(true)
-    try {
-      const runs = await window.electronAPI.listAgentRuns(workspaceId, { agentProfileId: agent.id })
-      setWorkspaceRuns(runs)
-    } catch {
-      setWorkspaceRuns([])
-    } finally {
-      setIsLoadingRuns(false)
-    }
-  }, [agent.id, appShell?.activeWorkspaceId])
-
-  React.useEffect(() => {
-    void loadRuns()
-  }, [loadRuns])
-
-  const runSource = workspaceRuns
+  const runSource = runsState.runs
   const allRuns = React.useMemo(() => listAgentRuns(agent.id, runSource), [agent.id, runSource])
   const activeRuns = React.useMemo(() => getActiveAgentRuns(agent.id, runSource), [agent.id, runSource])
   const recentRuns = React.useMemo(() => getRecentFinishedAgentRuns(agent.id, 10, runSource), [agent.id, runSource])
@@ -1479,28 +1575,25 @@ function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
 
   React.useEffect(() => {
     if (activeRuns.length === 0) return
-    const interval = window.setInterval(() => { void loadRuns() }, 2500)
+    const interval = window.setInterval(() => { void runsState.reload() }, 2500)
     return () => window.clearInterval(interval)
-  }, [activeRuns.length, loadRuns])
+  }, [activeRuns.length, runsState])
 
   const handleCancelRun = React.useCallback(async (run: AgentRun) => {
     const workspaceId = appShell?.activeWorkspaceId
     if (!workspaceId || typeof window === 'undefined' || !window.electronAPI?.cancelAgentRun) return
     setCancellingRunId(run.id)
     try {
-      const cancelledRun = await window.electronAPI.cancelAgentRun(workspaceId, {
+      await window.electronAPI.cancelAgentRun(workspaceId, {
         runId: run.id,
         parentSessionId: run.parentSessionId,
         childSessionId: run.childSessionId,
       })
-      if (cancelledRun) {
-        setWorkspaceRuns(current => current.map(candidate => candidate.id === cancelledRun.id ? cancelledRun : candidate))
-      }
-      await loadRuns()
+      await runsState.reload()
     } finally {
       setCancellingRunId(null)
     }
-  }, [appShell?.activeWorkspaceId, loadRuns])
+  }, [appShell?.activeWorkspaceId, runsState])
 
   const handleOpenLog = React.useCallback(async (run: AgentRun) => {
     if (!run.transcriptPath || typeof window === 'undefined' || !window.electronAPI?.readFile) return
@@ -1532,7 +1625,7 @@ function AgentActivityTab({ agent }: { agent: AgentProfileMock }) {
       >
         {activeRuns.length === 0 ? (
           <p className="text-xs italic text-muted-foreground/60">
-            {isLoadingRuns ? 'Loading activity…' : 'This agent isn\'t running anything right now.'}
+            {runsState.isLoading ? 'Loading activity…' : 'This agent isn\'t running anything right now.'}
           </p>
         ) : (
           <div className="space-y-1.5">
@@ -1836,17 +1929,21 @@ function AgentRunMeta({ run, active = false }: { run: AgentRun; active?: boolean
   )
 }
 
-function AgentRunSparkline({ buckets }: { buckets: AgentRunBucket[] }) {
+function AgentRunSparkline({ buckets, compact = false }: { buckets: AgentRunBucket[]; compact?: boolean }) {
   const maxValue = Math.max(1, ...buckets.map(bucket => bucket.completed + bucket.failed + bucket.cancelled))
+  const maxHeight = compact ? 18 : 34
   return (
-    <div className="flex h-12 w-32 shrink-0 items-end justify-end gap-1 border-b border-foreground/[0.18] pr-2">
+    <div className={cn(
+      'flex shrink-0 items-end justify-end border-b border-foreground/[0.18]',
+      compact ? 'h-5 w-20 gap-0.5 pr-1' : 'h-12 w-32 gap-1 pr-2',
+    )}>
       {buckets.map(bucket => {
         const total = bucket.completed + bucket.failed + bucket.cancelled
         return (
           <span
             key={bucket.date}
-            className={cn('w-1 rounded-t-sm', total > 0 ? (bucket.failed > 0 ? 'bg-destructive' : bucket.cancelled > 0 ? 'bg-muted-foreground/60' : 'bg-accent') : 'bg-transparent')}
-            style={{ height: `${total > 0 ? Math.max(4, (total / maxValue) * 34) : 2}px` }}
+            className={cn(compact ? 'w-1 rounded-t-[2px]' : 'w-1 rounded-t-sm', total > 0 ? (bucket.failed > 0 ? 'bg-destructive' : bucket.cancelled > 0 ? 'bg-muted-foreground/60' : 'bg-accent') : 'bg-transparent')}
+            style={{ height: `${total > 0 ? Math.max(3, (total / maxValue) * maxHeight) : 2}px` }}
           />
         )
       })}
@@ -2629,7 +2726,7 @@ function AgentEnvironmentTab({ profile, onSave }: { profile: AgentProfileDetail;
   )
 }
 
-function AgentStatusBadge({ status }: { status: AgentProfile['status'] }) {
+function AgentStatusBadge({ status }: { status: AgentDisplayStatus }) {
   const presentation = getAgentStatusPresentation(status)
   return (
     <span className={cn('inline-flex w-fit items-center gap-1.5 rounded-md border border-border bg-background px-1.5 py-0.5 text-xs', presentation.className)}>
