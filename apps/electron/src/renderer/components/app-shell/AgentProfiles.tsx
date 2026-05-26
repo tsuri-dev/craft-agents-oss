@@ -226,7 +226,7 @@ function createFallbackAgentProfile(agentId?: string | null): AgentProfileMock {
     model: 'Connection default',
     skillSlugs: [],
     sourceSlugs: [],
-    availability: 'offline',
+    availability: agentStatusToAvailability('draft'),
     workload: 'Idle',
     recentRuns: 0,
     lastRun: 'Never',
@@ -250,6 +250,7 @@ function agentProfileToView(profile: AgentProfile, connectionOptions: AgentConne
     skillSlugs: [...profile.skillSlugs],
     sourceSlugs: [...profile.sourceSlugs],
     connectionName: connection?.name ?? profile.connectionSlug ?? base.connectionName,
+    availability: agentStatusToAvailability(profile.status),
   }
 }
 
@@ -257,6 +258,16 @@ function upsertAgentProfileList<T extends AgentProfile>(profiles: T[], profile: 
   const next = profiles.filter(item => item.id !== profile.id)
   next.unshift(profile as T)
   return next
+}
+
+function agentStatusToAvailability(status: AgentProfile['status']): AgentProfileMock['availability'] {
+  return status === 'ready' ? 'online' : 'unstable'
+}
+
+function getAgentStatusPresentation(status: AgentProfile['status']): { label: string; dot: string; className: string } {
+  return status === 'ready'
+    ? { label: 'Ready', dot: 'bg-success', className: 'text-success' }
+    : { label: 'Draft', dot: 'bg-warning', className: 'text-warning' }
 }
 
 function useAgentProfileViews(): AgentProfileMock[] {
@@ -306,22 +317,21 @@ export function AgentProfilesOverviewPage({ onAgentClick }: { onAgentClick: (age
   const [query, setQuery] = React.useState('')
   const [showCreate, setShowCreate] = React.useState(false)
   const [scope, setScope] = React.useState<'mine' | 'all'>('mine')
-  const [availability, setAvailability] = React.useState<'all' | AgentProfileMock['availability']>('all')
+  const [statusFilter, setStatusFilter] = React.useState<'all' | AgentProfileMock['status']>('all')
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase()
     return agents.filter(agent => {
-      if (availability !== 'all' && agent.availability !== availability) return false
+      if (statusFilter !== 'all' && agent.status !== statusFilter) return false
       if (!q) return true
       return agent.name.toLowerCase().includes(q) || agent.description.toLowerCase().includes(q)
     })
-  }, [agents, query, availability])
+  }, [agents, query, statusFilter])
 
   const counts = React.useMemo(() => ({
     all: agents.length,
-    online: agents.filter(agent => agent.availability === 'online').length,
-    unstable: agents.filter(agent => agent.availability === 'unstable').length,
-    offline: agents.filter(agent => agent.availability === 'offline').length,
+    ready: agents.filter(agent => agent.status === 'ready').length,
+    draft: agents.filter(agent => agent.status === 'draft').length,
   }), [agents])
 
   return (
@@ -371,10 +381,9 @@ export function AgentProfilesOverviewPage({ onAgentClick }: { onAgentClick: (age
           </div>
 
           <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
-            <FilterChip active={availability === 'all'} onClick={() => setAvailability('all')}>All {counts.all}</FilterChip>
-            <FilterChip active={availability === 'online'} dot="bg-success" onClick={() => setAvailability('online')}>Online {counts.online}</FilterChip>
-            <FilterChip active={availability === 'unstable'} dot="bg-warning" onClick={() => setAvailability('unstable')}>Unstable {counts.unstable}</FilterChip>
-            <FilterChip active={availability === 'offline'} dot="bg-muted-foreground/50" onClick={() => setAvailability('offline')}>Offline {counts.offline}</FilterChip>
+            <FilterChip active={statusFilter === 'all'} onClick={() => setStatusFilter('all')}>All {counts.all}</FilterChip>
+            <FilterChip active={statusFilter === 'ready'} dot="bg-success" onClick={() => setStatusFilter('ready')}>Ready {counts.ready}</FilterChip>
+            <FilterChip active={statusFilter === 'draft'} dot="bg-warning" onClick={() => setStatusFilter('draft')}>Draft {counts.draft}</FilterChip>
           </div>
 
           <div className="grid h-8 shrink-0 grid-cols-[minmax(240px,1.7fr)_120px_140px_minmax(200px,1.2fr)_100px_64px_60px] border-b border-border bg-muted/30 px-4 py-2 text-xs uppercase tracking-wider text-muted-foreground">
@@ -652,8 +661,7 @@ function FilterChip({
 
 function AgentTableRow({ agent, onClick }: { agent: AgentProfileMock; onClick: () => void }) {
   const Icon = agent.icon
-  const statusColor = agent.availability === 'online' ? 'text-success' : agent.availability === 'unstable' ? 'text-warning' : 'text-muted-foreground'
-  const statusDot = agent.availability === 'online' ? 'bg-success' : agent.availability === 'unstable' ? 'bg-warning' : 'bg-muted-foreground/50'
+  const status = getAgentStatusPresentation(agent.status)
 
   return (
     <button
@@ -664,7 +672,7 @@ function AgentTableRow({ agent, onClick }: { agent: AgentProfileMock; onClick: (
       <div className="flex min-w-0 items-center gap-3">
         <div className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted">
           <Icon className="h-4 w-4 text-foreground/80" />
-          <span className={cn('absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-background', statusDot)} />
+          <span className={cn('absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-background', status.dot)} />
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -674,9 +682,9 @@ function AgentTableRow({ agent, onClick }: { agent: AgentProfileMock; onClick: (
           <div className="mt-0.5 truncate text-xs text-muted-foreground">{agent.description || <span className="italic text-muted-foreground/50">No description</span>}</div>
         </div>
       </div>
-      <div className={cn('flex items-center gap-1.5 text-xs capitalize', statusColor)}>
-        <span className={cn('h-1.5 w-1.5 rounded-full', statusDot)} />
-        {agent.availability}
+      <div className={cn('flex items-center gap-1.5 text-xs', status.className)}>
+        <span className={cn('h-1.5 w-1.5 rounded-full', status.dot)} />
+        {status.label}
       </div>
       <div className="text-xs text-muted-foreground">{agent.workload}</div>
       <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
@@ -794,9 +802,17 @@ export function AgentProfileDetailPage({
   agentId?: string | null
   onBack?: () => void
 }) {
-  const agent = React.useMemo(() => createFallbackAgentProfile(agentId), [agentId])
-  const profileState = useAgentProfileDetail(agent)
-  const statusLabel = agent.availability === 'online' ? 'Online' : agent.availability === 'unstable' ? 'Unstable' : 'Offline'
+  const appShell = useOptionalAppShellContext()
+  const fallbackAgent = React.useMemo(() => createFallbackAgentProfile(agentId), [agentId])
+  const profileState = useAgentProfileDetail(fallbackAgent)
+  const connectionOptions = React.useMemo(
+    () => buildAgentConnectionOptions(appShell?.llmConnections),
+    [appShell?.llmConnections],
+  )
+  const agent = React.useMemo(
+    () => agentProfileToView(profileState.profile, connectionOptions),
+    [profileState.profile, connectionOptions],
+  )
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -813,7 +829,7 @@ export function AgentProfileDetailPage({
           </button>
           <span className="text-muted-foreground/40">/</span>
           <h1 className="truncate text-sm font-medium">{profileState.profile.name}</h1>
-          <AvailabilityBadge availability={agent.availability}>{statusLabel}</AvailabilityBadge>
+          <AgentStatusBadge status={profileState.profile.status} />
         </div>
         <button
           type="button"
@@ -998,7 +1014,7 @@ function AgentDetailInspectorCard({
             onSave={description => onProfileUpdate({ description })}
           />
         </div>
-        <AvailabilityBadge availability={agent.availability}>{capitalize(agent.availability)}</AvailabilityBadge>
+        <AgentStatusBadge status={profile.status} />
       </div>
 
       <AgentInspectorSection label="Properties">
@@ -2204,6 +2220,7 @@ function AgentSourcesTab({
   onProfileUpdate: (patch: NonNullable<AgentProfileUpdateInput['profile']>) => Promise<void>
 }) {
   const appShell = useOptionalAppShellContext()
+  const { navigateToSource } = useNavigation()
   const [localSources, setLocalSources] = React.useState<LoadedSource[]>([])
   const [draftSourceSlugs, setDraftSourceSlugs] = React.useState<string[]>(profile.sourceSlugs)
   const [sourceQuery, setSourceQuery] = React.useState('')
@@ -2296,18 +2313,9 @@ function AgentSourcesTab({
   }, [draftSourceSlugs, persistSourceSlugs])
 
   const openSourceConfig = React.useCallback((slug?: string) => {
-    const route = slug
-      ? `craftagents://sources/source/${encodeURIComponent(slug)}?window=focused`
-      : 'craftagents://sources?window=focused'
-    const openPromise = window.electronAPI?.openUrl?.(route)
-    if (!openPromise) {
-      setError('Source navigation is not available')
-      return
-    }
-    openPromise.catch(err => {
-      setError(err instanceof Error ? err.message : 'Failed to open source configuration')
-    })
-  }, [])
+    setError(null)
+    navigateToSource(slug)
+  }, [navigateToSource])
 
   return (
     <div className="flex h-full flex-col gap-4 p-6">
@@ -2621,13 +2629,12 @@ function AgentEnvironmentTab({ profile, onSave }: { profile: AgentProfileDetail;
   )
 }
 
-function AvailabilityBadge({ availability, children }: { availability: AgentProfileMock['availability']; children: React.ReactNode }) {
-  const dot = availability === 'online' ? 'bg-success' : availability === 'unstable' ? 'bg-warning' : 'bg-muted-foreground/50'
-  const text = availability === 'online' ? 'text-success' : availability === 'unstable' ? 'text-warning' : 'text-muted-foreground'
+function AgentStatusBadge({ status }: { status: AgentProfile['status'] }) {
+  const presentation = getAgentStatusPresentation(status)
   return (
-    <span className={cn('inline-flex w-fit items-center gap-1.5 rounded-md border border-border bg-background px-1.5 py-0.5 text-xs', text)}>
-      <span className={cn('h-1.5 w-1.5 rounded-full', dot)} />
-      {children}
+    <span className={cn('inline-flex w-fit items-center gap-1.5 rounded-md border border-border bg-background px-1.5 py-0.5 text-xs', presentation.className)}>
+      <span className={cn('h-1.5 w-1.5 rounded-full', presentation.dot)} />
+      {presentation.label}
     </span>
   )
 }
@@ -2638,10 +2645,6 @@ function AgentSmallToken({ children }: { children: React.ReactNode }) {
 
 function Sep() {
   return <span className="mx-1 text-muted-foreground/45">·</span>
-}
-
-function capitalize(value: string) {
-  return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
 function getRunStatusPresentation(status: AgentRun['status']): { icon: typeof CheckCircle2; className: string } {

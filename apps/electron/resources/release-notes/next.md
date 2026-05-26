@@ -10,4 +10,6 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Agent profile status and source navigation** — Agent pages now display each profile's real Ready/Draft status instead of stale mock online/offline availability, and the Sources tab uses in-app source navigation instead of a deeplink path that could crash the page.
+
 ## Breaking Changes
