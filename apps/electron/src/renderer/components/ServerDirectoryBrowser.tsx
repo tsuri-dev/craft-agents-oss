@@ -30,6 +30,8 @@ function isWrongPlatformPath(path: string, serverHomePath: string | null): boole
   return path.startsWith('/')
 }
 
+const REMOTE_WORKSPACE_START_PATHS = ['/data/workspace']
+
 interface ServerDirectoryBrowserProps {
   open: boolean
   mode: 'browse' | 'manual'
@@ -91,23 +93,39 @@ export function ServerDirectoryBrowser({
 
         // Resolve the start path with cascading fallback for backward compat:
         // 1. initialPath (if provided and valid)
-        // 2. getServerHomeDir() — REMOTE_ELIGIBLE, returns server's home (new servers)
-        // 3. listServerDirectory('~') — server-side ~ resolution (medium-age servers)
-        // 4. listServerDirectory('/') — root directory (old servers)
+        // 2. common remote workspace roots, if present on the server
+        // 3. getServerHomeDir() — REMOTE_ELIGIBLE, returns server's home (new servers)
+        // 4. listServerDirectory('~') — server-side ~ resolution (medium-age servers)
+        // 5. listServerDirectory('/') — root directory (old servers)
         const tryNavigate = async (path: string) => {
           const result = await window.electronAPI.listServerDirectory(path)
           setListing(result)
           setPathInput(result.currentPath)
-          setServerHomePath(result.currentPath)
+          setServerHomePath(prev => prev ?? result.currentPath)
         }
 
         try {
           if (initialPath) {
             await tryNavigate(initialPath)
           } else {
+            let navigated = false
+
+            for (const candidate of REMOTE_WORKSPACE_START_PATHS) {
+              try {
+                await tryNavigate(candidate)
+                navigated = true
+                break
+              } catch {
+                // Candidate does not exist or is not valid on this server.
+              }
+            }
+
+            if (navigated) return
+
             // Try server home dir API first (REMOTE_ELIGIBLE — correct for remote workspaces)
             try {
               const serverHome = await window.electronAPI.getServerHomeDir()
+              setServerHomePath(serverHome)
               await tryNavigate(serverHome)
             } catch {
               // Fallback: ~ resolution (server-side)
@@ -126,7 +144,7 @@ export function ServerDirectoryBrowser({
         }
       } else {
         // Manual mode — fetch home dir for platform detection
-        const homeDir = await window.electronAPI.getHomeDir()
+        const homeDir = await window.electronAPI.getServerHomeDir().catch(() => window.electronAPI.getHomeDir())
         setServerHomePath(homeDir)
       }
     }

@@ -222,7 +222,7 @@ export function CompactWorkingDirectorySelector({
         mode={serverBrowserMode}
         onSelect={confirmServerBrowser}
         onCancel={cancelServerBrowser}
-        initialPath={workingDirectory}
+        initialPath={hasFolder ? workingDirectory : undefined}
       />
     </>
   )
