@@ -2823,7 +2823,7 @@ export function WorkingDirectoryBadge({
       mode={serverBrowserMode}
       onSelect={confirmServerBrowser}
       onCancel={cancelServerBrowser}
-      initialPath={workingDirectory}
+      initialPath={hasFolder ? workingDirectory : undefined}
     />
     </>
   )
