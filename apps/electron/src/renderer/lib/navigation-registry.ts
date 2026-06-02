@@ -46,7 +46,7 @@ export interface DetailsProps {
  */
 export interface NavigationData {
   /** All sessions in the current filter */
-  sessions: Array<{ id: string; isFlagged?: boolean; stateId?: string }>
+  sessions: Array<{ id: string; isFlagged?: boolean; stateId?: string; hasUnread?: boolean }>
   /** All sources */
   sources: Array<{ slug: string }>
   /** Current session filter (if in sessions mode) */
@@ -79,7 +79,7 @@ export type NavigatorType = 'sessions' | 'sources' | 'settings'
 /**
  * Session filter kinds that map to sidebar routes
  */
-export type SessionFilterKind = 'allSessions' | 'flagged' | 'state'
+export type SessionFilterKind = 'allSessions' | 'inbox' | 'flagged' | 'state'
 
 // =============================================================================
 // Details Page Metadata
@@ -130,6 +130,9 @@ export const NavigationRegistry = {
 
       let filtered = ctx.sessions
       switch (filter.kind) {
+        case 'inbox':
+          filtered = ctx.sessions.filter(s => s.hasUnread)
+          break
         case 'flagged':
           filtered = ctx.sessions.filter(s => s.isFlagged)
           break

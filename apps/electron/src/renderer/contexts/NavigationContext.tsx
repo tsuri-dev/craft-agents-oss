@@ -539,13 +539,15 @@ export function NavigationProvider({
       // navigator unless the "Show agent tasks" toggle is enabled.
       const showAgentTasks = storage.get<boolean>(storage.KEYS.showAgentTasks, false)
       const visibleSessions = sessionMetas.filter(
-        s => !s.hidden && (!workspaceId || s.workspaceId === workspaceId) && (showAgentTasks || !hasAgentTaskLabel(s.labels))
+        s => !s.hidden && (!workspaceId || s.workspaceId === workspaceId) && (filter.kind === 'inbox' || showAgentTasks || !hasAgentTaskLabel(s.labels))
       )
 
       return visibleSessions.filter((session) => {
         switch (filter.kind) {
           case 'allSessions':
             return session.isArchived !== true
+          case 'inbox':
+            return session.hasUnread === true && session.isArchived !== true
           case 'flagged':
             return session.isFlagged === true && session.isArchived !== true
           case 'archived':
@@ -635,8 +637,9 @@ export function NavigationProvider({
         }
       }
 
-      // Sessions: auto-select last/first session
-      if (isSessionsNavigation(nextState) && !nextState.details && !options?.skipAutoSelect) {
+      // Sessions: auto-select last/first session. Inbox intentionally stays empty
+      // until the user selects a notification, matching notification-inbox UX.
+      if (isSessionsNavigation(nextState) && nextState.filter.kind !== 'inbox' && !nextState.details && !options?.skipAutoSelect) {
         const lastSelectedSessionId = getLastSelectedSessionId(nextState.filter)
         const fallbackSessionId = lastSelectedSessionId ?? getFirstSessionId(nextState.filter)
         if (fallbackSessionId) {
@@ -1198,6 +1201,9 @@ export function NavigationProvider({
       case 'allSessions':
         navigate(routes.view.allSessions(sessionId))
         break
+      case 'inbox':
+        navigate(routes.view.inbox(sessionId))
+        break
       case 'flagged':
         navigate(routes.view.flagged(sessionId))
         break
@@ -1227,7 +1233,7 @@ export function NavigationProvider({
     if (!isReady || !workspaceId) return
     // Don't auto-select when panel stack is empty (user closed all panels)
     if (store.get(panelStackAtom).length === 0) return
-    if (!isSessionsNavigation(navigationState) || navigationState.details) return
+    if (!isSessionsNavigation(navigationState) || navigationState.details || navigationState.filter.kind === 'inbox') return
 
     const lastSelectedSessionId = getLastSelectedSessionId(navigationState.filter)
     const fallbackSessionId = lastSelectedSessionId ?? getFirstSessionId(navigationState.filter)

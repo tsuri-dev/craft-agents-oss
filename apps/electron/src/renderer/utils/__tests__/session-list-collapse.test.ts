@@ -7,6 +7,7 @@ import {
 describe('serializeSessionFilterForScope', () => {
   it('serializes simple filter kinds', () => {
     expect(serializeSessionFilterForScope({ kind: 'allSessions' })).toBe('allSessions')
+    expect(serializeSessionFilterForScope({ kind: 'inbox' })).toBe('inbox')
     expect(serializeSessionFilterForScope({ kind: 'flagged' })).toBe('flagged')
     expect(serializeSessionFilterForScope({ kind: 'archived' })).toBe('archived')
   })

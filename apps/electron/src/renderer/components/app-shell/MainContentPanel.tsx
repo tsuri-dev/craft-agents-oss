@@ -23,7 +23,7 @@ import { toast } from 'sonner'
 import { Panel } from './Panel'
 import { MultiSelectPanel } from './MultiSelectPanel'
 import { SessionBoard } from './SessionBoard'
-import { RequirementBoard, RequirementDetailPage } from './RequirementBoard'
+import { RequirementBoard } from './RequirementBoard'
 import { AgentProfileDetailPage, AgentProfilesOverviewPage } from './AgentProfiles'
 import { PluginIntroPage, PluginsHub } from './PluginsHub'
 import { useAppShellContext } from '@/context/AppShellContext'
@@ -60,6 +60,7 @@ import {
   buildSessionGroupFilterOptions,
   resolveUniqueSessionGroupName,
 } from '@/utils/session-group-filter'
+import { hasUnreadMeta } from '@/utils/session'
 
 class SourceDetailErrorBoundary extends React.Component<{
   sourceSlug: string
@@ -238,6 +239,7 @@ export function MainContentPanel({
     if (!isSessionsNavigation(navState)) return activeSessions
     const filter = navState.filter
     if (!filter || filter.kind === 'allSessions') return activeSessions
+    if (filter.kind === 'inbox') return activeSessions.filter(meta => hasUnreadMeta(meta))
     if (filter.kind === 'flagged') return activeSessions.filter(meta => meta.isFlagged)
     if (filter.kind === 'state') return activeSessions.filter(meta => (meta.sessionStatus || 'todo') === filter.stateId)
     if (filter.kind === 'label') {
@@ -533,7 +535,7 @@ export function MainContentPanel({
       <Panel variant="grow" className={className}>
         {navState.details?.pluginId === 'tapd'
           ? (navState.details.page === 'requirement' && navState.details.sourceItemId
-            ? <RequirementDetailPage sourceItemId={navState.details.sourceItemId} />
+            ? <RequirementBoard initialSourceItemId={navState.details.sourceItemId} />
             : navState.details.page === 'board'
               ? <RequirementBoard />
               : <PluginIntroPage />)
@@ -566,7 +568,7 @@ export function MainContentPanel({
       )
     }
 
-    if (!navState.details && navState.filter?.kind !== 'archived' && sessionBoardViewMode === 'board') {
+    if (!navState.details && navState.filter?.kind !== 'archived' && navState.filter?.kind !== 'inbox' && sessionBoardViewMode === 'board') {
       return wrapWithStoplight(
         <Panel variant="grow" className={className}>
           <div className="flex h-full min-h-0 flex-col bg-background">
@@ -600,7 +602,7 @@ export function MainContentPanel({
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
         <div className="flex items-center justify-center h-full text-muted-foreground">
-          <p className="text-sm">{t("session.noSessionSelected")}</p>
+          <p className="text-sm">{navState.filter?.kind === 'inbox' ? 'Select a notification to view details' : t("session.noSessionSelected")}</p>
         </div>
       </Panel>
     )

@@ -96,6 +96,10 @@ export const routes = {
     allSessions: (sessionId?: string) =>
       sessionId ? `allSessions/session/${sessionId}` as const : 'allSessions' as const,
 
+    /** Inbox view (sessions navigator, unread filter) */
+    inbox: (sessionId?: string) =>
+      sessionId ? `inbox/session/${sessionId}` as const : 'inbox' as const,
+
     /** Flagged view (sessions navigator, flagged filter) */
     flagged: (sessionId?: string) =>
       sessionId ? `flagged/session/${sessionId}` as const : 'flagged' as const,

@@ -11,12 +11,17 @@ import {
   CheckCircle2,
   ChevronRight,
   Circle,
-  Loader2,
+  Columns3,
   Link2,
+  List,
+  Loader2,
+  MoreHorizontal,
+  Pin,
   Plus,
   RefreshCw,
   Square,
   Workflow,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { AgentAvatar } from '@/components/ui/agent-avatar'
@@ -170,48 +175,313 @@ function getCachedItems(cache: TapdRequirementCache): ExternalRequirementItem[] 
   return cache.listOrder.map(id => cache.itemsById[id]).filter(Boolean)
 }
 
-function RequirementCard({ item }: { item: ExternalRequirementItem }) {
-  const linked = Boolean(item.binding)
+type TapdPluginViewMode = 'list' | 'board'
+
+type TapdStatusFilter = 'all' | string
+
+interface TapdOpenRequirementTab {
+  sourceItemId: string
+  pinned?: boolean
+}
+
+interface TapdHomeUiState {
+  viewMode?: TapdPluginViewMode
+  statusFilter?: TapdStatusFilter
+  tabs?: TapdOpenRequirementTab[]
+}
+
+const TAPD_HOME_TAB_ID = 'tapd-home'
+const TAPD_HOME_STATUS = 'Backlog'
+const TAPD_UI_STORAGE_VERSION = 1
+const TAPD_STATUS_ORDER = ['backlog', 'todo', 'in progress', 'in review', 'done', 'blocked']
+
+function tapdUiStorageKey(workspaceId?: string | null) {
+  return `craft.tapd-plugin.ui.${workspaceId ?? 'default'}.v${TAPD_UI_STORAGE_VERSION}`
+}
+
+function readTapdHomeUiState(workspaceId?: string | null): TapdHomeUiState {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = window.localStorage.getItem(tapdUiStorageKey(workspaceId))
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as TapdHomeUiState
+    return {
+      viewMode: parsed.viewMode === 'list' || parsed.viewMode === 'board' ? parsed.viewMode : undefined,
+      statusFilter: typeof parsed.statusFilter === 'string' ? parsed.statusFilter : undefined,
+      tabs: Array.isArray(parsed.tabs)
+        ? parsed.tabs
+          .filter(tab => typeof tab?.sourceItemId === 'string' && tab.sourceItemId.trim())
+          .map(tab => ({ sourceItemId: tab.sourceItemId.trim(), pinned: Boolean(tab.pinned) }))
+        : undefined,
+    }
+  } catch {
+    return {}
+  }
+}
+
+function writeTapdHomeUiState(workspaceId: string | null | undefined, patch: TapdHomeUiState) {
+  if (typeof window === 'undefined') return
+  const current = readTapdHomeUiState(workspaceId)
+  const next: TapdHomeUiState = { ...current, ...patch }
+  window.localStorage.setItem(tapdUiStorageKey(workspaceId), JSON.stringify(next))
+}
+
+function getRequirementTabTitle(item?: ExternalRequirementItem | null, sourceItemId?: string) {
+  const raw = item?.title?.trim()
+  if (raw) return raw.length > 34 ? `${raw.slice(0, 32)}…` : raw
+  return sourceItemId ? `TAPD-${sourceItemId}` : 'Requirement'
+}
+
+function getRequirementShortId(item: Pick<ExternalRequirementItem, 'sourceItemId'>) {
+  const id = item.sourceItemId || ''
+  return id.length > 8 ? id.slice(-8) : id
+}
+
+function getIssueStatusLabel(item: ExternalRequirementItem) {
+  return item.status?.trim() || TAPD_HOME_STATUS
+}
+
+function normalizeIssueStatus(status: string) {
+  return status.trim().toLowerCase()
+}
+
+function getStatusRank(status: string) {
+  const normalized = normalizeIssueStatus(status)
+  const exact = TAPD_STATUS_ORDER.indexOf(normalized)
+  if (exact >= 0) return exact
+  if (normalized.includes('backlog')) return 0
+  if (normalized.includes('todo') || normalized.includes('待')) return 1
+  if (normalized.includes('progress') || normalized.includes('开发') || normalized.includes('进行')) return 2
+  if (normalized.includes('review') || normalized.includes('验收') || normalized.includes('评审')) return 3
+  if (normalized.includes('done') || normalized.includes('closed') || normalized.includes('完成') || normalized.includes('发布')) return 4
+  if (normalized.includes('block') || normalized.includes('阻塞')) return 5
+  return 20
+}
+
+function sortStatusLabels(statuses: string[]) {
+  return [...statuses].sort((a, b) => {
+    const rank = getStatusRank(a) - getStatusRank(b)
+    if (rank !== 0) return rank
+    return a.localeCompare(b)
+  })
+}
+
+function getStatusPresentation(status: string) {
+  const normalized = normalizeIssueStatus(status)
+  if (normalized.includes('done') || normalized.includes('closed') || normalized.includes('完成') || normalized.includes('发布')) {
+    return { dot: 'border-success bg-success', ring: 'ring-success/20', column: 'bg-success/[0.045]', text: 'text-success/90' }
+  }
+  if (normalized.includes('block') || normalized.includes('拒绝') || normalized.includes('reject') || normalized.includes('阻塞')) {
+    return { dot: 'border-destructive bg-destructive', ring: 'ring-destructive/20', column: 'bg-destructive/[0.035]', text: 'text-destructive/90' }
+  }
+  if (normalized.includes('review') || normalized.includes('验收') || normalized.includes('评审')) {
+    return { dot: 'border-success bg-transparent', ring: 'ring-success/20', column: 'bg-success/[0.035]', text: 'text-success/90' }
+  }
+  if (normalized.includes('progress') || normalized.includes('开发') || normalized.includes('进行')) {
+    return { dot: 'border-warning bg-transparent', ring: 'ring-warning/20', column: 'bg-warning/[0.045]', text: 'text-warning/90' }
+  }
+  if (normalized.includes('todo') || normalized.includes('待')) {
+    return { dot: 'border-muted-foreground bg-transparent', ring: 'ring-foreground/[0.08]', column: 'bg-foreground/[0.025]', text: 'text-foreground' }
+  }
+  return { dot: 'border-muted-foreground/70 bg-transparent border-dotted', ring: 'ring-foreground/[0.08]', column: 'bg-foreground/[0.025]', text: 'text-foreground' }
+}
+
+function groupRequirementsByStatus(items: ExternalRequirementItem[], statuses: string[]) {
+  return statuses.map(status => ({
+    status,
+    items: items.filter(item => getIssueStatusLabel(item) === status),
+  }))
+}
+
+function RequirementTabStrip({
+  tabs,
+  activeTabId,
+  itemsById,
+  onActivateHome,
+  onActivateRequirement,
+  onCloseRequirement,
+  onTogglePinned,
+}: {
+  tabs: TapdOpenRequirementTab[]
+  activeTabId: string
+  itemsById: Record<string, ExternalRequirementItem>
+  onActivateHome: () => void
+  onActivateRequirement: (sourceItemId: string) => void
+  onCloseRequirement: (sourceItemId: string) => void
+  onTogglePinned: (sourceItemId: string) => void
+}) {
+  return (
+    <div className="flex h-12 shrink-0 items-center gap-1 border-b border-foreground/[0.06] bg-foreground/[0.025] px-3">
+      <button
+        type="button"
+        onClick={onActivateHome}
+        className={cn(
+          'group flex h-9 min-w-[190px] max-w-[240px] items-center gap-2 rounded-[10px] px-3 text-left text-[13px] font-medium transition-colors',
+          activeTabId === TAPD_HOME_TAB_ID ? 'bg-background text-foreground shadow-sm ring-1 ring-foreground/[0.06]' : 'text-foreground/70 hover:bg-background/70 hover:text-foreground',
+        )}
+      >
+        <Pin className="h-3.5 w-3.5 shrink-0 text-foreground/70" />
+        <span className="truncate">Tapd</span>
+      </button>
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+        {tabs.map(tab => {
+          const item = itemsById[tab.sourceItemId]
+          const active = activeTabId === tab.sourceItemId
+          return (
+            <button
+              key={tab.sourceItemId}
+              type="button"
+              onClick={() => onActivateRequirement(tab.sourceItemId)}
+              className={cn(
+                'group flex h-9 min-w-[160px] max-w-[260px] items-center gap-2 rounded-[10px] px-2.5 text-left text-[13px] transition-colors',
+                active ? 'bg-background text-foreground shadow-sm ring-1 ring-foreground/[0.06]' : 'text-foreground/65 hover:bg-background/70 hover:text-foreground',
+                tab.pinned && 'min-w-[120px]',
+              )}
+              title={item?.title ?? `TAPD-${tab.sourceItemId}`}
+            >
+              {tab.pinned ? <Pin className="h-3.5 w-3.5 shrink-0 text-accent" /> : <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-foreground/35" />}
+              <span className="min-w-0 flex-1 truncate">{getRequirementTabTitle(item, tab.sourceItemId)}</span>
+              <span className="hidden shrink-0 font-mono text-[10px] text-muted-foreground/70 xl:inline">{getRequirementShortId(item ?? { sourceItemId: tab.sourceItemId } as ExternalRequirementItem)}</span>
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onTogglePinned(tab.sourceItemId)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    onTogglePinned(tab.sourceItemId)
+                  }
+                }}
+                className={cn('rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-foreground/[0.06] hover:text-foreground group-hover:opacity-100', tab.pinned && 'opacity-100 text-accent')}
+                aria-label={tab.pinned ? 'Unpin tab' : 'Pin tab'}
+                title={tab.pinned ? 'Unpin tab' : 'Pin tab'}
+              >
+                <Pin className="h-3 w-3" />
+              </span>
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onCloseRequirement(tab.sourceItemId)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    onCloseRequirement(tab.sourceItemId)
+                  }
+                }}
+                className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-foreground/[0.06] hover:text-foreground group-hover:opacity-100"
+                aria-label="Close tab"
+                title="Close tab"
+              >
+                <X className="h-3 w-3" />
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function IssueStatusDot({ status }: { status: string }) {
+  const presentation = getStatusPresentation(status)
+  return <span className={cn('h-3.5 w-3.5 shrink-0 rounded-full border-2', presentation.dot)} />
+}
+
+function IssueRow({ item, onOpen }: { item: ExternalRequirementItem; onOpen: (item: ExternalRequirementItem) => void }) {
   const assignee = item.assignees?.[0]
   return (
     <button
       type="button"
-      onClick={() => navigate(routes.view.plugins(TAPD_PLUGIN_ID, 'requirement', item.sourceItemId))}
-      className="group flex min-h-[210px] w-full flex-col rounded-[16px] bg-background px-4 py-4 text-left shadow-minimal ring-1 ring-foreground/[0.07] transition-[transform,box-shadow,background-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-foreground/[0.012] hover:shadow-tinted active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+      onClick={() => onOpen(item)}
+      className="group grid w-full grid-cols-[22px_minmax(86px,120px)_minmax(0,1fr)_auto] items-center gap-2 rounded-[10px] px-4 py-3 text-left transition-colors hover:bg-foreground/[0.035]"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="mb-2 flex flex-wrap items-center gap-1.5">
-            {item.type && <MetaPill className="bg-foreground/[0.055] text-foreground/70">{item.type}</MetaPill>}
-            <MetaPill className={statusTone(item.status)}>{item.status || 'Unknown'}</MetaPill>
-          </div>
-          <h3 className="line-clamp-2 text-[15px] font-semibold leading-5 tracking-[-0.012em] text-foreground text-balance">
-            {item.title}
-          </h3>
+      <span className="text-center text-muted-foreground">—</span>
+      <span className="font-mono text-[13px] text-muted-foreground tabular-nums">TAPD-{getRequirementShortId(item)}</span>
+      <span className="min-w-0 truncate text-[14px] font-medium text-foreground">{item.title}</span>
+      <span className="flex min-w-0 items-center gap-2 text-[12px] text-muted-foreground">
+        {item.priority && <MetaPill className="bg-foreground/[0.045] text-foreground/60">{item.priority}</MetaPill>}
+        {item.binding && <MetaPill className="bg-success/10 text-success">Bound</MetaPill>}
+        {assignee && <span className="hidden max-w-[120px] truncate sm:inline">{assignee}</span>}
+        <ArrowRight className="h-3.5 w-3.5 opacity-0 transition-opacity group-hover:opacity-100" />
+      </span>
+    </button>
+  )
+}
+
+function IssueListSection({ status, items, onOpen }: { status: string; items: ExternalRequirementItem[]; onOpen: (item: ExternalRequirementItem) => void }) {
+  return (
+    <section className="rounded-[14px]">
+      <div className="flex h-11 items-center gap-3 rounded-[12px] bg-foreground/[0.025] px-4 ring-1 ring-foreground/[0.035]">
+        <span className="h-4 w-4 rounded-[4px] border border-foreground/35" />
+        <ChevronRight className="h-4 w-4 rotate-90 text-muted-foreground" />
+        <IssueStatusDot status={status} />
+        <span className="font-semibold text-foreground">{status}</span>
+        <span className="font-mono text-sm text-muted-foreground tabular-nums">{items.length}</span>
+      </div>
+      {items.length === 0 ? (
+        <div className="flex h-24 items-center justify-center text-[14px] text-muted-foreground">No issues</div>
+      ) : (
+        <div className="py-2">
+          {items.map(item => <IssueRow key={item.sourceItemId} item={item} onOpen={onOpen} />)}
         </div>
-        <span className={cn('mt-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full', linked ? 'bg-success/10 text-success' : 'bg-foreground/[0.045] text-muted-foreground')}>
-          {linked ? <CheckCircle2 className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
-        </span>
+      )}
+    </section>
+  )
+}
+
+function BoardIssueCard({ item, onOpen }: { item: ExternalRequirementItem; onOpen: (item: ExternalRequirementItem) => void }) {
+  const assignee = item.assignees?.[0]
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(item)}
+      className="group w-full rounded-[14px] bg-background p-4 text-left shadow-sm ring-1 ring-foreground/[0.08] transition-[transform,box-shadow] hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+    >
+      <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+        <span>—</span>
+        <span className="font-mono tabular-nums">TAPD-{getRequirementShortId(item)}</span>
       </div>
-
-      <div className="mt-3 text-[12px] tabular-nums text-muted-foreground">TAPD-{item.sourceItemId}</div>
-      <div className="mt-1 truncate text-[12px] text-muted-foreground">
-        {[item.project, assignee].filter(Boolean).join(' · ') || 'No owner context'}
-      </div>
-
-      <p className="mt-4 line-clamp-3 flex-1 text-[12px] leading-5 text-foreground/70 text-pretty">
-        {item.summary || 'No summary available yet. Open the detail page to refresh the requirement context from TAPD.'}
-      </p>
-
-      <div className="mt-4 flex items-center justify-between gap-3 border-t border-foreground/[0.06] pt-3">
-        <span className={cn('rounded-full px-2 py-1 text-[11px] font-medium', linked ? 'bg-success/10 text-success' : 'bg-foreground/[0.04] text-muted-foreground')}>
-          {linked ? 'Bound' : 'Not linked'}
-        </span>
-        <span className="inline-flex items-center gap-1 text-[12px] font-medium text-foreground/70 transition-colors group-hover:text-foreground">
-          View details <ArrowRight className="h-3.5 w-3.5" />
-        </span>
+      <h3 className="mt-3 line-clamp-2 text-[15px] font-semibold leading-5 text-foreground">{item.title}</h3>
+      {item.summary && <p className="mt-2 line-clamp-2 text-[13px] leading-5 text-muted-foreground">{item.summary}</p>}
+      <div className="mt-4 flex items-center gap-2 text-[12px] text-muted-foreground">
+        {assignee && <span className="truncate">{assignee}</span>}
+        {item.binding && <MetaPill className="bg-success/10 text-success">Bound</MetaPill>}
+        {item.priority && <MetaPill className="bg-foreground/[0.045] text-foreground/60">{item.priority}</MetaPill>}
       </div>
     </button>
+  )
+}
+
+function IssueBoardColumn({ status, items, onOpen }: { status: string; items: ExternalRequirementItem[]; onOpen: (item: ExternalRequirementItem) => void }) {
+  const presentation = getStatusPresentation(status)
+  return (
+    <section className={cn('flex h-full min-h-[520px] w-[310px] shrink-0 flex-col rounded-[18px] p-4', presentation.column)}>
+      <div className="mb-4 flex h-7 items-center gap-2 px-1">
+        <IssueStatusDot status={status} />
+        <span className={cn('font-semibold', presentation.text)}>{status}</span>
+        <span className="font-mono text-sm text-muted-foreground tabular-nums">{items.length}</span>
+        <button type="button" className="ml-auto rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground" aria-label="Column menu">
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+      </div>
+      {items.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center text-[14px] text-muted-foreground">No issues</div>
+      ) : (
+        <div className="space-y-3">
+          {items.map(item => <BoardIssueCard key={item.sourceItemId} item={item} onOpen={onOpen} />)}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -228,7 +498,65 @@ function PluginUnavailableState() {
   )
 }
 
-export function RequirementBoard() {
+function TapdLinkImportDialog({
+  open,
+  onOpenChange,
+  linkInput,
+  onLinkInputChange,
+  linkError,
+  addingFromLink,
+  connected,
+  connectionError,
+  onSubmit,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  linkInput: string
+  onLinkInputChange: (value: string) => void
+  linkError: string | null
+  addingFromLink: boolean
+  connected: boolean
+  connectionError?: string
+  onSubmit: () => void
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>Add TAPD requirement</DialogTitle>
+          <DialogDescription>Paste a full TAPD requirement link. Craft Agent will fetch and save that requirement locally.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 py-2">
+          <div className="flex items-center gap-2 rounded-[10px] border border-foreground/[0.08] bg-background px-3 focus-within:ring-2 focus-within:ring-accent/30">
+            <Link2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <Input
+              aria-label="TAPD requirement link"
+              autoFocus
+              value={linkInput}
+              onChange={event => onLinkInputChange(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') onSubmit()
+              }}
+              placeholder="https://www.tapd.cn/.../tapd_fe/.../story/detail/..."
+              className="h-10 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+            />
+          </div>
+          {!connected && <p className="text-[12px] text-warning">{connectionError || 'TAPD source is not connected.'}</p>}
+          {linkError && <p className="text-[12px] text-destructive">{linkError}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={addingFromLink}>Cancel</Button>
+          <Button onClick={onSubmit} disabled={addingFromLink || !linkInput.trim()}>
+            {addingFromLink ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+            Add requirement
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?: string }) {
   const { activeWorkspaceId } = useAppShellContext()
   // TAPD Requirements is a built-in plugin view. A live tapd-mcp-http source is
   // only required for importing/refreshing from TAPD; synced local cache should
@@ -240,10 +568,95 @@ export function RequirementBoard() {
   const [linkInput, setLinkInput] = React.useState('')
   const [linkError, setLinkError] = React.useState<string | null>(null)
   const [addingFromLink, setAddingFromLink] = React.useState(false)
+  const [importDialogOpen, setImportDialogOpen] = React.useState(false)
+  const [viewMode, setViewMode] = React.useState<TapdPluginViewMode>(() => readTapdHomeUiState(activeWorkspaceId).viewMode ?? 'list')
+  const [statusFilter, setStatusFilter] = React.useState<TapdStatusFilter>(() => readTapdHomeUiState(activeWorkspaceId).statusFilter ?? 'all')
+  const [openTabs, setOpenTabs] = React.useState<TapdOpenRequirementTab[]>(() => readTapdHomeUiState(activeWorkspaceId).tabs ?? [])
+  const [activeTabId, setActiveTabId] = React.useState(initialSourceItemId ?? TAPD_HOME_TAB_ID)
 
   const plugin = plugins.find(item => item.id === TAPD_PLUGIN_ID)
   const connected = plugin?.connectionStatus === 'connected'
-  const visibleItems = React.useMemo(() => getCachedItems(cache), [cache])
+  const allItems = React.useMemo(() => getCachedItems(cache), [cache])
+  const statusLabels = React.useMemo(() => sortStatusLabels(Array.from(new Set(allItems.map(getIssueStatusLabel)))), [allItems])
+  const visibleItems = React.useMemo(() => {
+    if (statusFilter === 'all') return allItems
+    return allItems.filter(item => getIssueStatusLabel(item) === statusFilter)
+  }, [allItems, statusFilter])
+  const visibleStatuses = React.useMemo(() => {
+    if (statusFilter === 'all') return statusLabels
+    return statusLabels.includes(statusFilter) ? [statusFilter] : []
+  }, [statusFilter, statusLabels])
+  const groupedItems = React.useMemo(() => groupRequirementsByStatus(visibleItems, visibleStatuses), [visibleItems, visibleStatuses])
+
+  const persistTabs = React.useCallback((tabs: TapdOpenRequirementTab[]) => {
+    writeTapdHomeUiState(activeWorkspaceId, { tabs })
+  }, [activeWorkspaceId])
+
+  const openRequirementTab = React.useCallback((sourceItemId: string) => {
+    setOpenTabs(current => {
+      const existing = current.find(tab => tab.sourceItemId === sourceItemId)
+      const next = existing ? current : [...current, { sourceItemId }]
+      persistTabs(next)
+      return next
+    })
+    setActiveTabId(sourceItemId)
+    navigate(routes.view.plugins(TAPD_PLUGIN_ID, 'requirement', sourceItemId))
+  }, [persistTabs])
+
+  const activateHome = React.useCallback(() => {
+    setActiveTabId(TAPD_HOME_TAB_ID)
+    navigate(routes.view.plugins(TAPD_PLUGIN_ID, 'board'))
+  }, [])
+
+  const closeRequirementTab = React.useCallback((sourceItemId: string) => {
+    setOpenTabs(current => {
+      const index = current.findIndex(tab => tab.sourceItemId === sourceItemId)
+      const next = current.filter(tab => tab.sourceItemId !== sourceItemId)
+      persistTabs(next)
+      if (activeTabId === sourceItemId) {
+        const fallback = next[index - 1] ?? next[index] ?? null
+        if (fallback) {
+          setActiveTabId(fallback.sourceItemId)
+          navigate(routes.view.plugins(TAPD_PLUGIN_ID, 'requirement', fallback.sourceItemId))
+        } else {
+          setActiveTabId(TAPD_HOME_TAB_ID)
+          navigate(routes.view.plugins(TAPD_PLUGIN_ID, 'board'))
+        }
+      }
+      return next
+    })
+  }, [activeTabId, persistTabs])
+
+  const toggleRequirementTabPinned = React.useCallback((sourceItemId: string) => {
+    setOpenTabs(current => {
+      const next = current.map(tab => tab.sourceItemId === sourceItemId ? { ...tab, pinned: !tab.pinned } : tab)
+      const ordered = [...next].sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)))
+      persistTabs(ordered)
+      return ordered
+    })
+  }, [persistTabs])
+
+  React.useEffect(() => {
+    const stored = readTapdHomeUiState(activeWorkspaceId)
+    setViewMode(stored.viewMode ?? 'list')
+    setStatusFilter(stored.statusFilter ?? 'all')
+    setOpenTabs(stored.tabs ?? [])
+    setActiveTabId(initialSourceItemId ?? TAPD_HOME_TAB_ID)
+  }, [activeWorkspaceId, initialSourceItemId])
+
+  React.useEffect(() => {
+    if (!initialSourceItemId) {
+      setActiveTabId(TAPD_HOME_TAB_ID)
+      return
+    }
+    setOpenTabs(current => {
+      const existing = current.some(tab => tab.sourceItemId === initialSourceItemId)
+      const next = existing ? current : [...current, { sourceItemId: initialSourceItemId }]
+      persistTabs(next)
+      return next
+    })
+    setActiveTabId(initialSourceItemId)
+  }, [initialSourceItemId, persistTabs])
 
   React.useEffect(() => {
     setCache(tapdInstalled ? readCache(activeWorkspaceId) : emptyCache())
@@ -329,6 +742,8 @@ export function RequirementBoard() {
       const nextCache = upsertCachedItem(activeWorkspaceId, item)
       setCache(nextCache)
       setLinkInput('')
+      setImportDialogOpen(false)
+      openRequirementTab(item.sourceItemId)
       if (linkedGroupName) {
         toast.success('TAPD requirement saved and linked', { description: `Group: ${linkedGroupName}` })
       } else {
@@ -339,89 +754,157 @@ export function RequirementBoard() {
     } finally {
       setAddingFromLink(false)
     }
-  }, [activeWorkspaceId, connected, linkInput, plugin?.connectionError, tapdInstalled])
+  }, [activeWorkspaceId, connected, linkInput, openRequirementTab, plugin?.connectionError, tapdInstalled])
+
+  const updateViewMode = React.useCallback((mode: TapdPluginViewMode) => {
+    setViewMode(mode)
+    writeTapdHomeUiState(activeWorkspaceId, { viewMode: mode })
+  }, [activeWorkspaceId])
+
+  const updateStatusFilter = React.useCallback((status: TapdStatusFilter) => {
+    setStatusFilter(status)
+    writeTapdHomeUiState(activeWorkspaceId, { statusFilter: status })
+  }, [activeWorkspaceId])
+
+  React.useEffect(() => {
+    if (statusFilter !== 'all' && !statusLabels.includes(statusFilter)) {
+      updateStatusFilter('all')
+    }
+  }, [statusFilter, statusLabels, updateStatusFilter])
 
   if (!tapdInstalled) return <PluginUnavailableState />
 
-  const cachedCount = cache.listOrder.length
+  const activeRequirementId = activeTabId === TAPD_HOME_TAB_ID ? null : activeTabId
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="shrink-0 border-b border-foreground/[0.06] px-8 py-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0">
-            <h1 className="text-[28px] font-semibold leading-8 tracking-[-0.022em] text-foreground text-balance">TAPD Requirements</h1>
-            <p className="mt-1 text-[13px] text-muted-foreground">Paste a TAPD requirement link to fetch it and keep it in the local board cache.</p>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
-              <MetaPill className="bg-foreground/[0.045] text-foreground/70">TAPD</MetaPill>
-              <span className={cn('inline-flex h-6 items-center rounded-full px-2 text-[11px] font-medium', connected ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning')}>
-                {plugin?.connectionStatus ?? 'unknown'}
-              </span>
-              <span className="tabular-nums">{cachedCount} saved locally</span>
-              <span>{formatSyncTime(cache.lastSyncedAt)}</span>
+      <RequirementTabStrip
+        tabs={openTabs}
+        activeTabId={activeTabId}
+        itemsById={cache.itemsById}
+        onActivateHome={activateHome}
+        onActivateRequirement={openRequirementTab}
+        onCloseRequirement={closeRequirementTab}
+        onTogglePinned={toggleRequirementTabPinned}
+      />
+
+      {activeRequirementId ? (
+        <div className="min-h-0 flex-1">
+          <RequirementDetailPage sourceItemId={activeRequirementId} />
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 bg-foreground/[0.018] p-4">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[18px] bg-background shadow-sm ring-1 ring-foreground/[0.08]">
+            <div className="flex h-[64px] shrink-0 items-center gap-2 border-b border-foreground/[0.06] px-6">
+              <button
+                type="button"
+                onClick={() => updateStatusFilter('all')}
+                className={cn('h-9 rounded-[10px] px-4 text-[14px] font-medium ring-1 ring-foreground/[0.08] transition-colors', statusFilter === 'all' ? 'bg-foreground/[0.055] text-foreground' : 'text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground')}
+              >
+                All
+              </button>
+              <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+                {statusLabels.map(status => (
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => updateStatusFilter(status)}
+                    className={cn('inline-flex h-9 shrink-0 items-center gap-2 rounded-[10px] px-3 text-[14px] font-medium ring-1 ring-foreground/[0.08] transition-colors', statusFilter === status ? 'bg-foreground/[0.055] text-foreground' : 'text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground')}
+                  >
+                    <IssueStatusDot status={status} />
+                    {status}
+                    <span className="font-mono text-xs tabular-nums text-muted-foreground/70">{allItems.filter(item => getIssueStatusLabel(item) === status).length}</span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLinkError(null)
+                    setImportDialogOpen(true)
+                  }}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground ring-1 ring-foreground/[0.08] transition-colors hover:bg-foreground/[0.035] hover:text-foreground"
+                  aria-label="Add TAPD requirement"
+                  title="Add TAPD requirement"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                <span className="hidden h-9 items-center rounded-[10px] px-3 text-[14px] text-muted-foreground ring-1 ring-foreground/[0.08] sm:inline-flex">0 working</span>
+                <div className="flex h-9 overflow-hidden rounded-[10px] ring-1 ring-foreground/[0.08]">
+                  <button
+                    type="button"
+                    onClick={() => updateViewMode('list')}
+                    className={cn('w-9 transition-colors', viewMode === 'list' ? 'bg-foreground/[0.055] text-foreground' : 'text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground')}
+                    aria-label="List view"
+                    title="List view"
+                  >
+                    <List className="mx-auto h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateViewMode('board')}
+                    className={cn('w-9 border-l border-foreground/[0.06] transition-colors', viewMode === 'board' ? 'bg-foreground/[0.055] text-foreground' : 'text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground')}
+                    aria-label="Board view"
+                    title="Board view"
+                  >
+                    <Columns3 className="mx-auto h-4 w-4" />
+                  </button>
+                </div>
+              </div>
             </div>
+
+            {error && (
+              <div className="mx-6 mt-4 rounded-[14px] bg-destructive/10 p-4 text-sm text-destructive ring-1 ring-destructive/15">
+                <div className="font-medium">We couldn't load TAPD plugin status.</div>
+                <div className="mt-1 text-destructive/80">{error}</div>
+              </div>
+            )}
+
+            {addingFromLink && cache.listOrder.length === 0 ? (
+              <div className="grid gap-4 p-6 md:grid-cols-2 xl:grid-cols-3">
+                {Array.from({ length: 3 }).map((_, index) => <div key={index} className="h-[210px] rounded-[16px] bg-foreground/[0.035] animate-pulse" />)}
+              </div>
+            ) : cache.listOrder.length === 0 ? (
+              <div className="flex flex-1 items-center justify-center p-8 text-center">
+                <div>
+                  <Link2 className="mx-auto h-8 w-8 text-muted-foreground" />
+                  <h2 className="mt-3 text-base font-semibold text-foreground">No issues</h2>
+                  <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Use the + button beside filters to add a TAPD requirement link.</p>
+                </div>
+              </div>
+            ) : viewMode === 'list' ? (
+              <ScrollArea className="min-h-0 flex-1">
+                <div className="space-y-4 p-4">
+                  {groupedItems.map(group => <IssueListSection key={group.status} status={group.status} items={group.items} onOpen={item => openRequirementTab(item.sourceItemId)} />)}
+                </div>
+              </ScrollArea>
+            ) : (
+              <div className="min-h-0 flex-1 overflow-auto">
+                <div className="flex min-h-full w-max gap-5 p-6">
+                  {groupedItems.map(group => <IssueBoardColumn key={group.status} status={group.status} items={group.items} onOpen={item => openRequirementTab(item.sourceItemId)} />)}
+                </div>
+              </div>
+            )}
           </div>
         </div>
+      )}
 
-        <div className="mt-5 rounded-[14px] bg-foreground/[0.025] px-3 py-3 ring-1 ring-foreground/[0.07]">
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[10px] bg-background px-3 ring-1 ring-foreground/[0.08] focus-within:ring-accent/40">
-              <Link2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <Input
-                aria-label="TAPD requirement link"
-                value={linkInput}
-                onChange={event => {
-                  setLinkInput(event.target.value)
-                  setLinkError(null)
-                }}
-                onKeyDown={event => {
-                  if (event.key === 'Enter') void addRequirementFromLink()
-                }}
-                placeholder="Paste a TAPD story link, for example .../tapd_fe/10045201/story/detail/101..."
-                className="h-9 border-0 bg-transparent px-0 text-[13px] shadow-none focus-visible:ring-0"
-              />
-            </div>
-            <Button size="sm" className="active:scale-[0.98]" onClick={() => void addRequirementFromLink()} disabled={addingFromLink || !linkInput.trim()}>
-              {addingFromLink ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-              Save locally
-            </Button>
-          </div>
-          <div className={cn('mt-2 text-[12px]', linkError ? 'text-destructive' : 'text-muted-foreground')}>
-            {linkError ?? 'No list query or direct filtering. Only requirements imported from full TAPD links are saved here.'}
-          </div>
-        </div>
-      </div>
-
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="px-8 py-6">
-          {error && (
-            <div className="mb-4 rounded-[18px] bg-destructive/10 p-5 text-sm text-destructive ring-1 ring-destructive/15">
-              <div className="font-medium">We couldn't load TAPD plugin status.</div>
-              <div className="mt-1 text-destructive/80">{error}</div>
-            </div>
-          )}
-
-          {addingFromLink && cache.listOrder.length === 0 && (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {Array.from({ length: 3 }).map((_, index) => <div key={index} className="h-[210px] rounded-[16px] bg-foreground/[0.035] animate-pulse" />)}
-            </div>
-          )}
-
-          {!addingFromLink && cache.listOrder.length === 0 && (
-            <div className="rounded-[18px] bg-foreground/[0.025] p-8 text-center ring-1 ring-foreground/[0.06]">
-              <Link2 className="mx-auto h-8 w-8 text-muted-foreground" />
-              <h2 className="mt-3 text-base font-semibold text-foreground">No saved requirements yet</h2>
-              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Paste a TAPD requirement link above. Craft Agent will fetch that single requirement from TAPD and save it locally.</p>
-            </div>
-          )}
-
-          {visibleItems.length > 0 && (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-              {visibleItems.map(item => <RequirementCard key={item.sourceItemId} item={item} />)}
-            </div>
-          )}
-        </div>
-      </ScrollArea>
+      <TapdLinkImportDialog
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        linkInput={linkInput}
+        onLinkInputChange={(value) => {
+          setLinkInput(value)
+          setLinkError(null)
+        }}
+        linkError={linkError}
+        addingFromLink={addingFromLink}
+        connected={connected}
+        connectionError={plugin?.connectionError}
+        onSubmit={() => void addRequirementFromLink()}
+      />
     </div>
   )
 }

@@ -91,7 +91,7 @@ import { getResizeGradientStyle } from "@/hooks/useResizeGradient"
 import { useAction, useActionLabel } from "@/actions"
 import { useFocusZone } from "@/hooks/keyboard"
 import { useFocusContext } from "@/context/FocusContext"
-import { getSessionTitle } from "@/utils/session"
+import { getSessionTitle, hasUnreadMeta } from "@/utils/session"
 import {
   buildSessionProjectFilterOptions,
   filterSessionProjectOptions,
@@ -204,6 +204,8 @@ function routeForSessionFilterRoot(filter: SessionFilter | null | undefined) {
   switch (filter.kind) {
     case 'allSessions':
       return routes.view.allSessions()
+    case 'inbox':
+      return routes.view.inbox()
     case 'flagged':
       return routes.view.flagged()
     case 'archived':
@@ -691,6 +693,7 @@ function AppShellContent({
     if (!sessionFilter) return null
     switch (sessionFilter.kind) {
       case 'allSessions': return 'allSessions'
+      case 'inbox': return 'inbox'
       case 'flagged': return 'flagged'
       case 'archived': return 'archived'
       case 'state': return `state:${sessionFilter.stateId}`
@@ -1484,6 +1487,12 @@ function AppShellContent({
     return navigatorSessionMetas.filter(s => !s.isArchived)
   }, [navigatorSessionMetas])
 
+  // Inbox intentionally uses workspace-wide visible sessions (including agent-task sessions)
+  // so unread agent replies are not hidden behind the "Show agent tasks" preference.
+  const inboxSessionMetas = useMemo(() => {
+    return workspaceSessionMetas.filter(s => !s.isArchived && hasUnreadMeta(s))
+  }, [workspaceSessionMetas])
+
   const projectFilterOptions = useMemo(
     () => buildSessionProjectFilterOptions(activeSessionMetas),
     [activeSessionMetas],
@@ -1664,9 +1673,9 @@ function AppShellContent({
   // Keep active workspace unread indicator in sync with live metadata updates
   useEffect(() => {
     if (!activeWorkspaceId) return
-    const activeHasUnread = activeSessionMetas.some((session) => !!session.hasUnread)
+    const activeHasUnread = inboxSessionMetas.length > 0
     setWorkspaceUnreadMap((prev) => ({ ...prev, [activeWorkspaceId]: activeHasUnread }))
-  }, [activeWorkspaceId, activeSessionMetas])
+  }, [activeWorkspaceId, inboxSessionMetas.length])
 
   // Keep cross-workspace indicators in sync with global unread updates from main process
   useEffect(() => {
@@ -1683,6 +1692,7 @@ function AppShellContent({
 
   // Count sessions by todo state (scoped to workspace)
   const isMetaDone = (s: SessionMeta) => s.sessionStatus === 'done' || s.sessionStatus === 'cancelled'
+  const inboxCount = inboxSessionMetas.length
   const flaggedCount = activeSessionMetas.filter(s => s.isFlagged).length
   const archivedCount = navigatorSessionMetas.filter(s => s.isArchived).length
 
@@ -1772,6 +1782,10 @@ function AppShellContent({
         // "All Sessions" - shows active (non-archived) sessions
         result = activeSessionMetas
         break
+      case 'inbox':
+        // Inbox shows unread sessions across regular and agent-task sessions.
+        result = inboxSessionMetas
+        break
       case 'flagged':
         result = activeSessionMetas.filter(s => s.isFlagged)
         break
@@ -1860,7 +1874,7 @@ function AppShellContent({
     result = filterSessionsByGroupFilter(result, groupFilter)
 
     return result
-  }, [navigatorSessionMetas, activeSessionMetas, sessionFilter, listFilter, labelFilter, projectFilter, groupFilter, labelConfigs])
+  }, [navigatorSessionMetas, activeSessionMetas, inboxSessionMetas, sessionFilter, listFilter, labelFilter, projectFilter, groupFilter, labelConfigs])
 
   // Derive "pinned" (non-removable) filters from the current sessionFilter path.
   // These represent filters that are implicit in the current deeplink/route and
@@ -2003,6 +2017,14 @@ function AppShellContent({
     setViewFiltersMap(prev => ({
       ...prev,
       allSessions: { statuses: {}, labels: {}, projects: {}, groups: {}, groupingMode: 'date' },
+    }))
+  }, [])
+
+  const handleInboxClick = useCallback(() => {
+    navigate(routes.view.inbox())
+    setViewFiltersMap(prev => ({
+      ...prev,
+      inbox: { statuses: {}, labels: {}, projects: {}, groups: {}, groupingMode: 'date' },
     }))
   }, [])
 
@@ -2314,7 +2336,8 @@ function AppShellContent({
   const unifiedSidebarItems = React.useMemo((): SidebarItem[] => {
     const result: SidebarItem[] = []
 
-    // 1. Sessions section: All Sessions (expandable) with status items, Flagged, Archived as children
+    // 1. Sessions section: Inbox and All Sessions (expandable) with status items, Flagged, Archived as children
+    result.push({ id: 'nav:inbox', type: 'nav', action: handleInboxClick })
     result.push({ id: 'nav:allSessions', type: 'nav', action: handleAllSessionsClick })
     for (const state of effectiveSessionStatuses) {
       result.push({ id: `nav:state:${state.id}`, type: 'nav', action: () => handleSessionStatusClick(state.id) })
@@ -2351,7 +2374,7 @@ function AppShellContent({
     result.push({ id: 'nav:whats-new', type: 'nav', action: handleWhatsNewClick })
 
     return result
-  }, [handleAllSessionsClick, handleSessionStatusClick, effectiveSessionStatuses, handleProjectsClick, projectFilterOptions, handleProjectClick, handleLabelClick, labelTree, handleFlaggedClick, handleArchivedClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleAgentsClick, handlePluginsClick, tapdPluginInstalled, handleSettingsClick, handleWhatsNewClick])
+  }, [handleInboxClick, handleAllSessionsClick, handleSessionStatusClick, effectiveSessionStatuses, handleProjectsClick, projectFilterOptions, handleProjectClick, handleLabelClick, labelTree, handleFlaggedClick, handleArchivedClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleAgentsClick, handlePluginsClick, tapdPluginInstalled, handleSettingsClick, handleWhatsNewClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -2508,6 +2531,8 @@ function AppShellContent({
     if (!sessionFilter) return t("sidebar.allSessions")
 
     switch (sessionFilter.kind) {
+      case 'inbox':
+        return 'Inbox'
       case 'flagged':
         return t("sidebar.flagged")
       case 'state': {
@@ -2534,7 +2559,7 @@ function AppShellContent({
     }
   }, [navState, sessionFilter])
 
-  const isBoardEligibleView = isSessionsNavigation(navState) && sessionFilter?.kind !== 'archived'
+  const isBoardEligibleView = isSessionsNavigation(navState) && sessionFilter?.kind !== 'archived' && sessionFilter?.kind !== 'inbox'
   const sessionBoardToggle = isBoardEligibleView ? (
     <>
       <HeaderIconButton
@@ -2784,7 +2809,7 @@ function AppShellContent({
                     <TooltipContent side="right">{newChatHotkey}</TooltipContent>
                   </Tooltip>
                 </div>
-                {/* Primary Nav: All Sessions (▸ Statuses, Flagged, Archived), Labels | Sources, Skills | Settings */}
+                {/* Primary Nav: Inbox, All Sessions (▸ Statuses, Flagged, Archived), Labels | Sources, Skills | Settings */}
                 {/* pb-4 provides clearance so the last item scrolls above the mask-fade-bottom gradient */}
                 <div className="flex-1 overflow-y-auto min-h-0 mask-fade-bottom pb-4">
                 <LeftSidebar
@@ -2793,6 +2818,15 @@ function AppShellContent({
                   focusedItemId={focusedSidebarItemId}
                   links={[
                     // --- Sessions Section ---
+                    // Inbox: unread messages from normal and agent sessions.
+                    {
+                      id: "nav:inbox",
+                      title: "Inbox",
+                      label: inboxCount > 0 ? String(inboxCount) : undefined,
+                      icon: MailOpen,
+                      variant: sessionFilter?.kind === 'inbox' && !hasSessionSecondaryFilters ? "default" : "ghost",
+                      onClick: handleInboxClick,
+                    },
                     // All Sessions: expandable with status children (sortable) + Flagged & Archived as trailing items
                     {
                       id: "nav:allSessions",
@@ -4263,7 +4297,7 @@ function AppShellContent({
                 {/* Key on sidebarMode forces full remount when switching views, skipping animations */}
                 <SessionList
                   key={sessionFilter?.kind}
-                  items={searchActive ? navigatorSessionMetas : filteredSessionMetas}
+                  items={searchActive ? (sessionFilter?.kind === 'inbox' ? workspaceSessionMetas : navigatorSessionMetas) : filteredSessionMetas}
                   onDelete={handleDeleteSession}
                   onFlag={onFlagSession}
                   onUnflag={onUnflagSession}
