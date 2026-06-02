@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Circle,
   Columns3,
+  Filter,
   Link2,
   List,
   Loader2,
@@ -29,6 +30,18 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DocumentFormattedMarkdownOverlay, Spinner } from '@craft-agent/ui'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
@@ -150,6 +163,11 @@ function getTapdWorkspaceIdFromItem(item?: ExternalRequirementItem | null) {
   return undefined
 }
 
+function withoutRequirementBinding(item: ExternalRequirementItem): ExternalRequirementItem {
+  const { binding: _binding, ...snapshot } = item
+  return snapshot
+}
+
 function statusTone(value?: string) {
   const normalized = (value ?? '').toLowerCase()
   if (normalized.includes('done') || normalized.includes('closed') || normalized.includes('完成') || normalized.includes('发布')) return 'bg-success/[0.075] text-success/85'
@@ -177,7 +195,11 @@ function getCachedItems(cache: TapdRequirementCache): ExternalRequirementItem[] 
 
 type TapdPluginViewMode = 'list' | 'board'
 
-type TapdStatusFilter = 'all' | string
+type TapdFilterKind = 'status' | 'priority' | 'creator'
+
+type TapdHomeFilters = Record<TapdFilterKind, string[]>
+
+const EMPTY_TAPD_HOME_FILTERS: TapdHomeFilters = { status: [], priority: [], creator: [] }
 
 interface TapdOpenRequirementTab {
   sourceItemId: string
@@ -186,17 +208,49 @@ interface TapdOpenRequirementTab {
 
 interface TapdHomeUiState {
   viewMode?: TapdPluginViewMode
-  statusFilter?: TapdStatusFilter
+  /** @deprecated legacy single status filter. Migrated into filters.status. */
+  statusFilter?: string
+  filters?: TapdHomeFilters
+  collapsedStatuses?: string[]
+  expandedDefaultCollapsedStatuses?: string[]
   tabs?: TapdOpenRequirementTab[]
 }
 
 const TAPD_HOME_TAB_ID = 'tapd-home'
 const TAPD_HOME_STATUS = 'Backlog'
 const TAPD_UI_STORAGE_VERSION = 1
-const TAPD_STATUS_ORDER = ['backlog', 'todo', 'in progress', 'in review', 'done', 'blocked']
+const TAPD_STATUS_ORDER = ['in progress', '开发中', '进行中', 'todo', 'backlog', 'in review', 'blocked', 'done', '已上线']
+const TAPD_HOME_CACHE_TTL_MS = 30 * 60 * 1000
+const TAPD_SYNC_PAGE_LIMIT = 100
+const TAPD_SYNC_MAX_PAGES = 50
 
 function tapdUiStorageKey(workspaceId?: string | null) {
   return `craft.tapd-plugin.ui.${workspaceId ?? 'default'}.v${TAPD_UI_STORAGE_VERSION}`
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue
+    const trimmed = entry.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    result.push(trimmed)
+  }
+  return result
+}
+
+function normalizeTapdHomeFilters(value: unknown, legacyStatusFilter?: string): TapdHomeFilters {
+  const record = value && typeof value === 'object' ? value as Partial<Record<TapdFilterKind, unknown>> : {}
+  const status = normalizeStringArray(record.status)
+  const legacyStatus = legacyStatusFilter && legacyStatusFilter !== 'all' ? [legacyStatusFilter] : []
+  return {
+    status: status.length > 0 ? status : legacyStatus,
+    priority: normalizeStringArray(record.priority),
+    creator: normalizeStringArray(record.creator),
+  }
 }
 
 function readTapdHomeUiState(workspaceId?: string | null): TapdHomeUiState {
@@ -205,9 +259,13 @@ function readTapdHomeUiState(workspaceId?: string | null): TapdHomeUiState {
     const raw = window.localStorage.getItem(tapdUiStorageKey(workspaceId))
     if (!raw) return {}
     const parsed = JSON.parse(raw) as TapdHomeUiState
+    const legacyStatusFilter = typeof parsed.statusFilter === 'string' ? parsed.statusFilter : undefined
     return {
       viewMode: parsed.viewMode === 'list' || parsed.viewMode === 'board' ? parsed.viewMode : undefined,
-      statusFilter: typeof parsed.statusFilter === 'string' ? parsed.statusFilter : undefined,
+      statusFilter: legacyStatusFilter,
+      filters: normalizeTapdHomeFilters(parsed.filters, legacyStatusFilter),
+      collapsedStatuses: normalizeStringArray(parsed.collapsedStatuses),
+      expandedDefaultCollapsedStatuses: normalizeStringArray(parsed.expandedDefaultCollapsedStatuses),
       tabs: Array.isArray(parsed.tabs)
         ? parsed.tabs
           .filter(tab => typeof tab?.sourceItemId === 'string' && tab.sourceItemId.trim())
@@ -245,16 +303,30 @@ function normalizeIssueStatus(status: string) {
   return status.trim().toLowerCase()
 }
 
+function isInProgressStatus(status: string) {
+  const normalized = normalizeIssueStatus(status)
+  return normalized.includes('progress') || normalized.includes('开发中') || normalized.includes('进行中') || normalized === '开发'
+}
+
+function isLaunchedStatus(status?: string) {
+  const normalized = normalizeIssueStatus(status ?? '')
+  return normalized.includes('已上线') || normalized === '上线' || normalized.includes('online')
+}
+
+function isDefaultCollapsedStatus(status: string) {
+  return isLaunchedStatus(status)
+}
+
 function getStatusRank(status: string) {
   const normalized = normalizeIssueStatus(status)
+  if (isInProgressStatus(status)) return 0
   const exact = TAPD_STATUS_ORDER.indexOf(normalized)
-  if (exact >= 0) return exact
-  if (normalized.includes('backlog')) return 0
-  if (normalized.includes('todo') || normalized.includes('待')) return 1
-  if (normalized.includes('progress') || normalized.includes('开发') || normalized.includes('进行')) return 2
-  if (normalized.includes('review') || normalized.includes('验收') || normalized.includes('评审')) return 3
-  if (normalized.includes('done') || normalized.includes('closed') || normalized.includes('完成') || normalized.includes('发布')) return 4
+  if (exact >= 0) return exact + 1
+  if (normalized.includes('todo') || normalized.includes('待')) return 2
+  if (normalized.includes('backlog')) return 3
+  if (normalized.includes('review') || normalized.includes('验收') || normalized.includes('评审')) return 4
   if (normalized.includes('block') || normalized.includes('阻塞')) return 5
+  if (normalized.includes('done') || normalized.includes('closed') || normalized.includes('完成') || normalized.includes('发布') || isLaunchedStatus(status)) return 6
   return 20
 }
 
@@ -284,6 +356,24 @@ function getStatusPresentation(status: string) {
     return { dot: 'border-muted-foreground bg-transparent', ring: 'ring-foreground/[0.08]', column: 'bg-foreground/[0.025]', text: 'text-foreground' }
   }
   return { dot: 'border-muted-foreground/70 bg-transparent border-dotted', ring: 'ring-foreground/[0.08]', column: 'bg-foreground/[0.025]', text: 'text-foreground' }
+}
+
+function getUniqueSortedValues(values: Array<string | undefined>): string[] {
+  const unique = Array.from(new Set(values.map(value => value?.trim()).filter((value): value is string => Boolean(value))))
+  return unique.sort((a, b) => a.localeCompare(b))
+}
+
+function hasActiveTapdFilters(filters: TapdHomeFilters) {
+  return filters.status.length > 0 || filters.priority.length > 0 || filters.creator.length > 0
+}
+
+function applyTapdHomeFilters(items: ExternalRequirementItem[], filters: TapdHomeFilters) {
+  return items.filter(item => {
+    if (filters.status.length > 0 && !filters.status.includes(getIssueStatusLabel(item))) return false
+    if (filters.priority.length > 0 && !filters.priority.includes(item.priority?.trim() || 'No priority')) return false
+    if (filters.creator.length > 0 && !filters.creator.includes(item.creator?.trim() || 'No creator')) return false
+    return true
+  })
 }
 
 function groupRequirementsByStatus(items: ExternalRequirementItem[], statuses: string[]) {
@@ -418,23 +508,27 @@ function IssueRow({ item, onOpen }: { item: ExternalRequirementItem; onOpen: (it
   )
 }
 
-function IssueListSection({ status, items, onOpen }: { status: string; items: ExternalRequirementItem[]; onOpen: (item: ExternalRequirementItem) => void }) {
+function IssueListSection({ status, items, collapsed, onToggleCollapsed, onOpen }: { status: string; items: ExternalRequirementItem[]; collapsed: boolean; onToggleCollapsed: (status: string) => void; onOpen: (item: ExternalRequirementItem) => void }) {
   return (
     <section className="rounded-[14px]">
-      <div className="flex h-11 items-center gap-3 rounded-[12px] bg-foreground/[0.025] px-4 ring-1 ring-foreground/[0.035]">
+      <button
+        type="button"
+        onClick={() => onToggleCollapsed(status)}
+        className="flex h-11 w-full items-center gap-3 rounded-[12px] bg-foreground/[0.025] px-4 text-left ring-1 ring-foreground/[0.035] transition-colors hover:bg-foreground/[0.04]"
+      >
         <span className="h-4 w-4 rounded-[4px] border border-foreground/35" />
-        <ChevronRight className="h-4 w-4 rotate-90 text-muted-foreground" />
+        <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform', !collapsed && 'rotate-90')} />
         <IssueStatusDot status={status} />
         <span className="font-semibold text-foreground">{status}</span>
         <span className="font-mono text-sm text-muted-foreground tabular-nums">{items.length}</span>
-      </div>
-      {items.length === 0 ? (
+      </button>
+      {!collapsed && (items.length === 0 ? (
         <div className="flex h-24 items-center justify-center text-[14px] text-muted-foreground">No issues</div>
       ) : (
         <div className="py-2">
           {items.map(item => <IssueRow key={item.sourceItemId} item={item} onOpen={onOpen} />)}
         </div>
-      )}
+      ))}
     </section>
   )
 }
@@ -462,26 +556,106 @@ function BoardIssueCard({ item, onOpen }: { item: ExternalRequirementItem; onOpe
   )
 }
 
-function IssueBoardColumn({ status, items, onOpen }: { status: string; items: ExternalRequirementItem[]; onOpen: (item: ExternalRequirementItem) => void }) {
+function IssueBoardColumn({ status, items, collapsed, onToggleCollapsed, onOpen }: { status: string; items: ExternalRequirementItem[]; collapsed: boolean; onToggleCollapsed: (status: string) => void; onOpen: (item: ExternalRequirementItem) => void }) {
   const presentation = getStatusPresentation(status)
   return (
-    <section className={cn('flex h-full min-h-[520px] w-[310px] shrink-0 flex-col rounded-[18px] p-4', presentation.column)}>
+    <section className={cn('flex h-full min-h-[520px] shrink-0 flex-col rounded-[18px] p-4 transition-[width]', collapsed ? 'w-[220px]' : 'w-[310px]', presentation.column)}>
       <div className="mb-4 flex h-7 items-center gap-2 px-1">
+        <button type="button" onClick={() => onToggleCollapsed(status)} className="rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground" aria-label={collapsed ? 'Expand column' : 'Collapse column'}>
+          <ChevronRight className={cn('h-4 w-4 transition-transform', !collapsed && 'rotate-90')} />
+        </button>
         <IssueStatusDot status={status} />
-        <span className={cn('font-semibold', presentation.text)}>{status}</span>
+        <span className={cn('truncate font-semibold', presentation.text)}>{status}</span>
         <span className="font-mono text-sm text-muted-foreground tabular-nums">{items.length}</span>
         <button type="button" className="ml-auto rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground" aria-label="Column menu">
           <MoreHorizontal className="h-4 w-4" />
         </button>
       </div>
-      {items.length === 0 ? (
+      {!collapsed && (items.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-[14px] text-muted-foreground">No issues</div>
       ) : (
         <div className="space-y-3">
           {items.map(item => <BoardIssueCard key={item.sourceItemId} item={item} onOpen={onOpen} />)}
         </div>
-      )}
+      ))}
     </section>
+  )
+}
+
+function TapdFilterSubMenu({
+  label,
+  values,
+  selected,
+  onToggle,
+}: {
+  label: string
+  values: string[]
+  selected: string[]
+  onToggle: (value: string) => void
+}) {
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger className="h-9 text-[14px]">
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {selected.length > 0 && <span className="ml-auto mr-1 font-mono text-xs text-muted-foreground tabular-nums">{selected.length}</span>}
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="min-w-[220px]">
+        {values.length === 0 ? (
+          <DropdownMenuItem disabled className="text-muted-foreground">No values</DropdownMenuItem>
+        ) : values.map(value => (
+          <DropdownMenuCheckboxItem
+            key={value}
+            checked={selected.includes(value)}
+            onCheckedChange={() => onToggle(value)}
+            onSelect={event => event.preventDefault()}
+            className="h-8 text-[13px]"
+          >
+            <span className="min-w-0 flex-1 truncate">{value}</span>
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  )
+}
+
+function TapdFilterMenu({
+  filters,
+  statusOptions,
+  priorityOptions,
+  creatorOptions,
+  onToggle,
+  onReset,
+}: {
+  filters: TapdHomeFilters
+  statusOptions: string[]
+  priorityOptions: string[]
+  creatorOptions: string[]
+  onToggle: (kind: TapdFilterKind, value: string) => void
+  onReset: () => void
+}) {
+  const active = hasActiveTapdFilters(filters)
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className={cn('relative h-9 w-9 rounded-[10px] text-muted-foreground ring-1 ring-foreground/[0.08] transition-colors hover:bg-foreground/[0.035] hover:text-foreground', active && 'bg-foreground/[0.055] text-foreground')}
+          title="Filter"
+          aria-label="Filter"
+        >
+          <Filter className="mx-auto h-4 w-4" />
+          {active && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-success ring-2 ring-background" />}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-[220px] p-1">
+        <DropdownMenuLabel className="px-2 py-1.5 text-[12px] text-muted-foreground">Filter</DropdownMenuLabel>
+        <TapdFilterSubMenu label="Status" values={statusOptions} selected={filters.status} onToggle={value => onToggle('status', value)} />
+        <TapdFilterSubMenu label="Priority" values={priorityOptions} selected={filters.priority} onToggle={value => onToggle('priority', value)} />
+        <TapdFilterSubMenu label="Creator" values={creatorOptions} selected={filters.creator} onToggle={value => onToggle('creator', value)} />
+        <DropdownMenuSeparator />
+        <DropdownMenuItem disabled={!active} onSelect={onReset} className="h-8 text-[13px]">Reset all filters</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -569,24 +743,30 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
   const [linkError, setLinkError] = React.useState<string | null>(null)
   const [addingFromLink, setAddingFromLink] = React.useState(false)
   const [importDialogOpen, setImportDialogOpen] = React.useState(false)
-  const [viewMode, setViewMode] = React.useState<TapdPluginViewMode>(() => readTapdHomeUiState(activeWorkspaceId).viewMode ?? 'list')
-  const [statusFilter, setStatusFilter] = React.useState<TapdStatusFilter>(() => readTapdHomeUiState(activeWorkspaceId).statusFilter ?? 'all')
-  const [openTabs, setOpenTabs] = React.useState<TapdOpenRequirementTab[]>(() => readTapdHomeUiState(activeWorkspaceId).tabs ?? [])
+  const initialUiState = React.useMemo(() => readTapdHomeUiState(activeWorkspaceId), [activeWorkspaceId])
+  const [viewMode, setViewMode] = React.useState<TapdPluginViewMode>(() => initialUiState.viewMode ?? 'list')
+  const [filters, setFilters] = React.useState<TapdHomeFilters>(() => initialUiState.filters ?? EMPTY_TAPD_HOME_FILTERS)
+  const [collapsedStatuses, setCollapsedStatuses] = React.useState<Set<string>>(() => new Set(initialUiState.collapsedStatuses ?? []))
+  const [expandedDefaultCollapsedStatuses, setExpandedDefaultCollapsedStatuses] = React.useState<Set<string>>(() => new Set(initialUiState.expandedDefaultCollapsedStatuses ?? []))
+  const [syncingHome, setSyncingHome] = React.useState(false)
+  const [openTabs, setOpenTabs] = React.useState<TapdOpenRequirementTab[]>(() => initialUiState.tabs ?? [])
   const [activeTabId, setActiveTabId] = React.useState(initialSourceItemId ?? TAPD_HOME_TAB_ID)
 
   const plugin = plugins.find(item => item.id === TAPD_PLUGIN_ID)
   const connected = plugin?.connectionStatus === 'connected'
   const allItems = React.useMemo(() => getCachedItems(cache), [cache])
+  const tapdWorkspaceId = React.useMemo(() => allItems.map(getTapdWorkspaceIdFromItem).find((value): value is string => Boolean(value)), [allItems])
   const statusLabels = React.useMemo(() => sortStatusLabels(Array.from(new Set(allItems.map(getIssueStatusLabel)))), [allItems])
-  const visibleItems = React.useMemo(() => {
-    if (statusFilter === 'all') return allItems
-    return allItems.filter(item => getIssueStatusLabel(item) === statusFilter)
-  }, [allItems, statusFilter])
+  const priorityOptions = React.useMemo(() => getUniqueSortedValues(allItems.map(item => item.priority ?? 'No priority')), [allItems])
+  const creatorOptions = React.useMemo(() => getUniqueSortedValues(allItems.map(item => item.creator ?? 'No creator')), [allItems])
+  const visibleItems = React.useMemo(() => applyTapdHomeFilters(allItems, filters), [allItems, filters])
   const visibleStatuses = React.useMemo(() => {
-    if (statusFilter === 'all') return statusLabels
-    return statusLabels.includes(statusFilter) ? [statusFilter] : []
-  }, [statusFilter, statusLabels])
+    if (filters.status.length > 0) return sortStatusLabels(filters.status)
+    return sortStatusLabels(Array.from(new Set(visibleItems.map(getIssueStatusLabel))))
+  }, [filters.status, visibleItems])
   const groupedItems = React.useMemo(() => groupRequirementsByStatus(visibleItems, visibleStatuses), [visibleItems, visibleStatuses])
+  const workingCount = React.useMemo(() => visibleItems.filter(item => isInProgressStatus(getIssueStatusLabel(item))).length, [visibleItems])
+  const filterActive = hasActiveTapdFilters(filters)
 
   const persistTabs = React.useCallback((tabs: TapdOpenRequirementTab[]) => {
     writeTapdHomeUiState(activeWorkspaceId, { tabs })
@@ -639,7 +819,9 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
   React.useEffect(() => {
     const stored = readTapdHomeUiState(activeWorkspaceId)
     setViewMode(stored.viewMode ?? 'list')
-    setStatusFilter(stored.statusFilter ?? 'all')
+    setFilters(stored.filters ?? EMPTY_TAPD_HOME_FILTERS)
+    setCollapsedStatuses(new Set(stored.collapsedStatuses ?? []))
+    setExpandedDefaultCollapsedStatuses(new Set(stored.expandedDefaultCollapsedStatuses ?? []))
     setOpenTabs(stored.tabs ?? [])
     setActiveTabId(initialSourceItemId ?? TAPD_HOME_TAB_ID)
   }, [activeWorkspaceId, initialSourceItemId])
@@ -705,6 +887,95 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
     return () => { stale = true }
   }, [activeWorkspaceId, tapdInstalled])
 
+  const persistRequirementBindingSnapshot = React.useCallback(async (item: ExternalRequirementItem): Promise<ExternalRequirementItem> => {
+    if (!activeWorkspaceId || !item.binding?.groupName) return item
+    const binding = await window.electronAPI.createRequirementGroupFromItem(activeWorkspaceId, {
+      pluginId: TAPD_PLUGIN_ID,
+      item: withoutRequirementBinding(item),
+      groupName: item.binding.groupName,
+    })
+    return { ...item, binding }
+  }, [activeWorkspaceId])
+
+  const syncTapdHome = React.useCallback(async (options?: { manual?: boolean }) => {
+    if (!activeWorkspaceId || !tapdInstalled) return
+    if (!connected) {
+      if (options?.manual) toast.error(plugin?.connectionError || 'TAPD source is not connected.')
+      return
+    }
+    if (!tapdWorkspaceId) {
+      if (options?.manual) toast.error('Open or add a TAPD requirement first so the workspace_id can be detected.')
+      return
+    }
+    if (syncingHome) return
+
+    setSyncingHome(true)
+    try {
+      const current = readCache(activeWorkspaceId)
+      const itemsById = { ...current.itemsById }
+      const syncedIds: string[] = []
+      let total: number | undefined
+      let page = 1
+      let hasMore = true
+
+      while (hasMore && page <= TAPD_SYNC_MAX_PAGES) {
+        const result = await window.electronAPI.listRequirementItems(activeWorkspaceId, TAPD_PLUGIN_ID, {
+          workspaceId: tapdWorkspaceId,
+          page,
+          limit: TAPD_SYNC_PAGE_LIMIT,
+        })
+        total = result.total ?? total
+        for (const liveItem of result.items) {
+          const existing = itemsById[liveItem.sourceItemId]
+          const launched = isLaunchedStatus(liveItem.status)
+          if (launched && !existing) continue
+
+          let nextItem: ExternalRequirementItem = {
+            ...existing,
+            ...liveItem,
+            binding: liveItem.binding ?? existing?.binding,
+          }
+          if (nextItem.binding) {
+            nextItem = await persistRequirementBindingSnapshot(nextItem)
+          }
+          itemsById[nextItem.sourceItemId] = nextItem
+          syncedIds.push(nextItem.sourceItemId)
+        }
+        hasMore = result.hasMore === true
+        page += 1
+      }
+
+      const listOrder = [
+        ...syncedIds,
+        ...current.listOrder.filter(id => !syncedIds.includes(id)),
+      ].filter((id, index, arr) => Boolean(itemsById[id]) && arr.indexOf(id) === index)
+      const now = Date.now()
+      const next: TapdRequirementCache = {
+        ...current,
+        itemsById,
+        listOrder,
+        total,
+        lastSyncedAt: now,
+        homeSyncedAt: now,
+      }
+      writeCache(activeWorkspaceId, next)
+      setCache(next)
+      if (options?.manual) toast.success('TAPD requirements synced', { description: `${syncedIds.length} updated` })
+    } catch (err) {
+      if (options?.manual) toast.error(err instanceof Error ? err.message : String(err))
+      else console.warn('[TAPD] Background sync failed:', err)
+    } finally {
+      setSyncingHome(false)
+    }
+  }, [activeWorkspaceId, connected, persistRequirementBindingSnapshot, plugin?.connectionError, syncingHome, tapdInstalled, tapdWorkspaceId])
+
+  React.useEffect(() => {
+    if (activeTabId !== TAPD_HOME_TAB_ID || !tapdWorkspaceId || syncingHome) return
+    const homeSyncedAt = cache.homeSyncedAt ?? 0
+    if (Date.now() - homeSyncedAt < TAPD_HOME_CACHE_TTL_MS) return
+    void syncTapdHome({ manual: false })
+  }, [activeTabId, cache.homeSyncedAt, syncTapdHome, syncingHome, tapdWorkspaceId])
+
   const addRequirementFromLink = React.useCallback(async () => {
     if (!activeWorkspaceId || !tapdInstalled) return
     const parsed = parseTapdRequirementLink(linkInput)
@@ -761,16 +1032,84 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
     writeTapdHomeUiState(activeWorkspaceId, { viewMode: mode })
   }, [activeWorkspaceId])
 
-  const updateStatusFilter = React.useCallback((status: TapdStatusFilter) => {
-    setStatusFilter(status)
-    writeTapdHomeUiState(activeWorkspaceId, { statusFilter: status })
+  const updateFilters = React.useCallback((updater: (current: TapdHomeFilters) => TapdHomeFilters) => {
+    setFilters(current => {
+      const next = updater(current)
+      writeTapdHomeUiState(activeWorkspaceId, { filters: next, statusFilter: next.status[0] ?? 'all' })
+      return next
+    })
+  }, [activeWorkspaceId])
+
+  const toggleFilterValue = React.useCallback((kind: TapdFilterKind, value: string) => {
+    updateFilters(current => {
+      const currentValues = current[kind]
+      const nextValues = currentValues.includes(value)
+        ? currentValues.filter(entry => entry !== value)
+        : [...currentValues, value]
+      return { ...current, [kind]: nextValues }
+    })
+  }, [updateFilters])
+
+  const resetFilters = React.useCallback(() => {
+    updateFilters(() => EMPTY_TAPD_HOME_FILTERS)
+  }, [updateFilters])
+
+  const toggleStatusCollapsed = React.useCallback((status: string) => {
+    setCollapsedStatuses(current => {
+      const next = new Set(current)
+      const shouldExpand = next.has(status)
+      if (shouldExpand) next.delete(status)
+      else next.add(status)
+      setExpandedDefaultCollapsedStatuses(currentExpanded => {
+        const nextExpanded = new Set(currentExpanded)
+        if (isDefaultCollapsedStatus(status)) {
+          if (shouldExpand) nextExpanded.add(status)
+          else nextExpanded.delete(status)
+        }
+        writeTapdHomeUiState(activeWorkspaceId, {
+          collapsedStatuses: Array.from(next),
+          expandedDefaultCollapsedStatuses: Array.from(nextExpanded),
+        })
+        return nextExpanded
+      })
+      return next
+    })
   }, [activeWorkspaceId])
 
   React.useEffect(() => {
-    if (statusFilter !== 'all' && !statusLabels.includes(statusFilter)) {
-      updateStatusFilter('all')
+    const validStatus = new Set(statusLabels)
+    const validPriority = new Set(priorityOptions)
+    const validCreator = new Set(creatorOptions)
+    const next: TapdHomeFilters = {
+      status: filters.status.filter(value => validStatus.has(value)),
+      priority: filters.priority.filter(value => validPriority.has(value)),
+      creator: filters.creator.filter(value => validCreator.has(value)),
     }
-  }, [statusFilter, statusLabels, updateStatusFilter])
+    if (
+      next.status.length !== filters.status.length ||
+      next.priority.length !== filters.priority.length ||
+      next.creator.length !== filters.creator.length
+    ) {
+      setFilters(next)
+      writeTapdHomeUiState(activeWorkspaceId, { filters: next, statusFilter: next.status[0] ?? 'all' })
+    }
+  }, [activeWorkspaceId, creatorOptions, filters, priorityOptions, statusLabels])
+
+  React.useEffect(() => {
+    setCollapsedStatuses(current => {
+      let changed = false
+      const next = new Set(Array.from(current).filter(status => statusLabels.includes(status)))
+      for (const status of statusLabels) {
+        if (isDefaultCollapsedStatus(status) && !expandedDefaultCollapsedStatuses.has(status) && !next.has(status)) {
+          next.add(status)
+          changed = true
+        }
+      }
+      if (next.size !== current.size) changed = true
+      if (changed) writeTapdHomeUiState(activeWorkspaceId, { collapsedStatuses: Array.from(next) })
+      return changed ? next : current
+    })
+  }, [activeWorkspaceId, expandedDefaultCollapsedStatuses, statusLabels])
 
   if (!tapdInstalled) return <PluginUnavailableState />
 
@@ -790,16 +1129,29 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
 
       {activeRequirementId ? (
         <div className="min-h-0 flex-1">
-          <RequirementDetailPage sourceItemId={activeRequirementId} />
+          <RequirementDetailPage
+            sourceItemId={activeRequirementId}
+            onItemUpdated={() => setCache(readCache(activeWorkspaceId))}
+          />
         </div>
       ) : (
         <div className="min-h-0 flex-1 bg-foreground/[0.018] p-4">
           <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[18px] bg-background shadow-sm ring-1 ring-foreground/[0.08]">
             <div className="flex h-[64px] shrink-0 items-center gap-2 border-b border-foreground/[0.06] px-6">
+              {viewMode === 'list' && (
+                <PanelHeaderCenterButton
+                  icon={syncingHome ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  tooltip="Sync TAPD requirements"
+                  aria-label="Sync TAPD requirements"
+                  onClick={() => void syncTapdHome({ manual: true })}
+                  disabled={syncingHome}
+                  className="h-9 w-9 rounded-[10px] p-0 opacity-100 ring-1 ring-foreground/[0.08]"
+                />
+              )}
               <button
                 type="button"
-                onClick={() => updateStatusFilter('all')}
-                className={cn('h-9 rounded-[10px] px-4 text-[14px] font-medium ring-1 ring-foreground/[0.08] transition-colors', statusFilter === 'all' ? 'bg-foreground/[0.055] text-foreground' : 'text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground')}
+                onClick={resetFilters}
+                className={cn('h-9 rounded-[10px] px-4 text-[14px] font-medium ring-1 ring-foreground/[0.08] transition-colors', !filterActive ? 'bg-foreground/[0.055] text-foreground' : 'text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground')}
               >
                 All
               </button>
@@ -808,8 +1160,8 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
                   <button
                     key={status}
                     type="button"
-                    onClick={() => updateStatusFilter(status)}
-                    className={cn('inline-flex h-9 shrink-0 items-center gap-2 rounded-[10px] px-3 text-[14px] font-medium ring-1 ring-foreground/[0.08] transition-colors', statusFilter === status ? 'bg-foreground/[0.055] text-foreground' : 'text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground')}
+                    onClick={() => toggleFilterValue('status', status)}
+                    className={cn('inline-flex h-9 shrink-0 items-center gap-2 rounded-[10px] px-3 text-[14px] font-medium ring-1 ring-foreground/[0.08] transition-colors', filters.status.includes(status) ? 'bg-foreground/[0.055] text-foreground' : 'text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground')}
                   >
                     <IssueStatusDot status={status} />
                     {status}
@@ -831,7 +1183,15 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
               </div>
 
               <div className="ml-auto flex shrink-0 items-center gap-2">
-                <span className="hidden h-9 items-center rounded-[10px] px-3 text-[14px] text-muted-foreground ring-1 ring-foreground/[0.08] sm:inline-flex">0 working</span>
+                <span className="hidden h-9 items-center rounded-[10px] px-3 text-[14px] text-muted-foreground ring-1 ring-foreground/[0.08] sm:inline-flex">{workingCount} working</span>
+                <TapdFilterMenu
+                  filters={filters}
+                  statusOptions={statusLabels}
+                  priorityOptions={priorityOptions}
+                  creatorOptions={creatorOptions}
+                  onToggle={toggleFilterValue}
+                  onReset={resetFilters}
+                />
                 <div className="flex h-9 overflow-hidden rounded-[10px] ring-1 ring-foreground/[0.08]">
                   <button
                     type="button"
@@ -877,13 +1237,31 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
             ) : viewMode === 'list' ? (
               <ScrollArea className="min-h-0 flex-1">
                 <div className="space-y-4 p-4">
-                  {groupedItems.map(group => <IssueListSection key={group.status} status={group.status} items={group.items} onOpen={item => openRequirementTab(item.sourceItemId)} />)}
+                  {groupedItems.map(group => (
+                    <IssueListSection
+                      key={group.status}
+                      status={group.status}
+                      items={group.items}
+                      collapsed={collapsedStatuses.has(group.status)}
+                      onToggleCollapsed={toggleStatusCollapsed}
+                      onOpen={item => openRequirementTab(item.sourceItemId)}
+                    />
+                  ))}
                 </div>
               </ScrollArea>
             ) : (
               <div className="min-h-0 flex-1 overflow-auto">
                 <div className="flex min-h-full w-max gap-5 p-6">
-                  {groupedItems.map(group => <IssueBoardColumn key={group.status} status={group.status} items={group.items} onOpen={item => openRequirementTab(item.sourceItemId)} />)}
+                  {groupedItems.map(group => (
+                    <IssueBoardColumn
+                      key={group.status}
+                      status={group.status}
+                      items={group.items}
+                      collapsed={collapsedStatuses.has(group.status)}
+                      onToggleCollapsed={toggleStatusCollapsed}
+                      onOpen={item => openRequirementTab(item.sourceItemId)}
+                    />
+                  ))}
                 </div>
               </div>
             )}
@@ -2033,7 +2411,7 @@ function RequirementInfoPopover({
   )
 }
 
-export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }) {
+export function RequirementDetailPage({ sourceItemId, onItemUpdated }: { sourceItemId: string; onItemUpdated?: (item: ExternalRequirementItem) => void }) {
   const { activeWorkspaceId, onOpenUrl, onSessionLabelsChange, onSessionOptionsChange } = useAppShellContext()
   const { navigateToSession } = useNavigation()
   // Keep synced cached requirements readable even when tapd-mcp-http is not enabled in this workspace.
@@ -2080,6 +2458,7 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
         setItem(result.item)
         setGroupName(result.item.binding?.groupName ?? defaultGroupName(result.item))
         upsertCachedItem(activeWorkspaceId, result.item)
+        onItemUpdated?.(result.item)
       })
       .catch(() => {
         // Missing local cache is fine; the live refresh action will surface TAPD/source errors.
@@ -2218,6 +2597,22 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     return () => window.clearInterval(interval)
   }, [activeTapdRun, loadAgentRuns, loadLocalComments])
 
+  const persistDetailItem = React.useCallback(async (nextItem: ExternalRequirementItem): Promise<ExternalRequirementItem> => {
+    if (!activeWorkspaceId) return nextItem
+    let itemToCache = nextItem
+    if (nextItem.binding?.groupName) {
+      const binding = await window.electronAPI.createRequirementGroupFromItem(activeWorkspaceId, {
+        pluginId: TAPD_PLUGIN_ID,
+        item: withoutRequirementBinding(nextItem),
+        groupName: nextItem.binding.groupName,
+      })
+      itemToCache = { ...nextItem, binding }
+    }
+    upsertCachedItem(activeWorkspaceId, itemToCache)
+    onItemUpdated?.(itemToCache)
+    return itemToCache
+  }, [activeWorkspaceId, onItemUpdated])
+
   const refreshDetail = React.useCallback(async () => {
     if (!activeWorkspaceId || !tapdInstalled) return
     const detailWorkspaceId = getTapdWorkspaceIdFromItem(item)
@@ -2229,26 +2624,27 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     setError(null)
     try {
       const result = await window.electronAPI.getRequirementItemDetail(activeWorkspaceId, TAPD_PLUGIN_ID, sourceItemId, toDetailFilters(detailWorkspaceId))
-      setItem(result.item)
-      setGroupName(result.item.binding?.groupName ?? defaultGroupName(result.item))
-      upsertCachedItem(activeWorkspaceId, result.item)
+      const nextItem = await persistDetailItem(result.item)
+      setItem(nextItem)
+      setGroupName(nextItem.binding?.groupName ?? defaultGroupName(nextItem))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
-  }, [activeWorkspaceId, item, sourceItemId, tapdInstalled])
+  }, [activeWorkspaceId, item, persistDetailItem, sourceItemId, tapdInstalled])
 
   const applyBinding = React.useCallback((binding: RequirementBinding) => {
     setItem(current => {
       if (!current) return current
       const next = { ...current, binding }
       upsertCachedItem(activeWorkspaceId, next)
+      onItemUpdated?.(next)
       return next
     })
     setGroupName(binding.groupName)
     setEditingGroup(false)
-  }, [activeWorkspaceId])
+  }, [activeWorkspaceId, onItemUpdated])
 
   const renameLinkedGroupSessions = React.useCallback((fromGroupName: string, toGroupName: string) => {
     if (!onSessionLabelsChange || fromGroupName === toGroupName) return
@@ -2264,7 +2660,7 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     if (!activeWorkspaceId || !item) return
     const name = groupName.trim() || defaultGroupName(item)
     const previousGroupName = item.binding?.groupName
-    const binding = await window.electronAPI.createRequirementGroupFromItem(activeWorkspaceId, { pluginId: TAPD_PLUGIN_ID, item, groupName: name })
+    const binding = await window.electronAPI.createRequirementGroupFromItem(activeWorkspaceId, { pluginId: TAPD_PLUGIN_ID, item: withoutRequirementBinding(item), groupName: name })
     if (previousGroupName) renameLinkedGroupSessions(previousGroupName, binding.groupName)
     applyBinding(binding)
     toast.success(previousGroupName ? 'Group renamed' : 'Requirement linked', { description: binding.groupName })

@@ -42,6 +42,7 @@ export interface TapdRequirementCache {
   itemsById: Record<string, ExternalRequirementItem>
   listOrder: string[]
   lastSyncedAt?: number
+  homeSyncedAt?: number
   total?: number
 }
 
@@ -64,6 +65,7 @@ export function readTapdRequirementCache(workspaceId: string | null | undefined)
       itemsById: parsed.itemsById ?? {},
       listOrder: parsed.listOrder ?? [],
       lastSyncedAt: parsed.lastSyncedAt,
+      homeSyncedAt: typeof parsed.homeSyncedAt === 'number' ? parsed.homeSyncedAt : undefined,
       total: parsed.total,
     }
   } catch {
