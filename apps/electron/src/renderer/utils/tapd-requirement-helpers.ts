@@ -4,6 +4,7 @@ import { TAPD_PLUGIN_ID, TAPD_SOURCE_SLUG } from './session-requirement-link'
 export const TAPD_CACHE_STORAGE_VERSION = 1
 export const TAPD_REVIEW_SKILL_SLUG = 'grill-with-docs'
 export const TAPD_GROUP_NAME_MAX_CHARS = 12
+export const TAPD_DEFAULT_AGENT_KEYS = ['tapd', 'niuma', 'ci'] as const
 
 export type TapdRequirementAgentTaskId = 'research-requirement' | 'write-technical-plan'
 
@@ -15,6 +16,11 @@ export interface TapdRequirementAgentTask {
 
 export interface TapdRequirementWorkContext {
   workingDirectory?: string
+  updatedAt?: number
+}
+
+export interface TapdRequirementAgentSelection {
+  agentIds: string[]
   updatedAt?: number
 }
 
@@ -125,6 +131,62 @@ export function writeTapdRequirementWorkContext(
   return next
 }
 
+export function getTapdRequirementAgentSelectionStorageKey(workspaceId: string | null | undefined, sourceItemId: string) {
+  return `requirement-board.${TAPD_PLUGIN_ID}.agents.${workspaceId ?? 'default'}.${sourceItemId}`
+}
+
+function normalizeAgentIds(agentIds: readonly string[] | undefined): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const agentId of agentIds ?? []) {
+    const trimmed = agentId.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    result.push(trimmed)
+  }
+  return result
+}
+
+export function readTapdRequirementAgentSelection(workspaceId: string | null | undefined, sourceItemId: string): TapdRequirementAgentSelection {
+  if (typeof window === 'undefined' || !window.localStorage) return { agentIds: [] }
+  try {
+    const raw = window.localStorage.getItem(getTapdRequirementAgentSelectionStorageKey(workspaceId, sourceItemId))
+    if (!raw) return { agentIds: [] }
+    const parsed = JSON.parse(raw) as Partial<TapdRequirementAgentSelection>
+    return {
+      agentIds: normalizeAgentIds(parsed.agentIds),
+      updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : undefined,
+    }
+  } catch {
+    return { agentIds: [] }
+  }
+}
+
+export function writeTapdRequirementAgentSelection(
+  workspaceId: string | null | undefined,
+  sourceItemId: string,
+  selection: Partial<TapdRequirementAgentSelection>,
+): TapdRequirementAgentSelection {
+  const next: TapdRequirementAgentSelection = {
+    agentIds: normalizeAgentIds(selection.agentIds),
+    updatedAt: Date.now(),
+  }
+  if (typeof window === 'undefined' || !window.localStorage) return next
+  try {
+    window.localStorage.setItem(getTapdRequirementAgentSelectionStorageKey(workspaceId, sourceItemId), JSON.stringify(next))
+  } catch {
+    // Agent selection is a convenience layer; ignore storage failures.
+  }
+  return next
+}
+
+export function addTapdRequirementAgentId(workspaceId: string | null | undefined, sourceItemId: string, agentId: string): TapdRequirementAgentSelection {
+  const current = readTapdRequirementAgentSelection(workspaceId, sourceItemId)
+  return writeTapdRequirementAgentSelection(workspaceId, sourceItemId, {
+    agentIds: [...current.agentIds, agentId],
+  })
+}
+
 export function defaultTapdGroupName(item: ExternalRequirementItem) {
   const title = item.title.length > 80 ? `${item.title.slice(0, 77)}…` : item.title
   return `[TAPD-${item.sourceItemId}] ${title}`
@@ -203,23 +265,41 @@ function hasTapdAgentCapabilities(agent: AgentProfile): boolean {
   return skillSlugs.includes(TAPD_REVIEW_SKILL_SLUG) && sourceSlugs.includes(TAPD_SOURCE_SLUG)
 }
 
-function isGenericNiumaAgent(agent: AgentProfile): boolean {
-  const normalize = (value: string) => value.toLowerCase().replace(/[\s_-]+/g, '')
-  return normalize(agent.id) === 'niuma' || normalize(agent.name) === 'niuma'
+function normalizeAgentKey(value: string): string {
+  return value.toLowerCase().replace(/[\s_-]+/g, '')
+}
+
+function matchesDefaultAgentKey(agent: AgentProfile, key: typeof TAPD_DEFAULT_AGENT_KEYS[number]): boolean {
+  const id = normalizeAgentKey(agent.id)
+  const name = normalizeAgentKey(agent.name)
+  if (key === 'tapd') return id === 'tapd' || name === 'tapd' || id.includes('tapd') || name.includes('tapd')
+  return id === key || name === key
+}
+
+function appendUniqueAgent(target: AgentProfile[], agent?: AgentProfile | null): void {
+  if (!agent || target.some(item => item.id === agent.id)) return
+  target.push(agent)
+}
+
+export function resolveDefaultTapdAgents(agents: readonly AgentProfile[]): AgentProfile[] {
+  const selected: AgentProfile[] = []
+  for (const key of TAPD_DEFAULT_AGENT_KEYS) {
+    appendUniqueAgent(selected, agents.find(agent => matchesDefaultAgentKey(agent, key)))
+  }
+  if (selected.length === 0) appendUniqueAgent(selected, agents.find(hasTapdAgentCapabilities))
+  return selected
+}
+
+export function resolveTapdRequirementAgents(agents: readonly AgentProfile[], addedAgentIds: readonly string[] = []): AgentProfile[] {
+  const selected = resolveDefaultTapdAgents(agents)
+  for (const agentId of addedAgentIds) {
+    appendUniqueAgent(selected, agents.find(agent => agent.id === agentId))
+  }
+  return selected
 }
 
 export function resolveDefaultTapdAgent(agents: readonly AgentProfile[]): AgentProfile | null {
-  const genericNiuma = agents.find(agent => isGenericNiumaAgent(agent) && hasTapdAgentCapabilities(agent))
-  if (genericNiuma) return genericNiuma
-
-  const byName = agents.find(agent => {
-    const id = agent.id.toLowerCase()
-    const name = agent.name.toLowerCase()
-    return id === 'tapd' || name === 'tapd' || id.includes('tapd') || name.includes('tapd')
-  })
-  if (byName) return byName
-
-  return agents.find(hasTapdAgentCapabilities) ?? null
+  return resolveDefaultTapdAgents(agents)[0] ?? null
 }
 
 export function getTapdRequirementAgentTask(taskId: TapdRequirementAgentTaskId): TapdRequirementAgentTask {

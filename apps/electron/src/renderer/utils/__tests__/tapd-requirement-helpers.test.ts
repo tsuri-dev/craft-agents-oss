@@ -5,6 +5,8 @@ import {
   buildTapdRequirementReviewPrompt,
   buildTapdRequirementTaskPrompt,
   resolveDefaultTapdAgent,
+  resolveDefaultTapdAgents,
+  resolveTapdRequirementAgents,
   suggestTapdGroupName,
   TAPD_GROUP_NAME_MAX_CHARS,
 } from '../tapd-requirement-helpers'
@@ -47,19 +49,35 @@ describe('tapd-requirement-helpers', () => {
     expect(suggestTapdGroupName(item({ title: 'TAPD-123456 - Feed Detail Performance Requirement' }))).toBe('Feed Detail')
   })
 
-  it('prefers the generic niuma agent over older Tapd-named profiles', () => {
-    const niuma = agent({
-      id: 'niu-ma',
-      name: 'niuma',
-      skillSlugs: ['grill-with-docs'],
-      sourceSlugs: ['tapd-mcp-http'],
-    })
-    const named = agent({ id: 'qqnews-implementation', name: 'Tapd' })
+  it('resolves the default requirement agent set as Tapd, niuma, and ci', () => {
+    const tapd = agent({ id: 'qqnews-implementation', name: 'Tapd' })
+    const niuma = agent({ id: 'niu-ma', name: 'niuma' })
+    const ci = agent({ id: 'ci', name: 'ci' })
+    const other = agent({ id: 'reviewer', name: 'Reviewer' })
 
-    expect(resolveDefaultTapdAgent([named, niuma])?.id).toBe('niu-ma')
+    expect(resolveDefaultTapdAgents([other, niuma, ci, tapd]).map(item => item.id)).toEqual([
+      'qqnews-implementation',
+      'niu-ma',
+      'ci',
+    ])
+    expect(resolveDefaultTapdAgent([other, niuma, ci, tapd])?.id).toBe('qqnews-implementation')
   })
 
-  it('prefers profiles named Tapd when niuma is unavailable', () => {
+  it('adds requirement-specific agents after the default Tapd agent set', () => {
+    const tapd = agent({ id: 'qqnews-implementation', name: 'Tapd' })
+    const niuma = agent({ id: 'niu-ma', name: 'niuma' })
+    const ci = agent({ id: 'ci', name: 'ci' })
+    const reviewer = agent({ id: 'reviewer', name: 'Reviewer' })
+
+    expect(resolveTapdRequirementAgents([reviewer, niuma, ci, tapd], ['reviewer', 'missing']).map(item => item.id)).toEqual([
+      'qqnews-implementation',
+      'niu-ma',
+      'ci',
+      'reviewer',
+    ])
+  })
+
+  it('prefers profiles named Tapd when resolving the legacy single default', () => {
     const fallback = agent({
       id: 'planner',
       name: 'Planner',

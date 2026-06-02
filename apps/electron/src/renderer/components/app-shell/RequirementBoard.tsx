@@ -38,10 +38,12 @@ import { TAPD_PLUGIN_ID } from '@/utils/session-requirement-link'
 import {
   defaultTapdGroupName,
   emptyTapdRequirementCache,
+  addTapdRequirementAgentId,
   buildTapdAgentInstructionPrompt,
+  readTapdRequirementAgentSelection,
   readTapdRequirementCache,
   readTapdRequirementWorkContext,
-  resolveDefaultTapdAgent,
+  resolveTapdRequirementAgents,
   suggestTapdGroupName,
   upsertTapdCachedItem,
   writeTapdRequirementCache,
@@ -752,35 +754,76 @@ function AgentStarterRow({ agent, agentName, isWorking, onOpenAgent, onRun }: { 
   )
 }
 
+function AddRequirementAgentRow({ agents, onAddAgent }: { agents: AgentProfile[]; onAddAgent: (agentId: string) => void }) {
+  const [value, setValue] = React.useState('')
+  if (agents.length === 0) return null
+
+  return (
+    <div className="flex items-center gap-2 rounded px-1 py-1.5 text-xs text-muted-foreground">
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+        <Plus className="h-3 w-3" />
+      </span>
+      <Select
+        value={value}
+        onValueChange={agentId => {
+          onAddAgent(agentId)
+          setValue('')
+        }}
+      >
+        <SelectTrigger className="h-7 min-w-0 flex-1 rounded border-border/60 bg-transparent px-2 text-xs">
+          <SelectValue placeholder="Add agent…" />
+        </SelectTrigger>
+        <SelectContent style={DIALOG_SELECT_CONTENT_STYLE}>
+          {agents.map(agent => (
+            <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+}
+
 function ExecutionLogSection({
   open,
   onOpenChange,
   pastRunsOpen,
   onPastRunsOpenChange,
-  agent,
+  agents,
+  availableAgents,
   runs,
-  isWorking,
+  startingAgentId,
   cancellingRunId,
   onRun,
+  onAddAgent,
   onCancelRun,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   pastRunsOpen: boolean
   onPastRunsOpenChange: (open: boolean) => void
-  agent?: AgentProfile | null
+  agents: AgentProfile[]
+  availableAgents: AgentProfile[]
   runs: AgentRun[]
-  isWorking: boolean
+  startingAgentId?: string | null
   cancellingRunId?: string | null
-  onRun: () => void
+  onRun: (agent: AgentProfile) => void
+  onAddAgent: (agentId: string) => void
   onCancelRun: (run: AgentRun) => void
 }) {
   const activeRuns = runs.filter(run => ACTIVE_AGENT_RUN_STATUSES.has(run.status))
   const pastRuns = runs.filter(run => !ACTIVE_AGENT_RUN_STATUSES.has(run.status))
-  const agentName = agent?.name ?? 'Tapd'
-  const openAgentActivity = React.useCallback(() => {
-    if (agent?.id) navigate(routes.view.agents(agent.id))
-  }, [agent?.id])
+  const runsByAgentId = React.useMemo(() => {
+    const map = new Map<string, AgentRun[]>()
+    for (const run of runs) {
+      const current = map.get(run.agentProfileId) ?? []
+      current.push(run)
+      map.set(run.agentProfileId, current)
+    }
+    return map
+  }, [runs])
+  const openAgentActivity = React.useCallback((agentId?: string) => {
+    if (agentId) navigate(routes.view.agents(agentId))
+  }, [])
 
   return (
     <div>
@@ -797,8 +840,33 @@ function ExecutionLogSection({
       />
       {open && (
         <div className="space-y-0.5 pl-2">
-          <AgentStarterRow agent={agent} agentName={agentName} isWorking={isWorking} onOpenAgent={openAgentActivity} onRun={onRun} />
-          {activeRuns.map(run => <AgentRunRow key={run.id} run={run} onOpenAgent={openAgentActivity} onCancel={onCancelRun} cancelling={cancellingRunId === run.id} />)}
+          {agents.map(agent => {
+            const agentRuns = runsByAgentId.get(agent.id) ?? []
+            const agentActiveRuns = agentRuns.filter(run => ACTIVE_AGENT_RUN_STATUSES.has(run.status))
+            const isWorking = startingAgentId === agent.id || agentActiveRuns.length > 0
+            return (
+              <React.Fragment key={agent.id}>
+                <AgentStarterRow
+                  agent={agent}
+                  agentName={agent.name}
+                  isWorking={isWorking}
+                  onOpenAgent={() => openAgentActivity(agent.id)}
+                  onRun={() => onRun(agent)}
+                />
+                {agentActiveRuns.map(run => (
+                  <AgentRunRow
+                    key={run.id}
+                    run={run}
+                    onOpenAgent={() => openAgentActivity(run.agentProfileId)}
+                    onCancel={onCancelRun}
+                    cancelling={cancellingRunId === run.id}
+                  />
+                ))}
+              </React.Fragment>
+            )
+          })}
+
+          <AddRequirementAgentRow agents={availableAgents} onAddAgent={onAddAgent} />
 
           {pastRuns.length > 0 && (
             <>
@@ -813,7 +881,15 @@ function ExecutionLogSection({
               </button>
               {pastRunsOpen && (
                 <div className="mt-0.5 space-y-0.5">
-                  {pastRuns.map(run => <AgentRunRow key={run.id} run={run} onOpenAgent={openAgentActivity} onCancel={onCancelRun} cancelling={false} />)}
+                  {pastRuns.map(run => (
+                    <AgentRunRow
+                      key={run.id}
+                      run={run}
+                      onOpenAgent={() => openAgentActivity(run.agentProfileId)}
+                      onCancel={onCancelRun}
+                      cancelling={false}
+                    />
+                  ))}
                 </div>
               )}
             </>
@@ -1480,9 +1556,10 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
   const [localComments, setLocalComments] = React.useState<RequirementComment[]>([])
   const [creatingSession, setCreatingSession] = React.useState(false)
   const [workContext, setWorkContext] = React.useState<TapdRequirementWorkContext>(() => readTapdRequirementWorkContext(activeWorkspaceId, sourceItemId))
+  const [requirementAgentIds, setRequirementAgentIds] = React.useState<string[]>(() => readTapdRequirementAgentSelection(activeWorkspaceId, sourceItemId).agentIds)
   const [agents, setAgents] = React.useState<AgentProfile[]>([])
   const [agentRuns, setAgentRuns] = React.useState<AgentRun[]>([])
-  const [startingTapdAgent, setStartingTapdAgent] = React.useState(false)
+  const [startingTapdAgentId, setStartingTapdAgentId] = React.useState<string | null>(null)
   const [propertiesOpen, setPropertiesOpen] = React.useState(true)
   const [workOpen, setWorkOpen] = React.useState(true)
   const [sessionsOpen, setSessionsOpen] = React.useState(true)
@@ -1497,6 +1574,7 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     setGroupName(cached ? cached.binding?.groupName ?? defaultGroupName(cached) : '')
     const nextWorkContext = readTapdRequirementWorkContext(activeWorkspaceId, sourceItemId)
     setWorkContext(nextWorkContext)
+    setRequirementAgentIds(readTapdRequirementAgentSelection(activeWorkspaceId, sourceItemId).agentIds)
   }, [activeWorkspaceId, sourceItemId, tapdInstalled])
 
   React.useEffect(() => {
@@ -1596,7 +1674,12 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     () => mainSession ? [mainSession, ...groupSessions.filter(session => session.id !== mainSession.id && !hasAgentTaskLabel(session.labels))] : [],
     [groupSessions, mainSession],
   )
-  const tapdAgent = React.useMemo(() => resolveDefaultTapdAgent(agents), [agents])
+  const requirementAgents = React.useMemo(() => resolveTapdRequirementAgents(agents, requirementAgentIds), [agents, requirementAgentIds])
+  const requirementAgentIdsSet = React.useMemo(() => new Set(requirementAgents.map(agent => agent.id)), [requirementAgents])
+  const availableRequirementAgents = React.useMemo(
+    () => agents.filter(agent => !requirementAgentIdsSet.has(agent.id)),
+    [agents, requirementAgentIdsSet],
+  )
   const mainSessionIds = React.useMemo(() => new Set(sessionsForDisplay.map(session => session.id)), [sessionsForDisplay])
   const relevantAgentRuns = React.useMemo(() => agentRuns.filter(run => {
     if (run.target?.type === 'requirement') {
@@ -1607,7 +1690,6 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     return summary.includes(sourceItemId.toLowerCase()) || summary.includes(`tapd-${sourceItemId}`.toLowerCase())
   }), [agentRuns, mainSessionIds, sourceItemId])
   const activeTapdRun = React.useMemo(() => relevantAgentRuns.find(run => ACTIVE_AGENT_RUN_STATUSES.has(run.status)) ?? null, [relevantAgentRuns])
-  const agentIsWorking = startingTapdAgent || Boolean(activeTapdRun)
   const usageTotals = React.useMemo(() => groupSessions.reduce((totals, session) => {
     const usage = getSessionUsageTotals(session)
     totals.inputTokens += usage.inputTokens
@@ -1618,30 +1700,29 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
   }, { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 }), [groupSessions])
 
   const loadAgentRuns = React.useCallback(async () => {
-    if (!activeWorkspaceId || !tapdAgent || typeof window === 'undefined' || !window.electronAPI?.listAgentRuns) {
+    if (!activeWorkspaceId || typeof window === 'undefined' || !window.electronAPI?.listAgentRuns) {
       setAgentRuns([])
       return
     }
     try {
-      const runs = await window.electronAPI.listAgentRuns(activeWorkspaceId, { agentProfileId: tapdAgent.id, target: { type: 'requirement', pluginId: TAPD_PLUGIN_ID, sourceItemId } })
+      const runs = await window.electronAPI.listAgentRuns(activeWorkspaceId, { target: { type: 'requirement', pluginId: TAPD_PLUGIN_ID, sourceItemId } })
       setAgentRuns(runs)
     } catch {
       setAgentRuns([])
     }
-  }, [activeWorkspaceId, sourceItemId, tapdAgent])
+  }, [activeWorkspaceId, sourceItemId])
 
   React.useEffect(() => {
     void loadAgentRuns()
   }, [loadAgentRuns])
 
   React.useEffect(() => {
-    if (!tapdAgent) return
     const interval = window.setInterval(() => {
       void loadAgentRuns()
       void loadLocalComments()
     }, activeTapdRun ? 2500 : 5000)
     return () => window.clearInterval(interval)
-  }, [activeTapdRun, loadAgentRuns, loadLocalComments, tapdAgent])
+  }, [activeTapdRun, loadAgentRuns, loadLocalComments])
 
   const refreshDetail = React.useCallback(async () => {
     if (!activeWorkspaceId || !tapdInstalled) return
@@ -1701,15 +1782,23 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
     toast.success(next.workingDirectory ? 'Working directory saved' : 'Working directory cleared')
   }, [activeWorkspaceId, sourceItemId])
 
-  const runTapdAgent = React.useCallback(async () => {
-    if (!activeWorkspaceId || !item || !tapdAgent || agentIsWorking) return
-    const prompt = buildTapdAgentInstructionPrompt(tapdAgent.id, item, workContext)
-    setStartingTapdAgent(true)
+  const addRequirementAgent = React.useCallback((agentId: string) => {
+    const next = addTapdRequirementAgentId(activeWorkspaceId, sourceItemId, agentId)
+    setRequirementAgentIds(next.agentIds)
+    const added = agents.find(agent => agent.id === agentId)
+    toast.success('Agent added to requirement', { description: added?.name ?? agentId })
+  }, [activeWorkspaceId, agents, sourceItemId])
+
+  const runRequirementAgent = React.useCallback(async (agent: AgentProfile) => {
+    if (!activeWorkspaceId || !item || startingTapdAgentId === agent.id) return
+    if (relevantAgentRuns.some(run => run.agentProfileId === agent.id && ACTIVE_AGENT_RUN_STATUSES.has(run.status))) return
+    const prompt = buildTapdAgentInstructionPrompt(agent.id, item, workContext)
+    setStartingTapdAgentId(agent.id)
     try {
       const result = await window.electronAPI.startRequirementAgentRun(activeWorkspaceId, {
         pluginId: TAPD_PLUGIN_ID,
         item,
-        agentProfileId: tapdAgent.id,
+        agentProfileId: agent.id,
         prompt,
         workingDirectory: workContext.workingDirectory,
         groupName: item.binding?.groupName,
@@ -1720,11 +1809,11 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
       ])
       await Promise.all([loadAgentRuns(), loadLocalComments()])
     } catch (err) {
-      toast.error('Could not start Tapd Agent', { description: err instanceof Error ? err.message : String(err) })
+      toast.error(`Could not start ${agent.name}`, { description: err instanceof Error ? err.message : String(err) })
     } finally {
-      setStartingTapdAgent(false)
+      setStartingTapdAgentId(current => current === agent.id ? null : current)
     }
-  }, [activeWorkspaceId, agentIsWorking, item, loadAgentRuns, loadLocalComments, tapdAgent, workContext])
+  }, [activeWorkspaceId, item, loadAgentRuns, loadLocalComments, relevantAgentRuns, startingTapdAgentId, workContext])
 
   const replyToAgentComment = React.useCallback(async (comment: RequirementComment, message: string) => {
     if (!activeWorkspaceId || !comment.agentProfileId || !comment.childSessionId) return
@@ -1972,16 +2061,18 @@ export function RequirementDetailPage({ sourceItemId }: { sourceItemId: string }
               onOpenChange={setExecutionLogOpen}
               pastRunsOpen={pastRunsOpen}
               onPastRunsOpenChange={setPastRunsOpen}
-              agent={tapdAgent}
+              agents={requirementAgents}
+              availableAgents={availableRequirementAgents}
               runs={relevantAgentRuns}
-              isWorking={agentIsWorking}
+              startingAgentId={startingTapdAgentId}
               cancellingRunId={cancellingRunId}
-              onRun={runTapdAgent}
+              onRun={runRequirementAgent}
+              onAddAgent={addRequirementAgent}
               onCancelRun={cancelTapdAgentRun}
             />
 
-            {!tapdAgent && (
-              <div className="px-8 pb-1 text-[11px] leading-4 text-destructive">No Tapd Agent profile found.</div>
+            {requirementAgents.length === 0 && (
+              <div className="px-8 pb-1 text-[11px] leading-4 text-destructive">No requirement agents found. Create or add an Agent profile to run on this requirement.</div>
             )}
 
             <TokenUsageSection
