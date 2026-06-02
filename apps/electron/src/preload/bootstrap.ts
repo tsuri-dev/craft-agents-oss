@@ -192,6 +192,7 @@ client.handleCapability(CLIENT_BROWSER_INVOKE, async (req: BrowserCapabilityRequ
 const api = buildClientApi(client, CHANNEL_MAP, (ch) => client.isChannelAvailable(ch))
 
 ;(api as any).getRuntimeEnvironment = (): 'electron' | 'web' => 'electron'
+;(api as any).getDeepLinkScheme = (): string => process.env.CRAFT_DEEPLINK_SCHEME || 'craftagents'
 
 // ---------------------------------------------------------------------------
 // Transport connection state logging (for remote connections)

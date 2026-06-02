@@ -96,7 +96,7 @@ export function parseDeepLink(url: string): DeepLinkTarget | null {
   try {
     const parsed = new URL(url)
 
-    if (parsed.protocol !== 'craftagents:') {
+    if (!/^craftagents[a-z0-9-]*:$/.test(parsed.protocol.toLowerCase())) {
       return null
     }
 

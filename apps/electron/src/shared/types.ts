@@ -394,6 +394,8 @@ export interface ElectronAPI {
   getVersions(): { node: string; chrome: string; electron: string }
   /** Returns the renderer host environment without going through RPC. */
   getRuntimeEnvironment(): 'electron' | 'web'
+  /** Returns the active custom URL scheme for this app instance (e.g. craftagents, craftagentsdev). */
+  getDeepLinkScheme(): string
   getHomeDir(): Promise<string>
   isDebugMode(): Promise<boolean>
 

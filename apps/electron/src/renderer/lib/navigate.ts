@@ -56,7 +56,8 @@ export function navigate(route: Route, options?: NavigateOptions): void {
 export async function openRouteInNewWindow(route: Route | string): Promise<void> {
   const routeText = String(route)
   const separator = routeText.includes('?') ? '&' : '?'
-  const url = `craftagents://${routeText}${separator}window=focused`
+  const scheme = window.electronAPI?.getDeepLinkScheme?.() || 'craftagents'
+  const url = `${scheme}://${routeText}${separator}window=focused`
   try {
     await window.electronAPI?.openUrl(url)
   } catch (error) {

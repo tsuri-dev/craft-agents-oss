@@ -47,6 +47,11 @@ describe('classifyExternalUrl — internal deep links', () => {
   it('is case-insensitive for the scheme', () => {
     expect(classifyExternalUrl('CRAFTAGENTS://settings').kind).toBe('internal-deeplink')
   })
+
+  it('classifies app-specific Craft Agents schemes as internal deeplinks', () => {
+    expect(classifyExternalUrl('craftagentsdev://plugins/plugin/tapd?window=focused').kind).toBe('internal-deeplink')
+    expect(classifyExternalUrl('craftagents1://allSessions/session/abc?window=focused').kind).toBe('internal-deeplink')
+  })
 })
 
 describe('classifyExternalUrl — dangerous schemes', () => {

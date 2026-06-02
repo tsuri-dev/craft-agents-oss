@@ -40,19 +40,26 @@ interface ParsedInternalDeepLink {
     actionParams?: Record<string, string>
   }
   workspaceId?: string
-  /** Use client shell.openExternal fallback (e.g. window=focused links). */
-  requiresExternalOpen?: boolean
+  /** Use client shell.openExternal protocol dispatch for window=focused/full links. */
+  requiresProtocolDispatch?: boolean
   /** True when URL is intentionally consumed without navigation (auth callbacks). */
   handledNoop?: boolean
 }
 
 const COMPOUND_ROUTE_PREFIXES = new Set([
   'allSessions',
+  'inbox',
   'flagged',
+  'archived',
   'state',
+  'label',
+  'view',
   'sources',
   'settings',
   'skills',
+  'automations',
+  'agents',
+  'plugins',
 ])
 
 function collectDeepLinkParams(parsed: URL, pathId?: string): Record<string, string> | undefined {
@@ -68,7 +75,7 @@ function collectDeepLinkParams(parsed: URL, pathId?: string): Record<string, str
 }
 
 function parseInternalCraftAgentsDeepLink(parsed: URL): ParsedInternalDeepLink | null {
-  if (parsed.protocol !== 'craftagents:') return null
+  if (!/^craftagents[a-z0-9-]*:$/.test(parsed.protocol.toLowerCase())) return null
 
   const host = parsed.hostname
   const pathParts = parsed.pathname.split('/').filter(Boolean)
@@ -76,7 +83,7 @@ function parseInternalCraftAgentsDeepLink(parsed: URL): ParsedInternalDeepLink |
 
   // Preserve window-specific behavior via OS protocol path.
   if (windowMode === 'focused' || windowMode === 'full') {
-    return { requiresExternalOpen: true }
+    return { requiresProtocolDispatch: true }
   }
 
   // OAuth callback links are handled by auth flow code paths.
@@ -306,9 +313,18 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
           return
         }
 
-        // For links requiring window management (e.g. window=focused/full), or
-        // unknown deep-link shapes, fall back to the client protocol handler.
-        deps.platform.logger.info('[OPEN_URL] Falling back to client openExternal for craftagents:// URL')
+        if (deepLink?.requiresProtocolDispatch) {
+          deps.platform.logger.info('[OPEN_URL] Delegating window-mode Craft Agents deep link to client protocol handler')
+          const deepLinkResult = await requestClientOpenExternal(server, ctx.clientId, url)
+          if (!deepLinkResult.opened) {
+            deps.platform.logger.error(`[OPEN_URL] Client capability failed: ${deepLinkResult.error}`)
+            throw new Error(`Cannot open URL on client: ${deepLinkResult.error}`)
+          }
+          return
+        }
+
+        // Unknown deep-link shapes still fall back to the client protocol handler.
+        deps.platform.logger.info('[OPEN_URL] Falling back to client openExternal for unknown Craft Agents deep link')
         const deepLinkResult = await requestClientOpenExternal(server, ctx.clientId, url)
         if (!deepLinkResult.opened) {
           deps.platform.logger.error(`[OPEN_URL] Client capability failed: ${deepLinkResult.error}`)

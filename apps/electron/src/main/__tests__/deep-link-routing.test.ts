@@ -29,6 +29,15 @@ describe('parseDeepLink compound routes', () => {
     })
   })
 
+  it('parses plugin requirement routes with app-specific dev scheme', () => {
+    expect(parseDeepLink('craftagentsdev://plugins/plugin/tapd/requirement/1010045201134757330?window=focused')).toEqual({
+      workspaceId: undefined,
+      view: 'plugins/plugin/tapd/requirement/1010045201134757330',
+      windowMode: 'focused',
+      rightSidebar: undefined,
+    })
+  })
+
   it('parses agent profile routes with focused window mode', () => {
     expect(parseDeepLink('craftagents://agents/agent/niu-ma?window=focused')).toEqual({
       workspaceId: undefined,
