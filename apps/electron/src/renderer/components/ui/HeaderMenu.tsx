@@ -19,6 +19,7 @@ import {
   StyledDropdownMenuItem,
   StyledDropdownMenuSeparator,
 } from './styled-dropdown'
+import { openRouteInNewWindow } from '@/lib/navigate'
 import { type DocFeature, getDocUrl } from '@craft-agent/shared/docs/doc-links'
 
 interface HeaderMenuProps {
@@ -33,13 +34,7 @@ interface HeaderMenuProps {
 export function HeaderMenu({ route, children, helpFeature }: HeaderMenuProps) {
   const { t } = useTranslation()
   const handleOpenInNewWindow = async () => {
-    const separator = route.includes('?') ? '&' : '?'
-    const url = `craftagents://${route}${separator}window=focused`
-    try {
-      await window.electronAPI?.openUrl(url)
-    } catch (error) {
-      console.error('[HeaderMenu] openUrl failed:', error)
-    }
+    await openRouteInNewWindow(route)
   }
 
   const handleLearnMore = helpFeature ? () => {

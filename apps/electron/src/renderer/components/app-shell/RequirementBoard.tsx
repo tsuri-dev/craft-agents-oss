@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
+  AppWindow,
   BadgeAlert,
   Ban,
   Bot,
@@ -61,7 +62,7 @@ import { WorkingDirectoryBadge } from './input/FreeFormInput'
 import { SessionFilesSection } from '../right-sidebar/SessionFilesSection'
 import { InfoPopoverShell, InfoPopoverTriggerButton } from './SessionInfoPopover'
 import { cn } from '@/lib/utils'
-import { navigate, routes } from '@/lib/navigate'
+import { navigate, openRouteInNewWindow, routes } from '@/lib/navigate'
 import { useNavigation } from '@/contexts/NavigationContext'
 import { addSessionAtom, sessionMetaMapAtom } from '@/atoms/sessions'
 import { sessionHasGroup } from '@/utils/session-group-filter'
@@ -898,6 +899,7 @@ interface IssueItemProps {
   syncing?: boolean
   dragging?: boolean
   onOpen: (item: ExternalRequirementItem) => void
+  onOpenInNewWindow: (item: ExternalRequirementItem) => void
   onSync: (item: ExternalRequirementItem) => void
   onDelete: (item: ExternalRequirementItem) => void
   onDragStart: (item: ExternalRequirementItem) => void
@@ -905,7 +907,7 @@ interface IssueItemProps {
   onDragEnd: () => void
 }
 
-function IssueRow({ item, labels, syncing, dragging, onOpen, onSync, onDelete, onDragStart, onDrop, onDragEnd }: IssueItemProps) {
+function IssueRow({ item, labels, syncing, dragging, onOpen, onOpenInNewWindow, onSync, onDelete, onDragStart, onDrop, onDragEnd }: IssueItemProps) {
   const assignee = item.assignees?.[0]
   const expectedTestTimeRaw = getExpectedTestTime(item)
   return (
@@ -945,6 +947,15 @@ function IssueRow({ item, labels, syncing, dragging, onOpen, onSync, onDelete, o
         {assignee && <span className="hidden max-w-[120px] truncate sm:inline">{assignee}</span>}
         <button
           type="button"
+          onClick={() => onOpenInNewWindow(item)}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+          aria-label="Open requirement in new window"
+          title="Open in new window"
+        >
+          <AppWindow className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
           onClick={() => onSync(item)}
           disabled={syncing}
           className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
@@ -968,7 +979,7 @@ function IssueRow({ item, labels, syncing, dragging, onOpen, onSync, onDelete, o
   )
 }
 
-function IssueListSection({ status, items, collapsed, labelsById, syncingItemIds, draggingStatus, draggingItemId, onToggleCollapsed, onOpen, onSync, onDelete, onStatusDragStart, onStatusDrop, onStatusDragEnd, onItemDragStart, onItemDrop, onItemDragEnd }: {
+function IssueListSection({ status, items, collapsed, labelsById, syncingItemIds, draggingStatus, draggingItemId, onToggleCollapsed, onOpen, onOpenInNewWindow, onSync, onDelete, onStatusDragStart, onStatusDrop, onStatusDragEnd, onItemDragStart, onItemDrop, onItemDragEnd }: {
   status: string
   items: ExternalRequirementItem[]
   collapsed: boolean
@@ -978,6 +989,7 @@ function IssueListSection({ status, items, collapsed, labelsById, syncingItemIds
   draggingItemId: string | null
   onToggleCollapsed: (status: string) => void
   onOpen: (item: ExternalRequirementItem) => void
+  onOpenInNewWindow: (item: ExternalRequirementItem) => void
   onSync: (item: ExternalRequirementItem) => void
   onDelete: (item: ExternalRequirementItem) => void
   onStatusDragStart: (status: string) => void
@@ -1025,6 +1037,7 @@ function IssueListSection({ status, items, collapsed, labelsById, syncingItemIds
               syncing={syncingItemIds.has(item.sourceItemId)}
               dragging={draggingItemId === item.sourceItemId}
               onOpen={onOpen}
+              onOpenInNewWindow={onOpenInNewWindow}
               onSync={onSync}
               onDelete={onDelete}
               onDragStart={onItemDragStart}
@@ -1038,7 +1051,7 @@ function IssueListSection({ status, items, collapsed, labelsById, syncingItemIds
   )
 }
 
-function BoardIssueCard({ item, labels, syncing, dragging, onOpen, onSync, onDelete, onDragStart, onDrop, onDragEnd }: IssueItemProps) {
+function BoardIssueCard({ item, labels, syncing, dragging, onOpen, onOpenInNewWindow, onSync, onDelete, onDragStart, onDrop, onDragEnd }: IssueItemProps) {
   const assignee = item.assignees?.[0]
   const expectedTestTimeRaw = getExpectedTestTime(item)
   return (
@@ -1072,9 +1085,18 @@ function BoardIssueCard({ item, labels, syncing, dragging, onOpen, onSync, onDel
         <TapdRequirementLabels labels={labels} />
         <button
           type="button"
+          onClick={() => onOpenInNewWindow(item)}
+          className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+          aria-label="Open requirement in new window"
+          title="Open in new window"
+        >
+          <AppWindow className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
           onClick={() => onSync(item)}
           disabled={syncing}
-          className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
           aria-label="Sync requirement"
           title="Sync requirement"
         >
@@ -1094,7 +1116,7 @@ function BoardIssueCard({ item, labels, syncing, dragging, onOpen, onSync, onDel
   )
 }
 
-function IssueBoardColumn({ status, items, collapsed, labelsById, syncingItemIds, draggingStatus, draggingItemId, onToggleCollapsed, onOpen, onSync, onDelete, onStatusDragStart, onStatusDrop, onStatusDragEnd, onItemDragStart, onItemDrop, onItemDragEnd }: {
+function IssueBoardColumn({ status, items, collapsed, labelsById, syncingItemIds, draggingStatus, draggingItemId, onToggleCollapsed, onOpen, onOpenInNewWindow, onSync, onDelete, onStatusDragStart, onStatusDrop, onStatusDragEnd, onItemDragStart, onItemDrop, onItemDragEnd }: {
   status: string
   items: ExternalRequirementItem[]
   collapsed: boolean
@@ -1104,6 +1126,7 @@ function IssueBoardColumn({ status, items, collapsed, labelsById, syncingItemIds
   draggingItemId: string | null
   onToggleCollapsed: (status: string) => void
   onOpen: (item: ExternalRequirementItem) => void
+  onOpenInNewWindow: (item: ExternalRequirementItem) => void
   onSync: (item: ExternalRequirementItem) => void
   onDelete: (item: ExternalRequirementItem) => void
   onStatusDragStart: (status: string) => void
@@ -1155,6 +1178,7 @@ function IssueBoardColumn({ status, items, collapsed, labelsById, syncingItemIds
               syncing={syncingItemIds.has(item.sourceItemId)}
               dragging={draggingItemId === item.sourceItemId}
               onOpen={onOpen}
+              onOpenInNewWindow={onOpenInNewWindow}
               onSync={onSync}
               onDelete={onDelete}
               onDragStart={onItemDragStart}
@@ -1447,6 +1471,10 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
     setActiveTabId(sourceItemId)
     navigate(routes.view.plugins(TAPD_PLUGIN_ID, 'requirement', sourceItemId))
   }, [persistTabs])
+
+  const openRequirementInNewWindow = React.useCallback((item: ExternalRequirementItem) => {
+    void openRouteInNewWindow(routes.view.plugins(TAPD_PLUGIN_ID, 'requirement', item.sourceItemId))
+  }, [])
 
   const activateHome = React.useCallback(() => {
     setActiveTabId(TAPD_HOME_TAB_ID)
@@ -2046,6 +2074,7 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
                       draggingItemId={draggingItemId}
                       onToggleCollapsed={toggleStatusCollapsed}
                       onOpen={item => openRequirementTab(item.sourceItemId)}
+                      onOpenInNewWindow={openRequirementInNewWindow}
                       onSync={syncRequirementItem}
                       onDelete={deleteLocalRequirement}
                       onStatusDragStart={setDraggingStatus}
@@ -2073,6 +2102,7 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
                       draggingItemId={draggingItemId}
                       onToggleCollapsed={toggleStatusCollapsed}
                       onOpen={item => openRequirementTab(item.sourceItemId)}
+                      onOpenInNewWindow={openRequirementInNewWindow}
                       onSync={syncRequirementItem}
                       onDelete={deleteLocalRequirement}
                       onStatusDragStart={setDraggingStatus}
@@ -2226,6 +2256,7 @@ function RequirementSessionsSection({
   hasBinding,
   onCreateSession,
   onNavigateSession,
+  onOpenSessionInNewWindow,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -2233,6 +2264,7 @@ function RequirementSessionsSection({
   hasBinding: boolean
   onCreateSession: () => void
   onNavigateSession: (sessionId: string) => void
+  onOpenSessionInNewWindow: (sessionId: string) => void
 }) {
   return (
     <div className="col-span-2 mt-1">
@@ -2265,15 +2297,25 @@ function RequirementSessionsSection({
           ) : sessions.length === 0 ? (
             <p className="px-1 py-1.5 text-xs italic text-muted-foreground/60">No sessions yet. Create one to start a requirement chat.</p>
           ) : sessions.map((session, index) => (
-            <button
-              key={session.id}
-              type="button"
-              className={cn('flex w-full items-center gap-1.5 rounded px-1 py-1.5 text-left text-xs transition-colors hover:bg-accent/40', index === 0 ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}
-              onClick={() => onNavigateSession(session.id)}
-              title={session.name || 'Untitled session'}
-            >
-              <span className="truncate">{session.name || 'Untitled session'}</span>
-            </button>
+            <div key={session.id} className="group/session-row flex items-center gap-1 rounded transition-colors hover:bg-accent/40">
+              <button
+                type="button"
+                className={cn('min-w-0 flex-1 rounded px-1 py-1.5 text-left text-xs transition-colors', index === 0 ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}
+                onClick={() => onNavigateSession(session.id)}
+                title={session.name || 'Untitled session'}
+              >
+                <span className="block truncate">{session.name || 'Untitled session'}</span>
+              </button>
+              <button
+                type="button"
+                className="mr-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-colors hover:bg-foreground/[0.06] hover:text-foreground group-hover/session-row:opacity-100"
+                onClick={() => onOpenSessionInNewWindow(session.id)}
+                aria-label="Open session in new window"
+                title="Open in new window"
+              >
+                <AppWindow className="h-3.5 w-3.5" />
+              </button>
+            </div>
           ))}
         </div>
       )}
@@ -2349,6 +2391,7 @@ function AgentRunRow({
   run,
   agent,
   onOpenAgent,
+  onOpenSessionInNewWindow,
   onCancel,
   cancelling,
   showAgentName = false,
@@ -2356,6 +2399,7 @@ function AgentRunRow({
   run: AgentRun
   agent?: AgentProfile | null
   onOpenAgent: () => void
+  onOpenSessionInNewWindow: (sessionId: string) => void
   onCancel: (run: AgentRun) => void
   cancelling: boolean
   showAgentName?: boolean
@@ -2389,21 +2433,37 @@ function AgentRunRow({
         <span className={status.tone}>{status.label}</span>
         {timestamp && <span className="text-muted-foreground"> · {formatRelativeRequirementTime(timestamp)}</span>}
       </span>
-      {isActive && (
+      {(run.childSessionId || isActive) && (
         <RunRowActions>
-          <button
-            type="button"
-            className="flex items-center justify-center rounded p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={isStopping}
-            aria-label="Cancel run"
-            title="Cancel run"
-            onClick={event => {
-              event.stopPropagation()
-              onCancel(run)
-            }}
-          >
-            {isStopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
-          </button>
+          {run.childSessionId && (
+            <button
+              type="button"
+              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+              aria-label="Open agent session in new window"
+              title="Open agent session in new window"
+              onClick={event => {
+                event.stopPropagation()
+                onOpenSessionInNewWindow(run.childSessionId!)
+              }}
+            >
+              <AppWindow className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {isActive && (
+            <button
+              type="button"
+              className="flex items-center justify-center rounded p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isStopping}
+              aria-label="Cancel run"
+              title="Cancel run"
+              onClick={event => {
+                event.stopPropagation()
+                onCancel(run)
+              }}
+            >
+              {isStopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
+            </button>
+          )}
         </RunRowActions>
       )}
     </div>
@@ -2485,6 +2545,7 @@ function ExecutionLogSection({
   onRun,
   onAddAgent,
   onCancelRun,
+  onOpenSessionInNewWindow,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -2498,6 +2559,7 @@ function ExecutionLogSection({
   onRun: (agent: AgentProfile) => void
   onAddAgent: (agentId: string) => void
   onCancelRun: (run: AgentRun) => void
+  onOpenSessionInNewWindow: (sessionId: string) => void
 }) {
   const activeRuns = runs.filter(run => ACTIVE_AGENT_RUN_STATUSES.has(run.status))
   const pastRuns = runs.filter(run => !ACTIVE_AGENT_RUN_STATUSES.has(run.status))
@@ -2549,6 +2611,7 @@ function ExecutionLogSection({
                     run={run}
                     agent={agent}
                     onOpenAgent={() => openAgentActivity(run.agentProfileId)}
+                    onOpenSessionInNewWindow={onOpenSessionInNewWindow}
                     onCancel={onCancelRun}
                     cancelling={cancellingRunId === run.id}
                   />
@@ -2578,6 +2641,7 @@ function ExecutionLogSection({
                       run={run}
                       agent={agentsById.get(run.agentProfileId)}
                       onOpenAgent={() => openAgentActivity(run.agentProfileId)}
+                      onOpenSessionInNewWindow={onOpenSessionInNewWindow}
                       onCancel={onCancelRun}
                       cancelling={false}
                       showAgentName
@@ -2731,6 +2795,7 @@ function prepareCommentMarkdown(comment: RequirementComment) {
 function TapdRequirementImage({ src, alt, title, onOpenUrl, compact = false }: { src?: string; alt?: string; title?: string; onOpenUrl: (url: string) => void; compact?: boolean }) {
   const [failed, setFailed] = React.useState(false)
   const imageRef = React.useRef<HTMLImageElement | null>(null)
+  const zoomRef = React.useRef<ReturnType<typeof mediumZoom> | null>(null)
   const normalizedSrc = src ? normalizeTapdImageUrl(src) : undefined
 
   React.useEffect(() => {
@@ -2746,11 +2811,25 @@ function TapdRequirementImage({ src, alt, title, onOpenUrl, compact = false }: {
       background: 'rgba(6, 6, 10, 0.78)',
       scrollOffset: 40,
     })
+    zoomRef.current = zoom
 
     return () => {
+      zoomRef.current = null
       zoom.detach()
     }
   }, [compact, failed, normalizedSrc])
+
+  const handleOpenZoom = React.useCallback((event: React.MouseEvent<HTMLImageElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const image = imageRef.current
+    const zoom = zoomRef.current
+    if (image && zoom) {
+      void zoom.open({ target: image })
+      return
+    }
+    if (normalizedSrc) onOpenUrl(normalizedSrc)
+  }, [normalizedSrc, onOpenUrl])
 
   if (!normalizedSrc || failed) {
     return (
@@ -2773,7 +2852,7 @@ function TapdRequirementImage({ src, alt, title, onOpenUrl, compact = false }: {
       loading="lazy"
       data-zoomable="tapd-requirement-image"
       className={cn(compact ? 'my-2 max-h-[180px] max-w-[min(100%,360px)]' : 'my-4 max-h-[420px] max-w-[min(100%,720px)]', 'block w-auto cursor-zoom-in rounded-[12px] border object-contain', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.border)}
-      onClick={(event) => event.stopPropagation()}
+      onClick={handleOpenZoom}
       onError={() => setFailed(true)}
     />
   )
@@ -3547,6 +3626,10 @@ export function RequirementDetailPage({ sourceItemId, onItemUpdated, onLabelsUpd
     updateDetailLabels(current => current.filter(existing => existing !== label))
   }, [updateDetailLabels])
 
+  const openSessionInNewWindow = React.useCallback((sessionId: string) => {
+    void openRouteInNewWindow(routes.view.allSessions(sessionId))
+  }, [])
+
   const addRequirementAgent = React.useCallback((agentId: string) => {
     const next = addTapdRequirementAgentId(activeWorkspaceId, sourceItemId, agentId)
     setRequirementAgentIds(next.agentIds)
@@ -3829,6 +3912,7 @@ export function RequirementDetailPage({ sourceItemId, onItemUpdated, onLabelsUpd
                 hasBinding={Boolean(item.binding)}
                 onCreateSession={openCreateSessionDialog}
                 onNavigateSession={navigateToSession}
+                onOpenSessionInNewWindow={openSessionInNewWindow}
               />
 
             </DetailSection>
@@ -3846,6 +3930,7 @@ export function RequirementDetailPage({ sourceItemId, onItemUpdated, onLabelsUpd
               onRun={runRequirementAgent}
               onAddAgent={addRequirementAgent}
               onCancelRun={cancelTapdAgentRun}
+              onOpenSessionInNewWindow={openSessionInNewWindow}
             />
 
             {requirementAgents.length === 0 && (

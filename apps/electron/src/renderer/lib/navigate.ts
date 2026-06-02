@@ -48,3 +48,18 @@ export function navigate(route: Route, options?: NavigateOptions): void {
   })
   window.dispatchEvent(event)
 }
+
+/**
+ * Open an internal route in a focused app window via the shared deeplink path.
+ * Mirrors the existing All Sessions / HeaderMenu behavior.
+ */
+export async function openRouteInNewWindow(route: Route | string): Promise<void> {
+  const routeText = String(route)
+  const separator = routeText.includes('?') ? '&' : '?'
+  const url = `craftagents://${routeText}${separator}window=focused`
+  try {
+    await window.electronAPI?.openUrl(url)
+  } catch (error) {
+    console.error('[navigate] openRouteInNewWindow failed:', error)
+  }
+}

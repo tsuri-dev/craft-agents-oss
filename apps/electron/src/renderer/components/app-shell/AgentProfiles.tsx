@@ -2,6 +2,7 @@ import * as React from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import {
   Activity,
+  AppWindow,
   ArrowLeft,
   ArrowUpDown,
   BookOpenText,
@@ -48,6 +49,7 @@ import { useNavigation } from '@/contexts/NavigationContext'
 import { agentProfilesAtom } from '@/atoms/agent-profiles'
 import { sessionMetaMapAtom, type SessionMeta } from '@/atoms/sessions'
 import { cn } from '@/lib/utils'
+import { openRouteInNewWindow, routes } from '@/lib/navigate'
 import { getModelDisplayName } from '@config/models'
 import { formatTokenCount, formatUsd } from '@/utils/session-usage'
 import { DEFAULT_THINKING_LEVEL, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
@@ -1678,6 +1680,10 @@ function AgentActivityTab({ agent, runsState }: { agent: AgentProfileMock; runsS
     if (!run.childSessionId) return
     navigateToSession(run.childSessionId)
   }, [navigateToSession])
+  const handleOpenRunSessionInNewWindow = React.useCallback((run: AgentRun) => {
+    if (!run.childSessionId) return
+    void openRouteInNewWindow(routes.view.allSessions(run.childSessionId))
+  }, [])
 
   return (
     <div className="flex flex-col gap-4 p-6">
@@ -1698,6 +1704,7 @@ function AgentActivityTab({ agent, runsState }: { agent: AgentProfileMock; runsS
                 onCancel={handleCancelRun}
                 onOpenLog={handleOpenLog}
                 onOpenSession={handleOpenRunSession}
+                onOpenSessionInNewWindow={handleOpenRunSessionInNewWindow}
                 canOpenLog={canOpenLog && !!run.transcriptPath}
                 cancelling={cancellingRunId === run.id}
               />
@@ -1744,6 +1751,7 @@ function AgentActivityTab({ agent, runsState }: { agent: AgentProfileMock; runsS
                 run={run}
                 onOpenLog={handleOpenLog}
                 onOpenSession={handleOpenRunSession}
+                onOpenSessionInNewWindow={handleOpenRunSessionInNewWindow}
                 canOpenLog={canOpenLog && !!run.transcriptPath}
               />
             ))}
@@ -1757,6 +1765,7 @@ function AgentActivityTab({ agent, runsState }: { agent: AgentProfileMock; runsS
         runs={allRuns}
         onOpenLog={handleOpenLog}
         onOpenSession={handleOpenRunSession}
+        onOpenSessionInNewWindow={handleOpenRunSessionInNewWindow}
         canOpenLog={canOpenLog}
       />
       <AgentRunLogDialog
@@ -1791,7 +1800,7 @@ function AgentActivitySection({ title, subtitle, action, children }: { title: st
   )
 }
 
-function ActiveAgentRunRow({ run, onCancel, onOpenLog, onOpenSession, canOpenLog, cancelling }: { run: AgentRun; onCancel: (run: AgentRun) => void; onOpenLog: (run: AgentRun) => void; onOpenSession: (run: AgentRun) => void; canOpenLog: boolean; cancelling: boolean }) {
+function ActiveAgentRunRow({ run, onCancel, onOpenLog, onOpenSession, onOpenSessionInNewWindow, canOpenLog, cancelling }: { run: AgentRun; onCancel: (run: AgentRun) => void; onOpenLog: (run: AgentRun) => void; onOpenSession: (run: AgentRun) => void; onOpenSessionInNewWindow: (run: AgentRun) => void; canOpenLog: boolean; cancelling: boolean }) {
   const isStopping = run.status === 'stopping' || cancelling
   const canOpenSession = !!run.childSessionId
   return (
@@ -1822,6 +1831,11 @@ function ActiveAgentRunRow({ run, onCancel, onOpenLog, onOpenSession, canOpenLog
       </div>
       <AgentRunActions run={run} onOpenLog={onOpenLog} canOpenLog={canOpenLog} />
       {run.childSessionId && (
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={event => { event.stopPropagation(); onOpenSessionInNewWindow(run) }} title="Open child session in new window" aria-label="Open child session in new window">
+          <AppWindow className="h-3.5 w-3.5" />
+        </Button>
+      )}
+      {run.childSessionId && (
         <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" disabled={isStopping} onClick={event => { event.stopPropagation(); onCancel(run) }} title="Cancel run">
           {isStopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}
         </Button>
@@ -1830,7 +1844,7 @@ function ActiveAgentRunRow({ run, onCancel, onOpenLog, onOpenSession, canOpenLog
   )
 }
 
-function RecentAgentRunRow({ run, onOpenLog, onOpenSession, canOpenLog }: { run: AgentRun; onOpenLog: (run: AgentRun) => void; onOpenSession: (run: AgentRun) => void; canOpenLog: boolean }) {
+function RecentAgentRunRow({ run, onOpenLog, onOpenSession, onOpenSessionInNewWindow, canOpenLog }: { run: AgentRun; onOpenLog: (run: AgentRun) => void; onOpenSession: (run: AgentRun) => void; onOpenSessionInNewWindow: (run: AgentRun) => void; canOpenLog: boolean }) {
   const status = getRunStatusPresentation(run.status)
   const Icon = status.icon
   const canOpenSession = !!run.childSessionId
@@ -1861,6 +1875,11 @@ function RecentAgentRunRow({ run, onOpenLog, onOpenSession, canOpenLog }: { run:
         <span>{formatDurationMs(getRunDurationMs(run))}</span>
       </div>
       <AgentRunActions run={run} onOpenLog={onOpenLog} canOpenLog={canOpenLog} />
+      {run.childSessionId && (
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={event => { event.stopPropagation(); onOpenSessionInNewWindow(run) }} title="Open child session in new window" aria-label="Open child session in new window">
+          <AppWindow className="h-3.5 w-3.5" />
+        </Button>
+      )}
     </div>
   )
 }
@@ -1913,7 +1932,7 @@ function AgentRunLogDialog({ run, content, error, loading, onOpenChange }: { run
   )
 }
 
-function AgentRunsHistoryDialog({ open, onOpenChange, runs, onOpenLog, onOpenSession, canOpenLog }: { open: boolean; onOpenChange: (open: boolean) => void; runs: AgentRun[]; onOpenLog: (run: AgentRun) => void; onOpenSession: (run: AgentRun) => void; canOpenLog: boolean }) {
+function AgentRunsHistoryDialog({ open, onOpenChange, runs, onOpenLog, onOpenSession, onOpenSessionInNewWindow, canOpenLog }: { open: boolean; onOpenChange: (open: boolean) => void; runs: AgentRun[]; onOpenLog: (run: AgentRun) => void; onOpenSession: (run: AgentRun) => void; onOpenSessionInNewWindow: (run: AgentRun) => void; canOpenLog: boolean }) {
   const handleOpenSession = React.useCallback((run: AgentRun) => {
     onOpenSession(run)
     onOpenChange(false)
@@ -1931,7 +1950,7 @@ function AgentRunsHistoryDialog({ open, onOpenChange, runs, onOpenLog, onOpenSes
             {runs.length === 0 ? (
               <p className="px-2 py-8 text-center text-xs italic text-muted-foreground/60">No runs yet.</p>
             ) : (
-              runs.map(run => <AgentRunHistoryRow key={run.id} run={run} onOpenLog={onOpenLog} onOpenSession={handleOpenSession} canOpenLog={canOpenLog && !!run.transcriptPath} />)
+              runs.map(run => <AgentRunHistoryRow key={run.id} run={run} onOpenLog={onOpenLog} onOpenSession={handleOpenSession} onOpenSessionInNewWindow={onOpenSessionInNewWindow} canOpenLog={canOpenLog && !!run.transcriptPath} />)
             )}
           </div>
         </ScrollArea>
@@ -1940,7 +1959,7 @@ function AgentRunsHistoryDialog({ open, onOpenChange, runs, onOpenLog, onOpenSes
   )
 }
 
-function AgentRunHistoryRow({ run, onOpenLog, onOpenSession, canOpenLog }: { run: AgentRun; onOpenLog: (run: AgentRun) => void; onOpenSession: (run: AgentRun) => void; canOpenLog: boolean }) {
+function AgentRunHistoryRow({ run, onOpenLog, onOpenSession, onOpenSessionInNewWindow, canOpenLog }: { run: AgentRun; onOpenLog: (run: AgentRun) => void; onOpenSession: (run: AgentRun) => void; onOpenSessionInNewWindow: (run: AgentRun) => void; canOpenLog: boolean }) {
   const status = getRunStatusPresentation(run.status)
   const Icon = status.icon
   const canOpenSession = !!run.childSessionId
@@ -1973,6 +1992,11 @@ function AgentRunHistoryRow({ run, onOpenLog, onOpenSession, canOpenLog }: { run
         <span>{formatDurationMs(getRunDurationMs(run))}</span>
       </div>
       <AgentRunActions run={run} onOpenLog={onOpenLog} canOpenLog={canOpenLog} />
+      {run.childSessionId && (
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={event => { event.stopPropagation(); onOpenSessionInNewWindow(run) }} title="Open child session in new window" aria-label="Open child session in new window">
+          <AppWindow className="h-3.5 w-3.5" />
+        </Button>
+      )}
     </div>
   )
 }
