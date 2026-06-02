@@ -51,6 +51,8 @@ export interface TapdRequirementCache {
   version: 1
   itemsById: Record<string, ExternalRequirementItem>
   listOrder: string[]
+  /** Locally hidden/deleted TAPD source ids. Live home sync skips these until explicitly re-imported. */
+  locallyDeletedIds?: string[]
   lastSyncedAt?: number
   homeSyncedAt?: number
   total?: number
@@ -61,7 +63,21 @@ export function getTapdRequirementCacheStorageKey(workspaceId: string | null | u
 }
 
 export function emptyTapdRequirementCache(): TapdRequirementCache {
-  return { version: TAPD_CACHE_STORAGE_VERSION, itemsById: {}, listOrder: [] }
+  return { version: TAPD_CACHE_STORAGE_VERSION, itemsById: {}, listOrder: [], locallyDeletedIds: [] }
+}
+
+function normalizeTapdCacheIdList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue
+    const id = entry.trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    result.push(id)
+  }
+  return result
 }
 
 export function readTapdRequirementCache(workspaceId: string | null | undefined): TapdRequirementCache {
@@ -73,7 +89,8 @@ export function readTapdRequirementCache(workspaceId: string | null | undefined)
     return {
       version: TAPD_CACHE_STORAGE_VERSION,
       itemsById: parsed.itemsById ?? {},
-      listOrder: parsed.listOrder ?? [],
+      listOrder: normalizeTapdCacheIdList(parsed.listOrder),
+      locallyDeletedIds: normalizeTapdCacheIdList(parsed.locallyDeletedIds),
       lastSyncedAt: parsed.lastSyncedAt,
       homeSyncedAt: typeof parsed.homeSyncedAt === 'number' ? parsed.homeSyncedAt : undefined,
       total: parsed.total,
@@ -98,6 +115,7 @@ export function upsertTapdCachedItem(workspaceId: string | null | undefined, ite
   const next: TapdRequirementCache = {
     ...current,
     total: undefined,
+    locallyDeletedIds: (current.locallyDeletedIds ?? []).filter(id => id !== item.sourceItemId),
     itemsById: { ...current.itemsById, [item.sourceItemId]: item },
     listOrder,
     lastSyncedAt: Date.now(),
@@ -106,12 +124,16 @@ export function upsertTapdCachedItem(workspaceId: string | null | undefined, ite
   return next
 }
 
-export function removeTapdCachedItem(workspaceId: string | null | undefined, sourceItemId: string) {
+export function removeTapdCachedItem(workspaceId: string | null | undefined, sourceItemId: string, options?: { rememberLocalDelete?: boolean }) {
   const current = readTapdRequirementCache(workspaceId)
   const { [sourceItemId]: _removed, ...itemsById } = current.itemsById
+  const locallyDeletedIds = options?.rememberLocalDelete
+    ? Array.from(new Set([...(current.locallyDeletedIds ?? []), sourceItemId]))
+    : current.locallyDeletedIds ?? []
   const next: TapdRequirementCache = {
     ...current,
     total: undefined,
+    locallyDeletedIds,
     itemsById,
     listOrder: current.listOrder.filter(id => id !== sourceItemId),
     lastSyncedAt: Date.now(),

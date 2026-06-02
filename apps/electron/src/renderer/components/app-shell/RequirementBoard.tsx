@@ -808,7 +808,6 @@ interface IssueItemProps {
 function IssueRow({ item, labels, syncing, onOpen, onSync, onDelete }: IssueItemProps) {
   const assignee = item.assignees?.[0]
   const expectedTestTimeRaw = getExpectedTestTime(item)
-  const deleted = isDeletedStatus(item.status)
   return (
     <div
       role="button"
@@ -838,17 +837,15 @@ function IssueRow({ item, labels, syncing, onOpen, onSync, onDelete }: IssueItem
         >
           {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
         </button>
-        {deleted && (
-          <button
-            type="button"
-            onClick={() => onDelete(item)}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-destructive opacity-70 transition-opacity hover:bg-destructive/10 hover:opacity-100"
-            aria-label="Delete local requirement"
-            title="Delete local requirement"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => onDelete(item)}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          aria-label="Delete local requirement"
+          title="Delete local cached copy"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
         <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
       </div>
     </div>
@@ -902,7 +899,6 @@ function IssueListSection({ status, items, collapsed, labelsById, syncingItemIds
 function BoardIssueCard({ item, labels, syncing, onOpen, onSync, onDelete }: IssueItemProps) {
   const assignee = item.assignees?.[0]
   const expectedTestTimeRaw = getExpectedTestTime(item)
-  const deleted = isDeletedStatus(item.status)
   return (
     <div className="group w-full rounded-[14px] bg-background p-4 text-left shadow-sm ring-1 ring-foreground/[0.08] transition-[transform,box-shadow] hover:-translate-y-0.5 hover:shadow-md focus-within:ring-2 focus-within:ring-accent/40">
       <button type="button" onClick={() => onOpen(item)} className="block w-full text-left focus-visible:outline-none">
@@ -924,17 +920,15 @@ function BoardIssueCard({ item, labels, syncing, onOpen, onSync, onDelete }: Iss
         >
           {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
         </button>
-        {deleted && (
-          <button
-            type="button"
-            onClick={() => onDelete(item)}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-[8px] text-destructive opacity-70 transition-opacity hover:bg-destructive/10 hover:opacity-100"
-            aria-label="Delete local requirement"
-            title="Delete local requirement"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => onDelete(item)}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          aria-label="Delete local requirement"
+          title="Delete local cached copy"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       </div>
     </div>
   )
@@ -1185,15 +1179,15 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
   }, [activeWorkspaceId])
 
   const deleteLocalRequirement = React.useCallback(async (item: ExternalRequirementItem) => {
-    if (!activeWorkspaceId || !isDeletedStatus(item.status)) return
-    const confirmed = window.confirm(`Delete the local copy of “${item.title}”? This does not delete anything from TAPD.`)
+    if (!activeWorkspaceId) return
+    const confirmed = window.confirm(`Delete the local cached copy of “${item.title}”? This does not delete or update the TAPD source requirement.`)
     if (!confirmed) return
     try {
       if (item.binding) {
         await window.electronAPI.unlinkRequirementItemFromGroup(activeWorkspaceId, { pluginId: TAPD_PLUGIN_ID, sourceItemId: item.sourceItemId })
       }
       removeTapdRequirementLabels(activeWorkspaceId, item.sourceItemId)
-      const nextCache = removeTapdCachedItem(activeWorkspaceId, item.sourceItemId)
+      const nextCache = removeTapdCachedItem(activeWorkspaceId, item.sourceItemId, { rememberLocalDelete: true })
       setCache(nextCache)
       refreshRequirementLabels()
       setOpenTabs(current => {
@@ -1305,9 +1299,11 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
       .then(result => {
         if (stale || result.items.length === 0) return
         const current = readCache(activeWorkspaceId)
+        const locallyDeletedIds = new Set(current.locallyDeletedIds ?? [])
         const itemsById = { ...current.itemsById }
         const listOrder = [...current.listOrder]
         for (const item of result.items) {
+          if (locallyDeletedIds.has(item.sourceItemId)) continue
           itemsById[item.sourceItemId] = item
           if (!listOrder.includes(item.sourceItemId)) listOrder.unshift(item.sourceItemId)
         }
@@ -1392,6 +1388,7 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
     try {
       const current = readCache(activeWorkspaceId)
       const itemsById = { ...current.itemsById }
+      const locallyDeletedIds = new Set(current.locallyDeletedIds ?? [])
       const syncedIds: string[] = []
       const syncedIdSet = new Set<string>()
       let total: number | undefined
@@ -1420,6 +1417,7 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
         total = result.total ?? total
         for (const liveItem of result.items) {
           const existing = itemsById[liveItem.sourceItemId]
+          if (!existing && locallyDeletedIds.has(liveItem.sourceItemId)) continue
           const launched = isLaunchedStatus(liveItem.status)
           if (launched && !existing) continue
 
