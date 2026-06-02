@@ -47,7 +47,19 @@ describe('tapd-requirement-helpers', () => {
     expect(suggestTapdGroupName(item({ title: 'TAPD-123456 - Feed Detail Performance Requirement' }))).toBe('Feed Detail')
   })
 
-  it('prefers profiles named Tapd before skill/source fallback', () => {
+  it('prefers the generic niuma agent over older Tapd-named profiles', () => {
+    const niuma = agent({
+      id: 'niu-ma',
+      name: 'niuma',
+      skillSlugs: ['grill-with-docs'],
+      sourceSlugs: ['tapd-mcp-http'],
+    })
+    const named = agent({ id: 'qqnews-implementation', name: 'Tapd' })
+
+    expect(resolveDefaultTapdAgent([named, niuma])?.id).toBe('niu-ma')
+  })
+
+  it('prefers profiles named Tapd when niuma is unavailable', () => {
     const fallback = agent({
       id: 'planner',
       name: 'Planner',

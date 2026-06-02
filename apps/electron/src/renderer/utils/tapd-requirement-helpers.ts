@@ -197,7 +197,21 @@ export function suggestTapdGroupName(item: Pick<ExternalRequirementItem, 'title'
   return clampDisplayChars(compact || stripped || fallback)
 }
 
+function hasTapdAgentCapabilities(agent: AgentProfile): boolean {
+  const skillSlugs = agent.skillSlugs ?? []
+  const sourceSlugs = agent.sourceSlugs ?? []
+  return skillSlugs.includes(TAPD_REVIEW_SKILL_SLUG) && sourceSlugs.includes(TAPD_SOURCE_SLUG)
+}
+
+function isGenericNiumaAgent(agent: AgentProfile): boolean {
+  const normalize = (value: string) => value.toLowerCase().replace(/[\s_-]+/g, '')
+  return normalize(agent.id) === 'niuma' || normalize(agent.name) === 'niuma'
+}
+
 export function resolveDefaultTapdAgent(agents: readonly AgentProfile[]): AgentProfile | null {
+  const genericNiuma = agents.find(agent => isGenericNiumaAgent(agent) && hasTapdAgentCapabilities(agent))
+  if (genericNiuma) return genericNiuma
+
   const byName = agents.find(agent => {
     const id = agent.id.toLowerCase()
     const name = agent.name.toLowerCase()
@@ -205,11 +219,7 @@ export function resolveDefaultTapdAgent(agents: readonly AgentProfile[]): AgentP
   })
   if (byName) return byName
 
-  return agents.find(agent => {
-    const skillSlugs = agent.skillSlugs ?? []
-    const sourceSlugs = agent.sourceSlugs ?? []
-    return skillSlugs.includes(TAPD_REVIEW_SKILL_SLUG) && sourceSlugs.includes(TAPD_SOURCE_SLUG)
-  }) ?? null
+  return agents.find(hasTapdAgentCapabilities) ?? null
 }
 
 export function getTapdRequirementAgentTask(taskId: TapdRequirementAgentTaskId): TapdRequirementAgentTask {
