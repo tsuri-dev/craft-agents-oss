@@ -232,6 +232,8 @@ interface TapdHomeUiState {
   filters?: TapdHomeFilters
   collapsedStatuses?: string[]
   expandedDefaultCollapsedStatuses?: string[]
+  statusOrder?: string[]
+  itemOrder?: string[]
   tabs?: TapdOpenRequirementTab[]
 }
 
@@ -243,6 +245,24 @@ const TAPD_STATUS_ORDER = ['in progress', '开发中', '进行中', 'todo', 'bac
 const TAPD_HOME_CACHE_TTL_MS = 30 * 60 * 1000
 const TAPD_SYNC_PAGE_LIMIT = 100
 const TAPD_SYNC_MAX_PAGES = 50
+const TAPD_SYNC_PAGE_TIMEOUT_MS = 25_000
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return new Promise<T>((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${(timeoutMs / 1000).toFixed(0)}s`)), timeoutMs)
+    promise.then(
+      value => {
+        if (timer) clearTimeout(timer)
+        resolve(value)
+      },
+      error => {
+        if (timer) clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
 
 function tapdUiStorageKey(workspaceId?: string | null) {
   return `craft.tapd-plugin.ui.${workspaceId ?? 'default'}.v${TAPD_UI_STORAGE_VERSION}`
@@ -286,6 +306,8 @@ function readTapdHomeUiState(workspaceId?: string | null): TapdHomeUiState {
       filters: normalizeTapdHomeFilters(parsed.filters, legacyStatusFilter),
       collapsedStatuses: normalizeStringArray(parsed.collapsedStatuses),
       expandedDefaultCollapsedStatuses: normalizeStringArray(parsed.expandedDefaultCollapsedStatuses),
+      statusOrder: normalizeStringArray(parsed.statusOrder),
+      itemOrder: normalizeStringArray(parsed.itemOrder),
       tabs: Array.isArray(parsed.tabs)
         ? parsed.tabs
           .filter(tab => typeof tab?.sourceItemId === 'string' && tab.sourceItemId.trim())
@@ -362,6 +384,51 @@ function sortStatusLabels(statuses: string[]) {
     if (rank !== 0) return rank
     return a.localeCompare(b)
   })
+}
+
+function applyManualStatusOrder(statuses: string[], statusOrder: readonly string[]) {
+  const existing = new Set(statuses)
+  const ordered = statusOrder.filter(status => existing.has(status))
+  const orderedSet = new Set(ordered)
+  return [...ordered, ...statuses.filter(status => !orderedSet.has(status))]
+}
+
+function getRequirementModifiedTime(item: ExternalRequirementItem) {
+  const candidates = [item.updatedAt, item.dueAt, item.createdAt]
+  for (const value of candidates) {
+    if (!value) continue
+    const parsed = Date.parse(value.replace(' ', 'T'))
+    if (Number.isFinite(parsed)) return parsed
+  }
+  const bindingUpdatedAt = item.binding?.updatedAt
+  if (bindingUpdatedAt) {
+    const parsed = Date.parse(String(bindingUpdatedAt))
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
+}
+
+function applyManualItemOrder(items: ExternalRequirementItem[], itemOrder: readonly string[]) {
+  const orderIndex = new Map(itemOrder.map((id, index) => [id, index]))
+  return [...items].sort((a, b) => {
+    const aIndex = orderIndex.get(a.sourceItemId)
+    const bIndex = orderIndex.get(b.sourceItemId)
+    if (aIndex !== undefined || bIndex !== undefined) {
+      if (aIndex === undefined) return 1
+      if (bIndex === undefined) return -1
+      return aIndex - bIndex
+    }
+    return getRequirementModifiedTime(b) - getRequirementModifiedTime(a)
+  })
+}
+
+function moveArrayValue(values: string[], fromValue: string, toValue: string) {
+  if (fromValue === toValue) return values
+  const next = values.filter(value => value !== fromValue)
+  const targetIndex = next.indexOf(toValue)
+  if (targetIndex < 0) return values
+  next.splice(targetIndex, 0, fromValue)
+  return next
 }
 
 function getStatusPresentation(status: string): { Icon: React.ElementType; icon: string; ring: string; column: string; text: string } {
@@ -800,18 +867,38 @@ interface IssueItemProps {
   item: ExternalRequirementItem
   labels: string[]
   syncing?: boolean
+  dragging?: boolean
   onOpen: (item: ExternalRequirementItem) => void
   onSync: (item: ExternalRequirementItem) => void
   onDelete: (item: ExternalRequirementItem) => void
+  onDragStart: (item: ExternalRequirementItem) => void
+  onDrop: (item: ExternalRequirementItem) => void
+  onDragEnd: () => void
 }
 
-function IssueRow({ item, labels, syncing, onOpen, onSync, onDelete }: IssueItemProps) {
+function IssueRow({ item, labels, syncing, dragging, onOpen, onSync, onDelete, onDragStart, onDrop, onDragEnd }: IssueItemProps) {
   const assignee = item.assignees?.[0]
   const expectedTestTimeRaw = getExpectedTestTime(item)
   return (
     <div
       role="button"
       tabIndex={0}
+      draggable
+      onDragStart={event => {
+        event.stopPropagation()
+        event.dataTransfer.effectAllowed = 'move'
+        onDragStart(item)
+      }}
+      onDragOver={event => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+      }}
+      onDrop={event => {
+        event.preventDefault()
+        event.stopPropagation()
+        onDrop(item)
+      }}
+      onDragEnd={onDragEnd}
       onClick={() => onOpen(item)}
       onKeyDown={event => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -819,9 +906,9 @@ function IssueRow({ item, labels, syncing, onOpen, onSync, onDelete }: IssueItem
           onOpen(item)
         }
       }}
-      className="group grid h-11 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[10px] px-4 text-left transition-colors hover:bg-foreground/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35"
+      className={cn('group grid h-11 w-full cursor-grab grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[10px] px-4 text-left transition-colors hover:bg-foreground/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35 active:cursor-grabbing', dragging && 'opacity-45')}
     >
-      <div className="min-w-0 truncate text-[14px] font-medium text-foreground" title={item.title}>{item.title}</div>
+      <div className="min-w-0 truncate text-[14px] font-normal text-foreground" title={item.title}>{item.title}</div>
       <div className="flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap text-[12px] text-muted-foreground" onClick={event => event.stopPropagation()}>
         <PriorityChip priority={item.priority} />
         <ExpectedTestDateChip value={expectedTestTimeRaw} />
@@ -852,27 +939,49 @@ function IssueRow({ item, labels, syncing, onOpen, onSync, onDelete }: IssueItem
   )
 }
 
-function IssueListSection({ status, items, collapsed, labelsById, syncingItemIds, onToggleCollapsed, onOpen, onSync, onDelete }: {
+function IssueListSection({ status, items, collapsed, labelsById, syncingItemIds, draggingStatus, draggingItemId, onToggleCollapsed, onOpen, onSync, onDelete, onStatusDragStart, onStatusDrop, onStatusDragEnd, onItemDragStart, onItemDrop, onItemDragEnd }: {
   status: string
   items: ExternalRequirementItem[]
   collapsed: boolean
   labelsById: Record<string, string[]>
   syncingItemIds: ReadonlySet<string>
+  draggingStatus: string | null
+  draggingItemId: string | null
   onToggleCollapsed: (status: string) => void
   onOpen: (item: ExternalRequirementItem) => void
   onSync: (item: ExternalRequirementItem) => void
   onDelete: (item: ExternalRequirementItem) => void
+  onStatusDragStart: (status: string) => void
+  onStatusDrop: (status: string) => void
+  onStatusDragEnd: () => void
+  onItemDragStart: (item: ExternalRequirementItem) => void
+  onItemDrop: (item: ExternalRequirementItem, status: string) => void
+  onItemDragEnd: () => void
 }) {
   return (
     <section className="rounded-[14px]">
       <button
         type="button"
+        draggable
+        onDragStart={event => {
+          event.dataTransfer.effectAllowed = 'move'
+          onStatusDragStart(status)
+        }}
+        onDragOver={event => {
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+        }}
+        onDrop={event => {
+          event.preventDefault()
+          onStatusDrop(status)
+        }}
+        onDragEnd={onStatusDragEnd}
         onClick={() => onToggleCollapsed(status)}
-        className="flex h-10 w-full items-center gap-2.5 rounded-[12px] bg-foreground/[0.025] px-4 text-left ring-1 ring-foreground/[0.035] transition-colors hover:bg-foreground/[0.04]"
+        className={cn('flex h-10 w-full cursor-grab items-center gap-2.5 rounded-[12px] bg-foreground/[0.025] px-4 text-left ring-1 ring-foreground/[0.035] transition-colors hover:bg-foreground/[0.04] active:cursor-grabbing', draggingStatus === status && 'opacity-45')}
       >
         <ChevronRight className={cn('h-3.5 w-3.5 text-muted-foreground transition-transform', !collapsed && 'rotate-90')} />
         <IssueStatusIcon status={status} size="sm" />
-        <span className="text-[16px] font-normal text-foreground">{status}</span>
+        <span className="text-[14px] font-semibold text-foreground">{status}</span>
         <span className="font-mono text-[13px] text-muted-foreground tabular-nums">{items.length}</span>
       </button>
       {!collapsed && (items.length === 0 ? (
@@ -885,9 +994,13 @@ function IssueListSection({ status, items, collapsed, labelsById, syncingItemIds
               item={item}
               labels={labelsById[item.sourceItemId] ?? []}
               syncing={syncingItemIds.has(item.sourceItemId)}
+              dragging={draggingItemId === item.sourceItemId}
               onOpen={onOpen}
               onSync={onSync}
               onDelete={onDelete}
+              onDragStart={onItemDragStart}
+              onDrop={dropItem => onItemDrop(dropItem, status)}
+              onDragEnd={onItemDragEnd}
             />
           ))}
         </div>
@@ -896,11 +1009,29 @@ function IssueListSection({ status, items, collapsed, labelsById, syncingItemIds
   )
 }
 
-function BoardIssueCard({ item, labels, syncing, onOpen, onSync, onDelete }: IssueItemProps) {
+function BoardIssueCard({ item, labels, syncing, dragging, onOpen, onSync, onDelete, onDragStart, onDrop, onDragEnd }: IssueItemProps) {
   const assignee = item.assignees?.[0]
   const expectedTestTimeRaw = getExpectedTestTime(item)
   return (
-    <div className="group w-full rounded-[14px] bg-background p-4 text-left shadow-sm ring-1 ring-foreground/[0.08] transition-[transform,box-shadow] hover:-translate-y-0.5 hover:shadow-md focus-within:ring-2 focus-within:ring-accent/40">
+    <div
+      draggable
+      onDragStart={event => {
+        event.stopPropagation()
+        event.dataTransfer.effectAllowed = 'move'
+        onDragStart(item)
+      }}
+      onDragOver={event => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+      }}
+      onDrop={event => {
+        event.preventDefault()
+        event.stopPropagation()
+        onDrop(item)
+      }}
+      onDragEnd={onDragEnd}
+      className={cn('group w-full cursor-grab rounded-[14px] bg-background p-4 text-left shadow-sm ring-1 ring-foreground/[0.08] transition-[transform,box-shadow] hover:-translate-y-0.5 hover:shadow-md focus-within:ring-2 focus-within:ring-accent/40 active:cursor-grabbing', dragging && 'opacity-45')}
+    >
       <button type="button" onClick={() => onOpen(item)} className="block w-full text-left focus-visible:outline-none">
         <h3 className="line-clamp-2 text-[15px] font-semibold leading-5 text-foreground">{item.title}</h3>
         {item.summary && <p className="mt-2 line-clamp-2 text-[13px] leading-5 text-muted-foreground">{item.summary}</p>}
@@ -934,20 +1065,44 @@ function BoardIssueCard({ item, labels, syncing, onOpen, onSync, onDelete }: Iss
   )
 }
 
-function IssueBoardColumn({ status, items, collapsed, labelsById, syncingItemIds, onToggleCollapsed, onOpen, onSync, onDelete }: {
+function IssueBoardColumn({ status, items, collapsed, labelsById, syncingItemIds, draggingStatus, draggingItemId, onToggleCollapsed, onOpen, onSync, onDelete, onStatusDragStart, onStatusDrop, onStatusDragEnd, onItemDragStart, onItemDrop, onItemDragEnd }: {
   status: string
   items: ExternalRequirementItem[]
   collapsed: boolean
   labelsById: Record<string, string[]>
   syncingItemIds: ReadonlySet<string>
+  draggingStatus: string | null
+  draggingItemId: string | null
   onToggleCollapsed: (status: string) => void
   onOpen: (item: ExternalRequirementItem) => void
   onSync: (item: ExternalRequirementItem) => void
   onDelete: (item: ExternalRequirementItem) => void
+  onStatusDragStart: (status: string) => void
+  onStatusDrop: (status: string) => void
+  onStatusDragEnd: () => void
+  onItemDragStart: (item: ExternalRequirementItem) => void
+  onItemDrop: (item: ExternalRequirementItem, status: string) => void
+  onItemDragEnd: () => void
 }) {
   const presentation = getStatusPresentation(status)
   return (
-    <section className={cn('flex h-full min-h-[520px] shrink-0 flex-col rounded-[18px] p-4 transition-[width]', collapsed ? 'w-[220px]' : 'w-[310px]', presentation.column)}>
+    <section
+      draggable
+      onDragStart={event => {
+        event.dataTransfer.effectAllowed = 'move'
+        onStatusDragStart(status)
+      }}
+      onDragOver={event => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+      }}
+      onDrop={event => {
+        event.preventDefault()
+        onStatusDrop(status)
+      }}
+      onDragEnd={onStatusDragEnd}
+      className={cn('flex h-full min-h-[520px] shrink-0 cursor-grab flex-col rounded-[18px] p-4 transition-[width] active:cursor-grabbing', collapsed ? 'w-[220px]' : 'w-[310px]', presentation.column, draggingStatus === status && 'opacity-45')}
+    >
       <div className="mb-4 flex h-7 items-center gap-2 px-1">
         <button type="button" onClick={() => onToggleCollapsed(status)} className="rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground" aria-label={collapsed ? 'Expand column' : 'Collapse column'}>
           <ChevronRight className={cn('h-4 w-4 transition-transform', !collapsed && 'rotate-90')} />
@@ -969,9 +1124,13 @@ function IssueBoardColumn({ status, items, collapsed, labelsById, syncingItemIds
               item={item}
               labels={labelsById[item.sourceItemId] ?? []}
               syncing={syncingItemIds.has(item.sourceItemId)}
+              dragging={draggingItemId === item.sourceItemId}
               onOpen={onOpen}
               onSync={onSync}
               onDelete={onDelete}
+              onDragStart={onItemDragStart}
+              onDrop={dropItem => onItemDrop(dropItem, status)}
+              onDragEnd={onItemDragEnd}
             />
           ))}
         </div>
@@ -1147,6 +1306,10 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
   const [filters, setFilters] = React.useState<TapdHomeFilters>(() => initialUiState.filters ?? EMPTY_TAPD_HOME_FILTERS)
   const [collapsedStatuses, setCollapsedStatuses] = React.useState<Set<string>>(() => new Set(initialUiState.collapsedStatuses ?? []))
   const [expandedDefaultCollapsedStatuses, setExpandedDefaultCollapsedStatuses] = React.useState<Set<string>>(() => new Set(initialUiState.expandedDefaultCollapsedStatuses ?? []))
+  const [statusOrder, setStatusOrder] = React.useState<string[]>(() => initialUiState.statusOrder ?? [])
+  const [itemOrder, setItemOrder] = React.useState<string[]>(() => initialUiState.itemOrder ?? [])
+  const [draggingStatus, setDraggingStatus] = React.useState<string | null>(null)
+  const [draggingItemId, setDraggingItemId] = React.useState<string | null>(null)
   const [syncingHome, setSyncingHome] = React.useState(false)
   const [syncingRequirementIds, setSyncingRequirementIds] = React.useState<Set<string>>(() => new Set())
   const [labelStore, setLabelStore] = React.useState<TapdRequirementLabelStore>(() => readTapdRequirementLabelStore(activeWorkspaceId))
@@ -1155,16 +1318,16 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
 
   const plugin = plugins.find(item => item.id === TAPD_PLUGIN_ID)
   const connected = plugin?.connectionStatus === 'connected'
-  const allItems = React.useMemo(() => getCachedItems(cache), [cache])
+  const allItems = React.useMemo(() => applyManualItemOrder(getCachedItems(cache), itemOrder), [cache, itemOrder])
   const tapdWorkspaceId = React.useMemo(() => allItems.map(getTapdWorkspaceIdFromItem).find((value): value is string => Boolean(value)), [allItems])
-  const statusLabels = React.useMemo(() => sortStatusLabels(Array.from(new Set(allItems.map(getIssueStatusLabel)))), [allItems])
+  const statusLabels = React.useMemo(() => applyManualStatusOrder(sortStatusLabels(Array.from(new Set(allItems.map(getIssueStatusLabel)))), statusOrder), [allItems, statusOrder])
   const priorityOptions = React.useMemo(() => getUniqueSortedValues(allItems.map(item => item.priority ?? 'No priority')), [allItems])
   const creatorOptions = React.useMemo(() => getUniqueSortedValues(allItems.map(item => item.creator ?? 'No creator')), [allItems])
   const visibleItems = React.useMemo(() => applyTapdHomeFilters(allItems, filters), [allItems, filters])
   const visibleStatuses = React.useMemo(() => {
-    if (filters.status.length > 0) return sortStatusLabels(filters.status)
-    return sortStatusLabels(Array.from(new Set(visibleItems.map(getIssueStatusLabel))))
-  }, [filters.status, visibleItems])
+    if (filters.status.length > 0) return applyManualStatusOrder(sortStatusLabels(filters.status), statusOrder)
+    return applyManualStatusOrder(sortStatusLabels(Array.from(new Set(visibleItems.map(getIssueStatusLabel)))), statusOrder)
+  }, [filters.status, statusOrder, visibleItems])
   const groupedItems = React.useMemo(() => groupRequirementsByStatus(visibleItems, visibleStatuses), [visibleItems, visibleStatuses])
   const labelsById = React.useMemo(() => Object.fromEntries(Object.entries(labelStore.labelsByRequirement).map(([sourceItemId, labels]) => [sourceItemId, labels.map(label => label.name)])), [labelStore.labelsByRequirement])
   const workingCount = React.useMemo(() => visibleItems.filter(item => isInProgressStatus(getIssueStatusLabel(item))).length, [visibleItems])
@@ -1177,6 +1340,46 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
   const refreshRequirementLabels = React.useCallback(() => {
     setLabelStore(readTapdRequirementLabelStore(activeWorkspaceId))
   }, [activeWorkspaceId])
+
+  const reorderStatus = React.useCallback((fromStatus: string, toStatus: string) => {
+    if (fromStatus === toStatus) return
+    setStatusOrder(current => {
+      const orderedCurrent = applyManualStatusOrder(statusLabels, current)
+      const reordered = moveArrayValue(orderedCurrent, fromStatus, toStatus)
+      const next = [...reordered, ...current.filter(status => !reordered.includes(status))]
+      writeTapdHomeUiState(activeWorkspaceId, { statusOrder: next })
+      return next
+    })
+  }, [activeWorkspaceId, statusLabels])
+
+  const reorderRequirementItem = React.useCallback((fromSourceItemId: string, toSourceItemId: string, status: string) => {
+    if (fromSourceItemId === toSourceItemId) return
+    const fromItem = cache.itemsById[fromSourceItemId]
+    const toItem = cache.itemsById[toSourceItemId]
+    if (!fromItem || !toItem) return
+    if (getIssueStatusLabel(fromItem) !== status || getIssueStatusLabel(toItem) !== status) return
+    setItemOrder(current => {
+      const baseOrder = applyManualItemOrder(allItems, current).map(item => item.sourceItemId)
+      const reordered = moveArrayValue(baseOrder, fromSourceItemId, toSourceItemId)
+      writeTapdHomeUiState(activeWorkspaceId, { itemOrder: reordered })
+      return reordered
+    })
+  }, [activeWorkspaceId, allItems, cache.itemsById])
+
+  const handleStatusDrop = React.useCallback((targetStatus: string) => {
+    if (draggingStatus) reorderStatus(draggingStatus, targetStatus)
+    setDraggingStatus(null)
+  }, [draggingStatus, reorderStatus])
+
+  const handleItemDrop = React.useCallback((targetItem: ExternalRequirementItem, status: string) => {
+    if (draggingItemId) reorderRequirementItem(draggingItemId, targetItem.sourceItemId, status)
+    setDraggingItemId(null)
+  }, [draggingItemId, reorderRequirementItem])
+
+  const handleDragEnd = React.useCallback(() => {
+    setDraggingStatus(null)
+    setDraggingItemId(null)
+  }, [])
 
   const deleteLocalRequirement = React.useCallback(async (item: ExternalRequirementItem) => {
     if (!activeWorkspaceId) return
@@ -1255,6 +1458,10 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
     setFilters(stored.filters ?? EMPTY_TAPD_HOME_FILTERS)
     setCollapsedStatuses(new Set(stored.collapsedStatuses ?? []))
     setExpandedDefaultCollapsedStatuses(new Set(stored.expandedDefaultCollapsedStatuses ?? []))
+    setStatusOrder(stored.statusOrder ?? [])
+    setItemOrder(stored.itemOrder ?? [])
+    setDraggingStatus(null)
+    setDraggingItemId(null)
     setLabelStore(readTapdRequirementLabelStore(activeWorkspaceId))
     setOpenTabs(stored.tabs ?? [])
     setActiveTabId(initialSourceItemId ?? TAPD_HOME_TAB_ID)
@@ -1391,21 +1598,24 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
       const locallyDeletedIds = new Set(current.locallyDeletedIds ?? [])
       const syncedIds: string[] = []
       const syncedIdSet = new Set<string>()
+      const seenLiveIds = new Set<string>()
       let total: number | undefined
       let page = 1
       let pageCount = 0
       let hasMore = true
+      let safeForMissingDeletion = true
+      let stoppedEarlyReason: string | null = null
       let markedDeleted = 0
       let autoDeleted = 0
 
       while (hasMore && page <= TAPD_SYNC_MAX_PAGES) {
         const pageStartedAt = Date.now()
-        const result = await window.electronAPI.listRequirementItems(activeWorkspaceId, TAPD_PLUGIN_ID, {
+        const result = await withTimeout(window.electronAPI.listRequirementItems(activeWorkspaceId, TAPD_PLUGIN_ID, {
           workspaceId: tapdWorkspaceId,
           page,
           limit: TAPD_SYNC_PAGE_LIMIT,
-          skipCount: page > 1,
-        })
+          skipCount: true,
+        }), TAPD_SYNC_PAGE_TIMEOUT_MS, `TAPD sync page ${page}`)
         pageCount += 1
         console.info('[TAPD] Home sync page finished', {
           page,
@@ -1415,6 +1625,19 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
           durationMs: Date.now() - pageStartedAt,
         })
         total = result.total ?? total
+        const pageIds = result.items.map(item => item.sourceItemId).filter(Boolean)
+        const repeatedPage = pageIds.length > 0 && pageIds.every(sourceItemId => seenLiveIds.has(sourceItemId))
+        if (repeatedPage) {
+          safeForMissingDeletion = false
+          stoppedEarlyReason = `page ${page} repeated previously synced items`
+          hasMore = false
+          break
+        }
+        if (result.items.length === 0) {
+          hasMore = false
+          break
+        }
+        for (const sourceItemId of pageIds) seenLiveIds.add(sourceItemId)
         for (const liveItem of result.items) {
           const existing = itemsById[liveItem.sourceItemId]
           if (!existing && locallyDeletedIds.has(liveItem.sourceItemId)) continue
@@ -1433,11 +1656,15 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
           syncedIds.push(nextItem.sourceItemId)
           syncedIdSet.add(nextItem.sourceItemId)
         }
-        hasMore = result.hasMore === true
+        hasMore = result.hasMore === true && result.items.length >= TAPD_SYNC_PAGE_LIMIT
         page += 1
       }
+      if (hasMore && page > TAPD_SYNC_MAX_PAGES) {
+        safeForMissingDeletion = false
+        stoppedEarlyReason = `reached max page limit (${TAPD_SYNC_MAX_PAGES})`
+      }
 
-      const syncComplete = !hasMore
+      const syncComplete = !hasMore && safeForMissingDeletion
       if (syncComplete) {
         let allRuns: AgentRun[] | null = null
         const getAllRuns = async () => {
@@ -1478,7 +1705,7 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
           itemsById[sourceItemId] = deletedItem
         }
       } else {
-        console.warn('[TAPD] Home sync stopped before exhausting all pages; skipping missing-item deletion pass.', { pageCount, maxPages: TAPD_SYNC_MAX_PAGES })
+        console.warn('[TAPD] Home sync stopped before exhausting all pages; skipping missing-item deletion pass.', { pageCount, maxPages: TAPD_SYNC_MAX_PAGES, reason: stoppedEarlyReason })
       }
 
       const listOrder = [
@@ -1498,7 +1725,7 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
       setCache(next)
       refreshRequirementLabels()
       const durationMs = Date.now() - startedAt
-      console.info('[TAPD] Home sync finished', { pageCount, updated: syncedIds.length, markedDeleted, autoDeleted, durationMs })
+      console.info('[TAPD] Home sync finished', { pageCount, updated: syncedIds.length, markedDeleted, autoDeleted, durationMs, stoppedEarlyReason })
       if (options?.manual) {
         const deletedSummary = markedDeleted || autoDeleted ? ` · ${markedDeleted} marked deleted · ${autoDeleted} auto-deleted` : ''
         toast.success('TAPD requirements synced', { description: `${syncedIds.length} updated${deletedSummary} · ${(durationMs / 1000).toFixed(1)}s` })
@@ -1786,10 +2013,18 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
                       collapsed={collapsedStatuses.has(group.status)}
                       labelsById={labelsById}
                       syncingItemIds={syncingRequirementIds}
+                      draggingStatus={draggingStatus}
+                      draggingItemId={draggingItemId}
                       onToggleCollapsed={toggleStatusCollapsed}
                       onOpen={item => openRequirementTab(item.sourceItemId)}
                       onSync={syncRequirementItem}
                       onDelete={deleteLocalRequirement}
+                      onStatusDragStart={setDraggingStatus}
+                      onStatusDrop={handleStatusDrop}
+                      onStatusDragEnd={handleDragEnd}
+                      onItemDragStart={item => setDraggingItemId(item.sourceItemId)}
+                      onItemDrop={handleItemDrop}
+                      onItemDragEnd={handleDragEnd}
                     />
                   ))}
                 </div>
@@ -1805,10 +2040,18 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
                       collapsed={collapsedStatuses.has(group.status)}
                       labelsById={labelsById}
                       syncingItemIds={syncingRequirementIds}
+                      draggingStatus={draggingStatus}
+                      draggingItemId={draggingItemId}
                       onToggleCollapsed={toggleStatusCollapsed}
                       onOpen={item => openRequirementTab(item.sourceItemId)}
                       onSync={syncRequirementItem}
                       onDelete={deleteLocalRequirement}
+                      onStatusDragStart={setDraggingStatus}
+                      onStatusDrop={handleStatusDrop}
+                      onStatusDragEnd={handleDragEnd}
+                      onItemDragStart={item => setDraggingItemId(item.sourceItemId)}
+                      onItemDrop={handleItemDrop}
+                      onItemDragEnd={handleDragEnd}
                     />
                   ))}
                 </div>
