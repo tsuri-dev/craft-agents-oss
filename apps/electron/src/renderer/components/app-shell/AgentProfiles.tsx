@@ -40,6 +40,7 @@ import { Switch } from '@/components/ui/switch'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { TiptapMarkdownEditor } from '@craft-agent/ui'
+import { AgentAvatar } from '@/components/ui/agent-avatar'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { deriveConnectionStatus } from '@/components/ui/source-status-indicator'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
@@ -823,7 +824,6 @@ function AgentTableRow({
   isLoadingActivity: boolean
   onClick: () => void
 }) {
-  const Icon = agent.icon
   const status = getAgentStatusPresentation(displayStatus)
   const runsLabel = isLoadingActivity && activity.allRuns.length === 0 ? '…' : String(activity.allRuns.length)
 
@@ -834,8 +834,8 @@ function AgentTableRow({
       className="grid w-full grid-cols-[minmax(240px,1.7fr)_120px_140px_minmax(200px,1.2fr)_100px_64px_60px] items-center px-4 py-2 text-left text-sm transition-colors hover:bg-muted/50"
     >
       <div className="flex min-w-0 items-center gap-3">
-        <div className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted">
-          <Icon className="h-4 w-4 text-foreground/80" />
+        <div className="relative shrink-0">
+          <AgentAvatar agent={agent} className="h-7 w-7 rounded-md text-[10px]" />
           <span className={cn('absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-background', status.dot)} />
         </div>
         <div className="min-w-0">
@@ -922,7 +922,6 @@ export function AgentProfilesListPanel({
 }
 
 function AgentProfileRow({ agent, displayStatus, selected, onClick }: { agent: AgentProfileMock; displayStatus: AgentDisplayStatus; selected: boolean; onClick: () => void }) {
-  const Icon = agent.icon
   const status = getAgentStatusPresentation(displayStatus)
   return (
     <button
@@ -934,12 +933,10 @@ function AgentProfileRow({ agent, displayStatus, selected, onClick }: { agent: A
       )}
     >
       <div className="flex min-w-0 items-start gap-2.5">
-        <div className={cn(
-          'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] ring-1 ring-foreground/[0.08]',
-          selected ? 'bg-background' : 'bg-foreground/[0.035]',
-        )}>
-          <Icon className="h-4 w-4 text-foreground/80" />
-        </div>
+        <AgentAvatar agent={agent} className={cn(
+          'mt-0.5 h-8 w-8 rounded-[10px] text-[11px]',
+          selected && 'ring-foreground/[0.18]',
+        )} />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <span className="truncate text-[13px] font-medium">{agent.name}</span>
@@ -1137,7 +1134,6 @@ function AgentDetailInspectorCard({
   usage: AgentUsageSummary
   onProfileUpdate: (patch: NonNullable<AgentProfileUpdateInput['profile']>) => Promise<void>
 }) {
-  const Icon = agent.icon
   const appShell = useOptionalAppShellContext()
   const connectionOptions = React.useMemo(
     () => buildAgentConnectionOptions(appShell?.llmConnections),
@@ -1179,9 +1175,7 @@ function AgentDetailInspectorCard({
   return (
     <aside className="flex w-full flex-col overflow-hidden rounded-lg border border-border bg-background md:h-full md:min-h-0 md:overflow-y-auto">
       <div className="flex flex-col gap-3 border-b border-border px-5 pb-5 pt-5">
-        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-muted">
-          <Icon className="h-7 w-7 text-muted-foreground" />
-        </div>
+        <AgentAvatar agent={agent} className="h-14 w-14 rounded-lg text-lg" />
         <div className="flex flex-col gap-1">
           <AgentNameEditor
             name={profile.name}

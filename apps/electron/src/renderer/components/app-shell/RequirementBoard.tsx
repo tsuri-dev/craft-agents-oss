@@ -19,6 +19,7 @@ import {
   Workflow,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { AgentAvatar } from '@/components/ui/agent-avatar'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -664,14 +665,18 @@ function RunRowActions({ children }: { children: React.ReactNode }) {
 
 function AgentRunRow({
   run,
+  agent,
   onOpenAgent,
   onCancel,
   cancelling,
+  showAgentName = false,
 }: {
   run: AgentRun
+  agent?: AgentProfile | null
   onOpenAgent: () => void
   onCancel: (run: AgentRun) => void
   cancelling: boolean
+  showAgentName?: boolean
 }) {
   const isActive = ACTIVE_AGENT_RUN_STATUSES.has(run.status)
   const status = getRunStatusPresentation(run.status)
@@ -690,10 +695,14 @@ function AgentRunRow({
       }}
       title="Open agent Activity"
     >
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        {isActive ? <span className="h-1.5 w-1.5 rounded-full bg-info animate-pulse" /> : <Bot className="h-3 w-3" />}
+      <span className="relative shrink-0">
+        <AgentAvatar agent={agent ?? { id: run.agentProfileId, name: run.agentProfileId }} className="h-5 w-5 text-[8px]" />
+        {isActive && <span className="absolute -bottom-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-info ring-1 ring-background animate-pulse" />}
       </span>
-      <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-xs text-muted-foreground" style={TRIGGER_MASK_STYLE}>{getRunTitle(run)}</span>
+      <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-xs text-muted-foreground" style={TRIGGER_MASK_STYLE}>
+        {showAgentName && <span className="mr-1 font-medium text-foreground/70">{agent?.name ?? run.agentProfileId}</span>}
+        {getRunTitle(run)}
+      </span>
       <span className="shrink-0 whitespace-nowrap text-xs">
         <span className={status.tone}>{status.label}</span>
         {timestamp && <span className="text-muted-foreground"> · {formatRelativeRequirementTime(timestamp)}</span>}
@@ -722,9 +731,7 @@ function AgentRunRow({
 function AgentStarterRow({ agent, agentName, isWorking, onOpenAgent, onRun }: { agent?: AgentProfile | null; agentName: string; isWorking: boolean; onOpenAgent: () => void; onRun: () => void }) {
   return (
     <div className="group relative flex items-center gap-2 rounded px-1 py-1.5 transition-colors hover:bg-accent/40">
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        <Bot className="h-3 w-3" />
-      </span>
+      <AgentAvatar agent={agent ?? { id: agentName, name: agentName }} className="h-5 w-5 text-[8px]" />
       <button
         type="button"
         className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left text-xs text-muted-foreground hover:text-foreground"
@@ -821,6 +828,7 @@ function ExecutionLogSection({
     }
     return map
   }, [runs])
+  const agentsById = React.useMemo(() => new Map(agents.map(agent => [agent.id, agent])), [agents])
   const openAgentActivity = React.useCallback((agentId?: string) => {
     if (agentId) navigate(routes.view.agents(agentId))
   }, [])
@@ -857,6 +865,7 @@ function ExecutionLogSection({
                   <AgentRunRow
                     key={run.id}
                     run={run}
+                    agent={agent}
                     onOpenAgent={() => openAgentActivity(run.agentProfileId)}
                     onCancel={onCancelRun}
                     cancelling={cancellingRunId === run.id}
@@ -885,9 +894,11 @@ function ExecutionLogSection({
                     <AgentRunRow
                       key={run.id}
                       run={run}
+                      agent={agentsById.get(run.agentProfileId)}
                       onOpenAgent={() => openAgentActivity(run.agentProfileId)}
                       onCancel={onCancelRun}
                       cancelling={false}
+                      showAgentName
                     />
                   ))}
                 </div>
