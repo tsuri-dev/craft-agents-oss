@@ -1,4 +1,5 @@
 import * as React from 'react'
+import mediumZoom from 'medium-zoom'
 import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
@@ -507,7 +508,7 @@ function PriorityChip({ priority }: { priority?: string }) {
   const label = normalizePriorityLabel(priority)
   if (!label) return null
   return (
-    <span className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-foreground/[0.045] px-2 text-[12px] font-medium text-foreground/70 dark:bg-foreground/[0.07] dark:text-foreground/75">
+    <span className="inline-flex h-5 shrink-0 items-center gap-1.5 text-[12px] font-normal text-muted-foreground">
       <PriorityIcon priority={label} />
       <span>{label}</span>
     </span>
@@ -520,7 +521,7 @@ function ExpectedTestDateChip({ value }: { value?: string }) {
   const overdue = isRequirementDateOverdue(value)
   const Icon = overdue ? CalendarX2 : CalendarDays
   return (
-    <span className={cn('inline-flex h-6 shrink-0 items-center gap-1.5 text-[12px] font-medium', overdue ? 'text-destructive' : 'text-muted-foreground')}>
+    <span className={cn('inline-flex h-5 shrink-0 items-center gap-1.5 text-[12px] font-normal', overdue ? 'text-destructive' : 'text-muted-foreground')}>
       <Icon className="h-4 w-4" />
       <span>{text}</span>
     </span>
@@ -689,12 +690,13 @@ function RequirementTabStrip({
   )
 }
 
-function IssueStatusIcon({ status }: { status: string }) {
+function IssueStatusIcon({ status, size = 'md' }: { status: string; size?: 'sm' | 'md' }) {
   const presentation = getStatusPresentation(status)
   const Icon = presentation.Icon
+  const compact = size === 'sm'
   return (
-    <span className={cn('inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full', presentation.icon)}>
-      <Icon className="h-4 w-4" strokeWidth={2.35} />
+    <span className={cn('inline-flex shrink-0 items-center justify-center rounded-full', compact ? 'h-4 w-4' : 'h-5 w-5', presentation.icon)}>
+      <Icon className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} strokeWidth={2.25} />
     </span>
   )
 }
@@ -797,11 +799,13 @@ function TapdRequirementLabelEditor({ labels, recentLabels = [], onAddLabel, onR
 interface IssueItemProps {
   item: ExternalRequirementItem
   labels: string[]
+  syncing?: boolean
   onOpen: (item: ExternalRequirementItem) => void
+  onSync: (item: ExternalRequirementItem) => void
   onDelete: (item: ExternalRequirementItem) => void
 }
 
-function IssueRow({ item, labels, onOpen, onDelete }: IssueItemProps) {
+function IssueRow({ item, labels, syncing, onOpen, onSync, onDelete }: IssueItemProps) {
   const assignee = item.assignees?.[0]
   const expectedTestTimeRaw = getExpectedTestTime(item)
   const deleted = isDeletedStatus(item.status)
@@ -824,6 +828,16 @@ function IssueRow({ item, labels, onOpen, onDelete }: IssueItemProps) {
         <ExpectedTestDateChip value={expectedTestTimeRaw} />
         <TapdRequirementLabels labels={labels} />
         {assignee && <span className="hidden max-w-[120px] truncate sm:inline">{assignee}</span>}
+        <button
+          type="button"
+          onClick={() => onSync(item)}
+          disabled={syncing}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
+          aria-label="Sync requirement"
+          title="Sync requirement"
+        >
+          {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+        </button>
         {deleted && (
           <button
             type="button"
@@ -841,13 +855,15 @@ function IssueRow({ item, labels, onOpen, onDelete }: IssueItemProps) {
   )
 }
 
-function IssueListSection({ status, items, collapsed, labelsById, onToggleCollapsed, onOpen, onDelete }: {
+function IssueListSection({ status, items, collapsed, labelsById, syncingItemIds, onToggleCollapsed, onOpen, onSync, onDelete }: {
   status: string
   items: ExternalRequirementItem[]
   collapsed: boolean
   labelsById: Record<string, string[]>
+  syncingItemIds: ReadonlySet<string>
   onToggleCollapsed: (status: string) => void
   onOpen: (item: ExternalRequirementItem) => void
+  onSync: (item: ExternalRequirementItem) => void
   onDelete: (item: ExternalRequirementItem) => void
 }) {
   return (
@@ -855,12 +871,12 @@ function IssueListSection({ status, items, collapsed, labelsById, onToggleCollap
       <button
         type="button"
         onClick={() => onToggleCollapsed(status)}
-        className="flex h-11 w-full items-center gap-3 rounded-[12px] bg-foreground/[0.025] px-4 text-left ring-1 ring-foreground/[0.035] transition-colors hover:bg-foreground/[0.04]"
+        className="flex h-10 w-full items-center gap-2.5 rounded-[12px] bg-foreground/[0.025] px-4 text-left ring-1 ring-foreground/[0.035] transition-colors hover:bg-foreground/[0.04]"
       >
-        <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform', !collapsed && 'rotate-90')} />
-        <IssueStatusIcon status={status} />
-        <span className="font-semibold text-foreground">{status}</span>
-        <span className="font-mono text-sm text-muted-foreground tabular-nums">{items.length}</span>
+        <ChevronRight className={cn('h-3.5 w-3.5 text-muted-foreground transition-transform', !collapsed && 'rotate-90')} />
+        <IssueStatusIcon status={status} size="sm" />
+        <span className="text-[16px] font-normal text-foreground">{status}</span>
+        <span className="font-mono text-[13px] text-muted-foreground tabular-nums">{items.length}</span>
       </button>
       {!collapsed && (items.length === 0 ? (
         <div className="flex h-24 items-center justify-center text-[14px] text-muted-foreground">No issues</div>
@@ -871,7 +887,9 @@ function IssueListSection({ status, items, collapsed, labelsById, onToggleCollap
               key={item.sourceItemId}
               item={item}
               labels={labelsById[item.sourceItemId] ?? []}
+              syncing={syncingItemIds.has(item.sourceItemId)}
               onOpen={onOpen}
+              onSync={onSync}
               onDelete={onDelete}
             />
           ))}
@@ -881,7 +899,7 @@ function IssueListSection({ status, items, collapsed, labelsById, onToggleCollap
   )
 }
 
-function BoardIssueCard({ item, labels, onOpen, onDelete }: IssueItemProps) {
+function BoardIssueCard({ item, labels, syncing, onOpen, onSync, onDelete }: IssueItemProps) {
   const assignee = item.assignees?.[0]
   const expectedTestTimeRaw = getExpectedTestTime(item)
   const deleted = isDeletedStatus(item.status)
@@ -896,11 +914,21 @@ function BoardIssueCard({ item, labels, onOpen, onDelete }: IssueItemProps) {
         <PriorityChip priority={item.priority} />
         <ExpectedTestDateChip value={expectedTestTimeRaw} />
         <TapdRequirementLabels labels={labels} />
+        <button
+          type="button"
+          onClick={() => onSync(item)}
+          disabled={syncing}
+          className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-[8px] text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
+          aria-label="Sync requirement"
+          title="Sync requirement"
+        >
+          {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+        </button>
         {deleted && (
           <button
             type="button"
             onClick={() => onDelete(item)}
-            className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-[8px] text-destructive opacity-70 transition-opacity hover:bg-destructive/10 hover:opacity-100"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-[8px] text-destructive opacity-70 transition-opacity hover:bg-destructive/10 hover:opacity-100"
             aria-label="Delete local requirement"
             title="Delete local requirement"
           >
@@ -912,13 +940,15 @@ function BoardIssueCard({ item, labels, onOpen, onDelete }: IssueItemProps) {
   )
 }
 
-function IssueBoardColumn({ status, items, collapsed, labelsById, onToggleCollapsed, onOpen, onDelete }: {
+function IssueBoardColumn({ status, items, collapsed, labelsById, syncingItemIds, onToggleCollapsed, onOpen, onSync, onDelete }: {
   status: string
   items: ExternalRequirementItem[]
   collapsed: boolean
   labelsById: Record<string, string[]>
+  syncingItemIds: ReadonlySet<string>
   onToggleCollapsed: (status: string) => void
   onOpen: (item: ExternalRequirementItem) => void
+  onSync: (item: ExternalRequirementItem) => void
   onDelete: (item: ExternalRequirementItem) => void
 }) {
   const presentation = getStatusPresentation(status)
@@ -944,7 +974,9 @@ function IssueBoardColumn({ status, items, collapsed, labelsById, onToggleCollap
               key={item.sourceItemId}
               item={item}
               labels={labelsById[item.sourceItemId] ?? []}
+              syncing={syncingItemIds.has(item.sourceItemId)}
               onOpen={onOpen}
+              onSync={onSync}
               onDelete={onDelete}
             />
           ))}
@@ -1122,6 +1154,7 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
   const [collapsedStatuses, setCollapsedStatuses] = React.useState<Set<string>>(() => new Set(initialUiState.collapsedStatuses ?? []))
   const [expandedDefaultCollapsedStatuses, setExpandedDefaultCollapsedStatuses] = React.useState<Set<string>>(() => new Set(initialUiState.expandedDefaultCollapsedStatuses ?? []))
   const [syncingHome, setSyncingHome] = React.useState(false)
+  const [syncingRequirementIds, setSyncingRequirementIds] = React.useState<Set<string>>(() => new Set())
   const [labelStore, setLabelStore] = React.useState<TapdRequirementLabelStore>(() => readTapdRequirementLabelStore(activeWorkspaceId))
   const [openTabs, setOpenTabs] = React.useState<TapdOpenRequirementTab[]>(() => initialUiState.tabs ?? [])
   const [activeTabId, setActiveTabId] = React.useState(initialSourceItemId ?? TAPD_HOME_TAB_ID)
@@ -1303,6 +1336,44 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
     })
     return { ...item, binding }
   }, [activeWorkspaceId])
+
+  const syncRequirementItem = React.useCallback(async (item: ExternalRequirementItem) => {
+    if (!activeWorkspaceId || !tapdInstalled) return
+    if (!connected) {
+      toast.error(plugin?.connectionError || 'TAPD source is not connected.')
+      return
+    }
+    const detailWorkspaceId = getTapdWorkspaceIdFromItem(item) ?? tapdWorkspaceId
+    if (!detailWorkspaceId) {
+      toast.error('Open or add a TAPD requirement first so the workspace_id can be detected.')
+      return
+    }
+    if (syncingRequirementIds.has(item.sourceItemId)) return
+
+    setSyncingRequirementIds(current => new Set(current).add(item.sourceItemId))
+    try {
+      const result = await window.electronAPI.getRequirementItemDetail(activeWorkspaceId, TAPD_PLUGIN_ID, item.sourceItemId, toDetailFilters(detailWorkspaceId))
+      let nextItem: ExternalRequirementItem = {
+        ...item,
+        ...result.item,
+        binding: result.item.binding ?? item.binding,
+      }
+      if (nextItem.binding) {
+        nextItem = await persistRequirementBindingSnapshot(nextItem)
+      }
+      const nextCache = upsertCachedItem(activeWorkspaceId, nextItem)
+      setCache(nextCache)
+      toast.success('TAPD requirement synced', { description: nextItem.title })
+    } catch (err) {
+      toast.error('Could not sync TAPD requirement', { description: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setSyncingRequirementIds(current => {
+        const next = new Set(current)
+        next.delete(item.sourceItemId)
+        return next
+      })
+    }
+  }, [activeWorkspaceId, connected, persistRequirementBindingSnapshot, plugin?.connectionError, syncingRequirementIds, tapdInstalled, tapdWorkspaceId])
 
   const syncTapdHome = React.useCallback(async (options?: { manual?: boolean }) => {
     if (!activeWorkspaceId || !tapdInstalled) return
@@ -1716,8 +1787,10 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
                       items={group.items}
                       collapsed={collapsedStatuses.has(group.status)}
                       labelsById={labelsById}
+                      syncingItemIds={syncingRequirementIds}
                       onToggleCollapsed={toggleStatusCollapsed}
                       onOpen={item => openRequirementTab(item.sourceItemId)}
+                      onSync={syncRequirementItem}
                       onDelete={deleteLocalRequirement}
                     />
                   ))}
@@ -1733,8 +1806,10 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
                       items={group.items}
                       collapsed={collapsedStatuses.has(group.status)}
                       labelsById={labelsById}
+                      syncingItemIds={syncingRequirementIds}
                       onToggleCollapsed={toggleStatusCollapsed}
                       onOpen={item => openRequirementTab(item.sourceItemId)}
+                      onSync={syncRequirementItem}
                       onDelete={deleteLocalRequirement}
                     />
                   ))}
@@ -2385,7 +2460,28 @@ function prepareCommentMarkdown(comment: RequirementComment) {
 
 function TapdRequirementImage({ src, alt, title, onOpenUrl, compact = false }: { src?: string; alt?: string; title?: string; onOpenUrl: (url: string) => void; compact?: boolean }) {
   const [failed, setFailed] = React.useState(false)
+  const imageRef = React.useRef<HTMLImageElement | null>(null)
   const normalizedSrc = src ? normalizeTapdImageUrl(src) : undefined
+
+  React.useEffect(() => {
+    setFailed(false)
+  }, [normalizedSrc])
+
+  React.useEffect(() => {
+    const image = imageRef.current
+    if (!image || !normalizedSrc || failed) return
+
+    const zoom = mediumZoom(image, {
+      margin: compact ? 24 : 32,
+      background: 'rgba(6, 6, 10, 0.78)',
+      scrollOffset: 40,
+    })
+
+    return () => {
+      zoom.detach()
+    }
+  }, [compact, failed, normalizedSrc])
+
   if (!normalizedSrc || failed) {
     return (
       <div className={cn(compact ? 'my-2 max-w-[360px]' : 'my-4 max-w-[720px]', 'rounded-[12px] border px-4 py-3 text-[13px]', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.border, TAPD_DETAIL_THEME.weak)}>
@@ -2400,11 +2496,14 @@ function TapdRequirementImage({ src, alt, title, onOpenUrl, compact = false }: {
   }
   return (
     <img
+      ref={imageRef}
       src={normalizedSrc}
       alt={alt ?? ''}
       title={title}
       loading="lazy"
-      className={cn(compact ? 'my-2 max-h-[180px] max-w-[min(100%,360px)]' : 'my-4 max-h-[420px] max-w-[min(100%,720px)]', 'block w-auto rounded-[12px] border object-contain', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.border)}
+      data-zoomable="tapd-requirement-image"
+      className={cn(compact ? 'my-2 max-h-[180px] max-w-[min(100%,360px)]' : 'my-4 max-h-[420px] max-w-[min(100%,720px)]', 'block w-auto cursor-zoom-in rounded-[12px] border object-contain', TAPD_DETAIL_THEME.subtlePanel, TAPD_DETAIL_THEME.border)}
+      onClick={(event) => event.stopPropagation()}
       onError={() => setFailed(true)}
     />
   )
