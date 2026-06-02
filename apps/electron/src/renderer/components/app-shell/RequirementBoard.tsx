@@ -595,19 +595,6 @@ function ExpectedTestDateChip({ value }: { value?: string }) {
   )
 }
 
-const TAPD_LABEL_TONES = [
-  'bg-red-500/10 text-red-700 dark:bg-red-400/15 dark:text-red-300',
-  'bg-purple-500/10 text-purple-700 dark:bg-purple-400/15 dark:text-purple-300',
-  'bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300',
-  'bg-emerald-500/10 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300',
-  'bg-amber-500/10 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300',
-] as const
-
-function labelTone(label: string) {
-  const hash = [...label].reduce((sum, char) => sum + char.charCodeAt(0), 0)
-  return TAPD_LABEL_TONES[hash % TAPD_LABEL_TONES.length]
-}
-
 function hasActiveTapdFilters(filters: TapdHomeFilters) {
   return filters.status.length > 0 || filters.priority.length > 0 || filters.creator.length > 0
 }
@@ -776,11 +763,14 @@ interface RequirementLabelControlsProps {
   onRemoveLabel?: (label: string) => void
 }
 
-function promptForTapdLabel(message: string, defaultValue = ''): string | null {
-  if (typeof window === 'undefined') return null
-  const value = window.prompt(message, defaultValue)
+function normalizeTapdLabelInput(value: string | null | undefined): string | null {
   const normalized = value?.trim().replace(/\s+/g, ' ')
   return normalized ? normalized.slice(0, 32) : null
+}
+
+function promptForTapdLabel(message: string, defaultValue = ''): string | null {
+  if (typeof window === 'undefined') return null
+  return normalizeTapdLabelInput(window.prompt(message, defaultValue))
 }
 
 function TapdRequirementLabels({ labels }: Pick<RequirementLabelControlsProps, 'labels'>) {
@@ -788,8 +778,8 @@ function TapdRequirementLabels({ labels }: Pick<RequirementLabelControlsProps, '
   return (
     <span className="inline-flex min-w-0 shrink-0 items-center gap-1 overflow-hidden">
       {labels.slice(0, 3).map(label => (
-        <span key={label} className={cn('inline-flex h-6 max-w-[120px] shrink-0 items-center gap-1 rounded-full px-2 text-[12px] font-medium', labelTone(label))} title={label}>
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-80" />
+        <span key={label} className="inline-flex h-5 max-w-[120px] shrink-0 items-center gap-1.5 text-[12px] font-normal text-muted-foreground" title={label}>
+          <Tag className="h-4 w-4 shrink-0" />
           <span className="truncate">{label}</span>
         </span>
       ))}
@@ -799,11 +789,25 @@ function TapdRequirementLabels({ labels }: Pick<RequirementLabelControlsProps, '
 }
 
 function TapdRequirementLabelEditor({ labels, recentLabels = [], onAddLabel, onRenameLabel, onRemoveLabel }: RequirementLabelControlsProps) {
+  const [addMenuOpen, setAddMenuOpen] = React.useState(false)
+  const [draftLabel, setDraftLabel] = React.useState('')
+  const inputRef = React.useRef<HTMLInputElement>(null)
   const quickLabels = recentLabels.filter(label => !labels.some(existing => existing.toLowerCase() === label.toLowerCase()))
-  const addNewLabel = () => {
-    const next = promptForTapdLabel('Add label')
-    if (next) onAddLabel?.(next)
-  }
+
+  React.useEffect(() => {
+    if (!addMenuOpen || typeof window === 'undefined') return
+    const frame = window.requestAnimationFrame(() => inputRef.current?.focus())
+    return () => window.cancelAnimationFrame(frame)
+  }, [addMenuOpen])
+
+  const submitDraftLabel = React.useCallback(() => {
+    const next = normalizeTapdLabelInput(draftLabel)
+    if (!next) return
+    onAddLabel?.(next)
+    setDraftLabel('')
+    setAddMenuOpen(false)
+  }, [draftLabel, onAddLabel])
+
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
       {labels.map(label => (
@@ -811,10 +815,10 @@ function TapdRequirementLabelEditor({ labels, recentLabels = [], onAddLabel, onR
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className={cn('inline-flex h-7 max-w-[150px] items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium transition-colors hover:opacity-85', labelTone(label))}
+              className="inline-flex h-5 max-w-[150px] items-center gap-1.5 text-[12px] font-normal text-muted-foreground transition-colors hover:text-foreground"
               title={`Edit label: ${label}`}
             >
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-80" />
+              <Tag className="h-4 w-4 shrink-0" />
               <span className="truncate">{label}</span>
             </button>
           </DropdownMenuTrigger>
@@ -833,30 +837,55 @@ function TapdRequirementLabelEditor({ labels, recentLabels = [], onAddLabel, onR
           </DropdownMenuContent>
         </DropdownMenu>
       ))}
-      <DropdownMenu>
+      <DropdownMenu open={addMenuOpen} onOpenChange={(open) => {
+        setAddMenuOpen(open)
+        if (!open) setDraftLabel('')
+      }}>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            className="inline-flex h-7 items-center gap-1.5 rounded-full bg-foreground/[0.06] px-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.09] hover:text-foreground dark:bg-foreground/[0.09] dark:hover:bg-foreground/[0.13]"
+            className="inline-flex h-7 items-center gap-1.5 rounded-[8px] px-2 text-[12px] font-normal text-muted-foreground transition-colors hover:bg-foreground/[0.045] hover:text-foreground"
             title="Add label"
           >
-            <Tag className="h-3.5 w-3.5" />
+            <Plus className="h-3.5 w-3.5" />
             Add label
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="min-w-[230px] p-1">
-          <DropdownMenuLabel className="px-2 py-1.5 text-[12px] text-muted-foreground">Add labels…</DropdownMenuLabel>
-          {quickLabels.length ? quickLabels.map(label => (
-            <DropdownMenuItem key={label} onSelect={() => onAddLabel?.(label)} className="h-8 gap-2 text-[13px]">
-              <span className={cn('h-2 w-2 rounded-full', labelTone(label).split(' ')[0].replace('/10', ''))} />
-              <span className="truncate">{label}</span>
-            </DropdownMenuItem>
-          )) : <DropdownMenuItem disabled className="text-muted-foreground">No recent labels</DropdownMenuItem>}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={addNewLabel} className="h-8 gap-2 text-[13px]">
-            <Plus className="h-3.5 w-3.5" />
-            New label…
-          </DropdownMenuItem>
+        <DropdownMenuContent align="start" className="min-w-[260px] p-2">
+          <DropdownMenuLabel className="px-1 pb-1 pt-0 text-[12px] text-muted-foreground">Label name</DropdownMenuLabel>
+          <div className="flex items-center gap-2 px-1 pb-2" onKeyDown={event => event.stopPropagation()}>
+            <Input
+              ref={inputRef}
+              value={draftLabel}
+              onChange={event => setDraftLabel(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  submitDraftLabel()
+                }
+              }}
+              placeholder="Type a label name"
+              className="h-8 text-[13px]"
+            />
+            <Button type="button" size="sm" className="h-8 px-3 text-[12px]" onClick={submitDraftLabel} disabled={!normalizeTapdLabelInput(draftLabel)}>
+              Add
+            </Button>
+          </div>
+          {quickLabels.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="px-1 py-1 text-[12px] text-muted-foreground">Recent labels</DropdownMenuLabel>
+              {quickLabels.map(label => (
+                <DropdownMenuItem key={label} onSelect={() => {
+                  onAddLabel?.(label)
+                  setAddMenuOpen(false)
+                }} className="h-8 gap-2 text-[13px]">
+                  <Tag className="h-3.5 w-3.5" />
+                  <span className="truncate">{label}</span>
+                </DropdownMenuItem>
+              ))}
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
