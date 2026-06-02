@@ -72,6 +72,30 @@ export interface DeepLinkNavigation {
 }
 
 /**
+ * Build the renderer route string represented by a parsed deep link.
+ * View routes can be restored synchronously from the renderer URL (?route=...).
+ * Action routes are returned in the same shape used by the deeplink IPC listener.
+ */
+export function buildRendererRouteFromDeepLinkTarget(target: Pick<DeepLinkTarget, 'view' | 'action' | 'actionParams'>): string | null {
+  if (target.view) return target.view
+  if (!target.action) return null
+
+  let route = `action/${target.action}`
+  if (target.actionParams?.id) {
+    route += `/${target.actionParams.id}`
+  }
+
+  const otherParams = { ...target.actionParams }
+  delete otherParams.id
+  if (Object.keys(otherParams).length > 0) {
+    const params = new URLSearchParams(otherParams)
+    route += `?${params.toString()}`
+  }
+
+  return route
+}
+
+/**
  * Parse window mode from URL search params
  */
 function parseWindowMode(parsed: URL): 'focused' | 'full' | undefined {

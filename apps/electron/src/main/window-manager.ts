@@ -7,10 +7,37 @@ import { fileURLToPath } from 'url'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { classifyExternalUrl, formatBlockedUrlError } from '@craft-agent/shared/utils/url-safety'
 import { RPC_CHANNELS, type WindowCloseRequestSource } from '../shared/types'
+import { buildRendererRouteFromDeepLinkTarget, parseDeepLink } from './deep-link'
 import type { SavedWindow } from './window-state'
 
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
+
+function buildInitialWindowQuery(
+  workspaceId: string,
+  focused: boolean,
+  initialDeepLink?: string,
+): Record<string, string> {
+  const query: Record<string, string> = { workspaceId }
+  if (focused) {
+    query.focused = 'true'
+  }
+
+  if (initialDeepLink) {
+    const target = parseDeepLink(initialDeepLink)
+    if (target) {
+      const route = buildRendererRouteFromDeepLinkTarget(target)
+      if (route && !route.startsWith('action/')) {
+        query.route = route
+      }
+      if (target.rightSidebar) {
+        query.sidebar = target.rightSidebar
+      }
+    }
+  }
+
+  return query
+}
 
 /**
  * Get the appropriate background material for Windows transparency effects
@@ -337,7 +364,7 @@ export class WindowManager {
         } catch {
           // Fallback if URL parsing fails
           windowLog.warn('Failed to parse restoreUrl, using default:', restoreUrl)
-          const params = new URLSearchParams({ workspaceId, ...(focused && { focused: 'true' }) }).toString()
+          const params = new URLSearchParams(buildInitialWindowQuery(workspaceId, focused, initialDeepLink)).toString()
           window.loadURL(`${VITE_DEV_SERVER_URL}?${params}`)
         }
       } else {
@@ -350,15 +377,12 @@ export class WindowManager {
           savedUrl.searchParams.forEach((value, key) => { query[key] = value })
           window.loadFile(join(__dirname, 'renderer/index.html'), { query })
         } catch {
-          window.loadFile(join(__dirname, 'renderer/index.html'), { query: { workspaceId } })
+          window.loadFile(join(__dirname, 'renderer/index.html'), { query: buildInitialWindowQuery(workspaceId, focused, initialDeepLink) })
         }
       }
     } else {
       // Build URL from options
-      const query: Record<string, string> = { workspaceId }
-      if (focused) {
-        query.focused = 'true' // Open in focused mode (no sidebars)
-      }
+      const query = buildInitialWindowQuery(workspaceId, focused, initialDeepLink)
 
       if (VITE_DEV_SERVER_URL) {
         const params = new URLSearchParams(query).toString()
@@ -379,31 +403,31 @@ export class WindowManager {
         failLoadRetries++
         windowLog.info(`Retrying Vite dev server (attempt ${failLoadRetries}/5)...`)
         setTimeout(() => {
-          const params = new URLSearchParams({ workspaceId }).toString()
+          const params = new URLSearchParams(buildInitialWindowQuery(workspaceId, focused, initialDeepLink)).toString()
           window.loadURL(`${VITE_DEV_SERVER_URL}?${params}`)
         }, 1000)
       } else {
-        window.loadFile(join(__dirname, 'renderer/index.html'), { query: { workspaceId } })
+        window.loadFile(join(__dirname, 'renderer/index.html'), { query: buildInitialWindowQuery(workspaceId, focused, initialDeepLink) })
       }
     })
 
-    // If an initial deep link was provided, navigate to it after the window is ready
+    // If an initial deep link was provided, also push it after the window is ready.
+    // View routes are encoded in the initial URL query (?route=...) above so the
+    // renderer can restore the first screen synchronously; this IPC push remains
+    // as a fallback and for action deep links.
     if (initialDeepLink) {
       window.once('ready-to-show', () => {
-        // Import parseDeepLink dynamically to avoid circular dependency
-        import('./deep-link').then(({ parseDeepLink }) => {
-          const target = parseDeepLink(initialDeepLink)
-          if (target && (target.view || target.action)) {
-            // Wait a bit for React to mount and register IPC listeners
-            setTimeout(() => {
-              this.pushToWindow(window, RPC_CHANNELS.deeplink.NAVIGATE, {
-                view: target.view,
-                action: target.action,
-                actionParams: target.actionParams,
-              })
-            }, 100)
-          }
-        })
+        const target = parseDeepLink(initialDeepLink)
+        if (target && (target.view || target.action)) {
+          // Wait a bit for React to mount and register IPC listeners
+          setTimeout(() => {
+            this.pushToWindow(window, RPC_CHANNELS.deeplink.NAVIGATE, {
+              view: target.view,
+              action: target.action,
+              actionParams: target.actionParams,
+            })
+          }, 100)
+        }
       })
     }
 

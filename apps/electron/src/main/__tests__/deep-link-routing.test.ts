@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { handleDeepLink, parseDeepLink } from '../deep-link'
+import { buildRendererRouteFromDeepLinkTarget, handleDeepLink, parseDeepLink } from '../deep-link'
 import { RPC_CHANNELS } from '../../shared/types'
 import type { EventSink } from '@craft-agent/server-core/transport'
 import type { WindowManager } from '../window-manager'
@@ -45,6 +45,14 @@ describe('parseDeepLink compound routes', () => {
       windowMode: 'focused',
       rightSidebar: undefined,
     })
+  })
+})
+
+describe('buildRendererRouteFromDeepLinkTarget', () => {
+  it('builds renderer route for TAPD plugin requirement deeplinks', () => {
+    const target = parseDeepLink('craftagentsdev://plugins/plugin/tapd/requirement/1010045201134757330?window=focused')
+    expect(target).toBeTruthy()
+    expect(buildRendererRouteFromDeepLinkTarget(target!)).toBe('plugins/plugin/tapd/requirement/1010045201134757330')
   })
 })
 
