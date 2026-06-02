@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { handleDeepLink } from '../deep-link'
+import { handleDeepLink, parseDeepLink } from '../deep-link'
 import { RPC_CHANNELS } from '../../shared/types'
 import type { EventSink } from '@craft-agent/server-core/transport'
 import type { WindowManager } from '../window-manager'
@@ -18,6 +18,26 @@ function createMockWindow(webContentsId: number) {
     },
   }
 }
+
+describe('parseDeepLink compound routes', () => {
+  it('parses plugin requirement routes with focused window mode', () => {
+    expect(parseDeepLink('craftagents://plugins/plugin/tapd/requirement/1010045201134757330?window=focused')).toEqual({
+      workspaceId: undefined,
+      view: 'plugins/plugin/tapd/requirement/1010045201134757330',
+      windowMode: 'focused',
+      rightSidebar: undefined,
+    })
+  })
+
+  it('parses agent profile routes with focused window mode', () => {
+    expect(parseDeepLink('craftagents://agents/agent/niu-ma?window=focused')).toEqual({
+      workspaceId: undefined,
+      view: 'agents/agent/niu-ma',
+      windowMode: 'focused',
+      rightSidebar: undefined,
+    })
+  })
+})
 
 describe('handleDeepLink routing', () => {
   it('prefers resolved target client over preferred caller client', async () => {

@@ -115,7 +115,8 @@ export function parseDeepLink(url: string): DeepLinkTarget | null {
 
     // Compound route prefixes
     const COMPOUND_ROUTE_PREFIXES = [
-      'allSessions', 'flagged', 'state', 'sources', 'settings', 'skills'
+      'allSessions', 'inbox', 'flagged', 'archived', 'state', 'label', 'view',
+      'sources', 'settings', 'skills', 'automations', 'agents', 'plugins',
     ]
 
     // craftagents://allSessions/..., craftagents://settings/..., etc. (compound routes)
