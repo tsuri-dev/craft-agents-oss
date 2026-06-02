@@ -519,6 +519,15 @@ html[data-font="inter"] {
   }
 }
 
+/* medium-zoom does not set z-index by default; keep TAPD image previews above app chrome. */
+.medium-zoom-overlay {
+  z-index: var(--z-fullscreen);
+}
+
+.medium-zoom-image--opened {
+  z-index: calc(var(--z-fullscreen) + 1);
+}
+
 /* Override Tailwind ring width utilities to use theme variable */
 @layer utilities {
   .ring-1, .ring-2, .ring-\[3px\], .ring-4 {
