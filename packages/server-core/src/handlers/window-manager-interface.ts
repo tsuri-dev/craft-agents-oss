@@ -20,4 +20,7 @@ export interface IWindowManager {
 
   /** Get all tracked windows for a workspace. */
   getAllWindowsForWorkspace(workspaceId: string): unknown[]
+
+  /** Create a new workspace window. Electron implementations may support focused + initialDeepLink. */
+  createWindow?(options: { workspaceId: string; focused?: boolean; initialDeepLink?: string }): unknown
 }

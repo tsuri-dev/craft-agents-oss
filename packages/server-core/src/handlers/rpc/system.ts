@@ -40,8 +40,8 @@ interface ParsedInternalDeepLink {
     actionParams?: Record<string, string>
   }
   workspaceId?: string
-  /** Use client shell.openExternal protocol dispatch for window=focused/full links. */
-  requiresProtocolDispatch?: boolean
+  /** Window mode requested by a deeplink query param. */
+  windowMode?: 'focused' | 'full'
   /** True when URL is intentionally consumed without navigation (auth callbacks). */
   handledNoop?: boolean
 }
@@ -79,12 +79,8 @@ function parseInternalCraftAgentsDeepLink(parsed: URL): ParsedInternalDeepLink |
 
   const host = parsed.hostname
   const pathParts = parsed.pathname.split('/').filter(Boolean)
-  const windowMode = parsed.searchParams.get('window')
-
-  // Preserve window-specific behavior via OS protocol path.
-  if (windowMode === 'focused' || windowMode === 'full') {
-    return { requiresProtocolDispatch: true }
-  }
+  const requestedWindowMode = parsed.searchParams.get('window')
+  const windowMode = requestedWindowMode === 'focused' || requestedWindowMode === 'full' ? requestedWindowMode : undefined
 
   // OAuth callback links are handled by auth flow code paths.
   if (host === 'auth-callback') {
@@ -93,7 +89,7 @@ function parseInternalCraftAgentsDeepLink(parsed: URL): ParsedInternalDeepLink |
 
   if (COMPOUND_ROUTE_PREFIXES.has(host)) {
     const viewRoute = pathParts.length > 0 ? `${host}/${pathParts.join('/')}` : host
-    return { navigation: { view: viewRoute } }
+    return { navigation: { view: viewRoute }, windowMode }
   }
 
   if (host === 'action') {
@@ -106,6 +102,7 @@ function parseInternalCraftAgentsDeepLink(parsed: URL): ParsedInternalDeepLink |
         action,
         actionParams,
       },
+      windowMode,
     }
   }
 
@@ -120,6 +117,7 @@ function parseInternalCraftAgentsDeepLink(parsed: URL): ParsedInternalDeepLink |
       return {
         workspaceId,
         navigation: { view: pathParts.slice(1).join('/') },
+        windowMode,
       }
     }
 
@@ -133,6 +131,7 @@ function parseInternalCraftAgentsDeepLink(parsed: URL): ParsedInternalDeepLink |
           action,
           actionParams: collectDeepLinkParams(parsed, pathParts[3]),
         },
+        windowMode,
       }
     }
   }
@@ -303,23 +302,39 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
           return
         }
 
-        if (deepLink?.navigation?.view || deepLink?.navigation?.action) {
-          const target = deepLink.workspaceId && deepLink.workspaceId !== ctx.workspaceId
-            ? { to: 'workspace' as const, workspaceId: deepLink.workspaceId }
-            : { to: 'client' as const, clientId: ctx.clientId }
+        if ((deepLink?.navigation?.view || deepLink?.navigation?.action) && deepLink.windowMode) {
+          const workspaceId = deepLink.workspaceId
+            ?? ctx.workspaceId
+            ?? (ctx.webContentsId != null ? windowManager?.getWorkspaceForWindow(ctx.webContentsId) ?? undefined : undefined)
+          const navUrl = new URL(url)
+          navUrl.searchParams.delete('window')
 
-          deps.platform.logger.info('[OPEN_URL] Routing craftagents:// URL internally via deeplink:navigate')
-          server.push(RPC_CHANNELS.deeplink.NAVIGATE, target, deepLink.navigation)
-          return
-        }
+          if (workspaceId && windowManager?.createWindow) {
+            deps.platform.logger.info('[OPEN_URL] Creating local window for Craft Agents deep link')
+            windowManager.createWindow({
+              workspaceId,
+              focused: deepLink.windowMode === 'focused',
+              initialDeepLink: navUrl.toString(),
+            })
+            return
+          }
 
-        if (deepLink?.requiresProtocolDispatch) {
           deps.platform.logger.info('[OPEN_URL] Delegating window-mode Craft Agents deep link to client protocol handler')
           const deepLinkResult = await requestClientOpenExternal(server, ctx.clientId, url)
           if (!deepLinkResult.opened) {
             deps.platform.logger.error(`[OPEN_URL] Client capability failed: ${deepLinkResult.error}`)
             throw new Error(`Cannot open URL on client: ${deepLinkResult.error}`)
           }
+          return
+        }
+
+        if (deepLink?.navigation?.view || deepLink?.navigation?.action) {
+          const target = deepLink.workspaceId && deepLink.workspaceId !== ctx.workspaceId
+            ? { to: 'workspace' as const, workspaceId: deepLink.workspaceId }
+            : { to: 'client' as const, clientId: ctx.clientId }
+
+          deps.platform.logger.info('[OPEN_URL] Routing Craft Agents URL internally via deeplink:navigate')
+          server.push(RPC_CHANNELS.deeplink.NAVIGATE, target, deepLink.navigation)
           return
         }
 
