@@ -7,20 +7,31 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
+  BadgeAlert,
+  Ban,
   Bot,
+  CalendarDays,
+  CalendarX2,
   CheckCircle2,
   ChevronRight,
   Circle,
+  CircleDashed,
+  CircleDot,
+  Clock3,
   Columns3,
   Filter,
+  FlaskConical,
   Link2,
   List,
   Loader2,
   MoreHorizontal,
+  Pencil,
   Pin,
   Plus,
   RefreshCw,
   Square,
+  Tag,
+  Trash2,
   Workflow,
   X,
 } from 'lucide-react'
@@ -59,15 +70,22 @@ import {
   emptyTapdRequirementCache,
   addTapdRequirementAgentId,
   buildTapdAgentInstructionPrompt,
+  getRecentTapdRequirementLabelNames,
   readTapdRequirementAgentSelection,
   readTapdRequirementCache,
+  readTapdRequirementLabels,
+  readTapdRequirementLabelStore,
   readTapdRequirementWorkContext,
+  removeTapdCachedItem,
+  removeTapdRequirementLabels,
   resolveTapdRequirementAgents,
   suggestTapdGroupName,
   upsertTapdCachedItem,
   writeTapdRequirementCache,
+  writeTapdRequirementLabels,
   writeTapdRequirementWorkContext,
   type TapdRequirementCache,
+  type TapdRequirementLabelStore,
   type TapdRequirementWorkContext,
 } from '@/utils/tapd-requirement-helpers'
 import { useAppShellContext } from '@/context/AppShellContext'
@@ -218,8 +236,9 @@ interface TapdHomeUiState {
 
 const TAPD_HOME_TAB_ID = 'tapd-home'
 const TAPD_HOME_STATUS = 'Backlog'
+const TAPD_DELETED_STATUS = '已删除'
 const TAPD_UI_STORAGE_VERSION = 1
-const TAPD_STATUS_ORDER = ['in progress', '开发中', '进行中', 'todo', 'backlog', 'in review', 'blocked', 'done', '已上线']
+const TAPD_STATUS_ORDER = ['in progress', '开发中', '进行中', 'todo', 'backlog', 'in review', '待评审', '待测试', 'blocked', 'done', '已上线', 'deleted', '已删除']
 const TAPD_HOME_CACHE_TTL_MS = 30 * 60 * 1000
 const TAPD_SYNC_PAGE_LIMIT = 100
 const TAPD_SYNC_MAX_PAGES = 50
@@ -313,8 +332,13 @@ function isLaunchedStatus(status?: string) {
   return normalized.includes('已上线') || normalized === '上线' || normalized.includes('online')
 }
 
+function isDeletedStatus(status?: string) {
+  const normalized = normalizeIssueStatus(status ?? '')
+  return normalized.includes('已删除') || normalized.includes('deleted') || normalized.includes('removed')
+}
+
 function isDefaultCollapsedStatus(status: string) {
-  return isLaunchedStatus(status)
+  return isLaunchedStatus(status) || isDeletedStatus(status)
 }
 
 function getStatusRank(status: string) {
@@ -327,6 +351,7 @@ function getStatusRank(status: string) {
   if (normalized.includes('review') || normalized.includes('验收') || normalized.includes('评审')) return 4
   if (normalized.includes('block') || normalized.includes('阻塞')) return 5
   if (normalized.includes('done') || normalized.includes('closed') || normalized.includes('完成') || normalized.includes('发布') || isLaunchedStatus(status)) return 6
+  if (isDeletedStatus(status)) return 7
   return 20
 }
 
@@ -338,29 +363,181 @@ function sortStatusLabels(statuses: string[]) {
   })
 }
 
-function getStatusPresentation(status: string) {
+function getStatusPresentation(status: string): { Icon: React.ElementType; icon: string; ring: string; column: string; text: string } {
   const normalized = normalizeIssueStatus(status)
-  if (normalized.includes('done') || normalized.includes('closed') || normalized.includes('完成') || normalized.includes('发布')) {
-    return { dot: 'border-success bg-success', ring: 'ring-success/20', column: 'bg-success/[0.045]', text: 'text-success/90' }
+  if (isDeletedStatus(status)) {
+    return { Icon: Trash2, icon: 'text-destructive', ring: 'ring-destructive/20', column: 'bg-destructive/[0.025]', text: 'text-destructive/90' }
   }
   if (normalized.includes('block') || normalized.includes('拒绝') || normalized.includes('reject') || normalized.includes('阻塞')) {
-    return { dot: 'border-destructive bg-destructive', ring: 'ring-destructive/20', column: 'bg-destructive/[0.035]', text: 'text-destructive/90' }
+    return { Icon: Ban, icon: 'text-destructive', ring: 'ring-destructive/20', column: 'bg-destructive/[0.035]', text: 'text-destructive/90' }
+  }
+  if (normalized.includes('done') || normalized.includes('closed') || normalized.includes('完成') || normalized.includes('发布') || isLaunchedStatus(status)) {
+    return { Icon: CheckCircle2, icon: 'text-accent', ring: 'ring-accent/20', column: 'bg-accent/[0.04]', text: 'text-accent/90' }
   }
   if (normalized.includes('review') || normalized.includes('验收') || normalized.includes('评审')) {
-    return { dot: 'border-success bg-transparent', ring: 'ring-success/20', column: 'bg-success/[0.035]', text: 'text-success/90' }
+    return { Icon: Clock3, icon: 'text-success', ring: 'ring-success/20', column: 'bg-success/[0.035]', text: 'text-success/90' }
+  }
+  if (normalized.includes('test') || normalized.includes('测')) {
+    return { Icon: FlaskConical, icon: 'text-success', ring: 'ring-success/20', column: 'bg-success/[0.035]', text: 'text-success/90' }
   }
   if (normalized.includes('progress') || normalized.includes('开发') || normalized.includes('进行')) {
-    return { dot: 'border-warning bg-transparent', ring: 'ring-warning/20', column: 'bg-warning/[0.045]', text: 'text-warning/90' }
+    return { Icon: CircleDot, icon: 'text-warning', ring: 'ring-warning/20', column: 'bg-warning/[0.045]', text: 'text-warning/90' }
   }
   if (normalized.includes('todo') || normalized.includes('待')) {
-    return { dot: 'border-muted-foreground bg-transparent', ring: 'ring-foreground/[0.08]', column: 'bg-foreground/[0.025]', text: 'text-foreground' }
+    return { Icon: Circle, icon: 'text-muted-foreground', ring: 'ring-foreground/[0.08]', column: 'bg-foreground/[0.025]', text: 'text-foreground' }
   }
-  return { dot: 'border-muted-foreground/70 bg-transparent border-dotted', ring: 'ring-foreground/[0.08]', column: 'bg-foreground/[0.025]', text: 'text-foreground' }
+  if (normalized.includes('backlog')) {
+    return { Icon: CircleDashed, icon: 'text-muted-foreground', ring: 'ring-foreground/[0.08]', column: 'bg-foreground/[0.025]', text: 'text-foreground' }
+  }
+  return { Icon: CircleDashed, icon: 'text-muted-foreground', ring: 'ring-foreground/[0.08]', column: 'bg-foreground/[0.025]', text: 'text-foreground' }
 }
 
 function getUniqueSortedValues(values: Array<string | undefined>): string[] {
   const unique = Array.from(new Set(values.map(value => value?.trim()).filter((value): value is string => Boolean(value))))
   return unique.sort((a, b) => a.localeCompare(b))
+}
+
+function stringifyTapdRawValue(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed || undefined
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return undefined
+}
+
+function findTapdRawFieldValue(raw: unknown, keywords: string[], depth = 0): string | undefined {
+  if (!raw || depth > 4) return undefined
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      const value = findTapdRawFieldValue(entry, keywords, depth + 1)
+      if (value) return value
+    }
+    return undefined
+  }
+  if (typeof raw !== 'object') return undefined
+  const record = raw as Record<string, unknown>
+  for (const [key, value] of Object.entries(record)) {
+    const normalizedKey = key.toLowerCase()
+    if (keywords.some(keyword => normalizedKey.includes(keyword))) {
+      const direct = stringifyTapdRawValue(value)
+      if (direct) return direct
+      const named = typeof value === 'object' && value
+        ? stringifyTapdRawValue((value as Record<string, unknown>).value ?? (value as Record<string, unknown>).name ?? (value as Record<string, unknown>).label)
+        : undefined
+      if (named) return named
+    }
+    if (value && typeof value === 'object') {
+      const valueRecord = value as Record<string, unknown>
+      const label = stringifyTapdRawValue(valueRecord.label ?? valueRecord.name ?? valueRecord.title ?? valueRecord.field_name ?? valueRecord.fieldName)
+      if (label && keywords.some(keyword => label.toLowerCase().includes(keyword))) {
+        const named = stringifyTapdRawValue(valueRecord.value ?? valueRecord.val ?? valueRecord.text ?? valueRecord.content)
+        if (named) return named
+      }
+    }
+  }
+  for (const value of Object.values(record)) {
+    const nested = findTapdRawFieldValue(value, keywords, depth + 1)
+    if (nested) return nested
+  }
+  return undefined
+}
+
+function getExpectedTestTime(item: ExternalRequirementItem): string | undefined {
+  const rawValue = findTapdRawFieldValue(item.raw, ['预计提测', '提测时间', '提测', 'expected_test', 'estimate_test', 'estimated_test', 'test_time', 'test_date'])
+  return rawValue ?? item.dueAt
+}
+
+function parseRequirementDate(value?: string): Date | null {
+  const raw = value?.trim()
+  if (!raw) return null
+  const parsed = Date.parse(raw.replace(' ', 'T'))
+  return Number.isFinite(parsed) ? new Date(parsed) : null
+}
+
+function formatRequirementDateShort(value?: string): string | undefined {
+  const raw = value?.trim()
+  if (!raw) return undefined
+  const parsed = parseRequirementDate(raw)
+  if (!parsed) return raw.length > 16 ? raw.slice(0, 16) : raw
+  return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+function isRequirementDateOverdue(value?: string) {
+  const parsed = parseRequirementDate(value)
+  if (!parsed) return false
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const candidate = new Date(parsed)
+  candidate.setHours(0, 0, 0, 0)
+  return candidate.getTime() < today.getTime()
+}
+
+function normalizePriorityLabel(priority?: string) {
+  const value = priority?.trim()
+  if (!value) return undefined
+  const normalized = value.toLowerCase()
+  if (normalized === '1' || normalized.includes('urgent') || normalized.includes('紧急')) return 'Urgent'
+  if (normalized === '2' || normalized.includes('high') || normalized.includes('高')) return 'High'
+  if (normalized === '3' || normalized.includes('medium') || normalized.includes('中')) return 'Medium'
+  if (normalized === '4' || normalized.includes('low') || normalized.includes('低')) return 'Low'
+  return value
+}
+
+function PriorityBars({ level }: { level: 1 | 2 | 3 }) {
+  return (
+    <span className="inline-flex h-4 w-4 items-end gap-[2px] text-muted-foreground" aria-hidden="true">
+      {[1, 2, 3].map(index => (
+        <span key={index} className={cn('w-[3px] rounded-sm bg-current', index === 1 ? 'h-1.5' : index === 2 ? 'h-2.5' : 'h-3.5', index <= level ? 'opacity-100' : 'opacity-30')} />
+      ))}
+    </span>
+  )
+}
+
+function PriorityIcon({ priority }: { priority?: string }) {
+  const label = normalizePriorityLabel(priority)
+  if (label === 'Urgent') return <BadgeAlert className="h-4 w-4 text-muted-foreground" />
+  if (label === 'High') return <PriorityBars level={3} />
+  if (label === 'Medium') return <PriorityBars level={2} />
+  if (label === 'Low') return <PriorityBars level={1} />
+  return <span className="inline-flex h-4 w-4 items-center justify-center text-[13px] font-semibold leading-none text-muted-foreground">--</span>
+}
+
+function PriorityChip({ priority }: { priority?: string }) {
+  const label = normalizePriorityLabel(priority)
+  if (!label) return null
+  return (
+    <span className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-foreground/[0.045] px-2 text-[12px] font-medium text-foreground/70 dark:bg-foreground/[0.07] dark:text-foreground/75">
+      <PriorityIcon priority={label} />
+      <span>{label}</span>
+    </span>
+  )
+}
+
+function ExpectedTestDateChip({ value }: { value?: string }) {
+  const text = formatRequirementDateShort(value)
+  if (!text) return null
+  const overdue = isRequirementDateOverdue(value)
+  const Icon = overdue ? CalendarX2 : CalendarDays
+  return (
+    <span className={cn('inline-flex h-6 shrink-0 items-center gap-1.5 text-[12px] font-medium', overdue ? 'text-destructive' : 'text-muted-foreground')}>
+      <Icon className="h-4 w-4" />
+      <span>{text}</span>
+    </span>
+  )
+}
+
+const TAPD_LABEL_TONES = [
+  'bg-red-500/10 text-red-700 dark:bg-red-400/15 dark:text-red-300',
+  'bg-purple-500/10 text-purple-700 dark:bg-purple-400/15 dark:text-purple-300',
+  'bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300',
+  'bg-emerald-500/10 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300',
+  'bg-amber-500/10 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300',
+] as const
+
+function labelTone(label: string) {
+  const hash = [...label].reduce((sum, char) => sum + char.charCodeAt(0), 0)
+  return TAPD_LABEL_TONES[hash % TAPD_LABEL_TONES.length]
 }
 
 function hasActiveTapdFilters(filters: TapdHomeFilters) {
@@ -381,6 +558,36 @@ function groupRequirementsByStatus(items: ExternalRequirementItem[], statuses: s
     status,
     items: items.filter(item => getIssueStatusLabel(item) === status),
   }))
+}
+
+function itemBelongsToTapdWorkspace(item: ExternalRequirementItem, tapdWorkspaceId: string) {
+  const itemWorkspaceId = getTapdWorkspaceIdFromItem(item)
+  return !itemWorkspaceId || itemWorkspaceId === tapdWorkspaceId
+}
+
+function sessionLinkedToRequirement(session: { workspaceId?: string; labels?: readonly string[] }, item: ExternalRequirementItem, workspaceId?: string | null) {
+  if (workspaceId && session.workspaceId !== workspaceId) return false
+  const labels = session.labels ?? []
+  if (labels.includes(formatLabelEntry('tapd', item.sourceItemId))) return true
+  return Boolean(item.binding?.groupName && labels.includes(formatLabelEntry('group', item.binding.groupName)))
+}
+
+function agentRunLinkedToRequirement(run: AgentRun, item: ExternalRequirementItem) {
+  if (run.target?.type === 'requirement') {
+    return run.target.pluginId === TAPD_PLUGIN_ID && run.target.sourceItemId === item.sourceItemId
+  }
+  const summary = run.triggerSummary.toLowerCase()
+  const id = item.sourceItemId.toLowerCase()
+  return summary.includes(id) || summary.includes(`tapd-${id}`)
+}
+
+function requirementHasLocalState(item: ExternalRequirementItem, labelsById: Record<string, string[]>, openTabs: TapdOpenRequirementTab[], workspaceId?: string | null) {
+  if (item.binding) return true
+  if ((labelsById[item.sourceItemId] ?? []).length > 0) return true
+  if (openTabs.some(tab => tab.sourceItemId === item.sourceItemId)) return true
+  if (readTapdRequirementWorkContext(workspaceId, item.sourceItemId).workingDirectory) return true
+  if (readTapdRequirementAgentSelection(workspaceId, item.sourceItemId).agentIds.length > 0) return true
+  return false
 }
 
 function RequirementTabStrip({
@@ -482,33 +689,167 @@ function RequirementTabStrip({
   )
 }
 
-function IssueStatusDot({ status }: { status: string }) {
+function IssueStatusIcon({ status }: { status: string }) {
   const presentation = getStatusPresentation(status)
-  return <span className={cn('h-3.5 w-3.5 shrink-0 rounded-full border-2', presentation.dot)} />
-}
-
-function IssueRow({ item, onOpen }: { item: ExternalRequirementItem; onOpen: (item: ExternalRequirementItem) => void }) {
-  const assignee = item.assignees?.[0]
+  const Icon = presentation.Icon
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(item)}
-      className="group grid w-full grid-cols-[22px_minmax(86px,120px)_minmax(0,1fr)_auto] items-center gap-2 rounded-[10px] px-4 py-3 text-left transition-colors hover:bg-foreground/[0.035]"
-    >
-      <span className="text-center text-muted-foreground">—</span>
-      <span className="font-mono text-[13px] text-muted-foreground tabular-nums">TAPD-{getRequirementShortId(item)}</span>
-      <span className="min-w-0 truncate text-[14px] font-medium text-foreground">{item.title}</span>
-      <span className="flex min-w-0 items-center gap-2 text-[12px] text-muted-foreground">
-        {item.priority && <MetaPill className="bg-foreground/[0.045] text-foreground/60">{item.priority}</MetaPill>}
-        {item.binding && <MetaPill className="bg-success/10 text-success">Bound</MetaPill>}
-        {assignee && <span className="hidden max-w-[120px] truncate sm:inline">{assignee}</span>}
-        <ArrowRight className="h-3.5 w-3.5 opacity-0 transition-opacity group-hover:opacity-100" />
-      </span>
-    </button>
+    <span className={cn('inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full', presentation.icon)}>
+      <Icon className="h-4 w-4" strokeWidth={2.35} />
+    </span>
   )
 }
 
-function IssueListSection({ status, items, collapsed, onToggleCollapsed, onOpen }: { status: string; items: ExternalRequirementItem[]; collapsed: boolean; onToggleCollapsed: (status: string) => void; onOpen: (item: ExternalRequirementItem) => void }) {
+interface RequirementLabelControlsProps {
+  labels: string[]
+  recentLabels?: string[]
+  onAddLabel?: (label: string) => void
+  onRenameLabel?: (from: string, to: string) => void
+  onRemoveLabel?: (label: string) => void
+}
+
+function promptForTapdLabel(message: string, defaultValue = ''): string | null {
+  if (typeof window === 'undefined') return null
+  const value = window.prompt(message, defaultValue)
+  const normalized = value?.trim().replace(/\s+/g, ' ')
+  return normalized ? normalized.slice(0, 32) : null
+}
+
+function TapdRequirementLabels({ labels }: Pick<RequirementLabelControlsProps, 'labels'>) {
+  if (labels.length === 0) return null
+  return (
+    <span className="inline-flex min-w-0 shrink-0 items-center gap-1 overflow-hidden">
+      {labels.slice(0, 3).map(label => (
+        <span key={label} className={cn('inline-flex h-6 max-w-[120px] shrink-0 items-center gap-1 rounded-full px-2 text-[12px] font-medium', labelTone(label))} title={label}>
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-80" />
+          <span className="truncate">{label}</span>
+        </span>
+      ))}
+      {labels.length > 3 && <span className="shrink-0 text-[12px] text-muted-foreground">+{labels.length - 3}</span>}
+    </span>
+  )
+}
+
+function TapdRequirementLabelEditor({ labels, recentLabels = [], onAddLabel, onRenameLabel, onRemoveLabel }: RequirementLabelControlsProps) {
+  const quickLabels = recentLabels.filter(label => !labels.some(existing => existing.toLowerCase() === label.toLowerCase()))
+  const addNewLabel = () => {
+    const next = promptForTapdLabel('Add label')
+    if (next) onAddLabel?.(next)
+  }
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+      {labels.map(label => (
+        <DropdownMenu key={label}>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn('inline-flex h-7 max-w-[150px] items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium transition-colors hover:opacity-85', labelTone(label))}
+              title={`Edit label: ${label}`}
+            >
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-80" />
+              <span className="truncate">{label}</span>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-[190px]">
+            <DropdownMenuItem onSelect={() => {
+              const next = promptForTapdLabel('Rename label', label)
+              if (next && next !== label) onRenameLabel?.(label, next)
+            }}>
+              <Pencil className="mr-2 h-3.5 w-3.5" />
+              Rename
+            </DropdownMenuItem>
+            <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => onRemoveLabel?.(label)}>
+              <X className="mr-2 h-3.5 w-3.5" />
+              Remove
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ))}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex h-7 items-center gap-1.5 rounded-full bg-foreground/[0.06] px-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.09] hover:text-foreground dark:bg-foreground/[0.09] dark:hover:bg-foreground/[0.13]"
+            title="Add label"
+          >
+            <Tag className="h-3.5 w-3.5" />
+            Add label
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-[230px] p-1">
+          <DropdownMenuLabel className="px-2 py-1.5 text-[12px] text-muted-foreground">Add labels…</DropdownMenuLabel>
+          {quickLabels.length ? quickLabels.map(label => (
+            <DropdownMenuItem key={label} onSelect={() => onAddLabel?.(label)} className="h-8 gap-2 text-[13px]">
+              <span className={cn('h-2 w-2 rounded-full', labelTone(label).split(' ')[0].replace('/10', ''))} />
+              <span className="truncate">{label}</span>
+            </DropdownMenuItem>
+          )) : <DropdownMenuItem disabled className="text-muted-foreground">No recent labels</DropdownMenuItem>}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={addNewLabel} className="h-8 gap-2 text-[13px]">
+            <Plus className="h-3.5 w-3.5" />
+            New label…
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}
+
+interface IssueItemProps {
+  item: ExternalRequirementItem
+  labels: string[]
+  onOpen: (item: ExternalRequirementItem) => void
+  onDelete: (item: ExternalRequirementItem) => void
+}
+
+function IssueRow({ item, labels, onOpen, onDelete }: IssueItemProps) {
+  const assignee = item.assignees?.[0]
+  const expectedTestTimeRaw = getExpectedTestTime(item)
+  const deleted = isDeletedStatus(item.status)
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(item)}
+      onKeyDown={event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onOpen(item)
+        }
+      }}
+      className="group grid h-11 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[10px] px-4 text-left transition-colors hover:bg-foreground/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/35"
+    >
+      <div className="min-w-0 truncate text-[14px] font-medium text-foreground" title={item.title}>{item.title}</div>
+      <div className="flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap text-[12px] text-muted-foreground" onClick={event => event.stopPropagation()}>
+        <PriorityChip priority={item.priority} />
+        <ExpectedTestDateChip value={expectedTestTimeRaw} />
+        <TapdRequirementLabels labels={labels} />
+        {assignee && <span className="hidden max-w-[120px] truncate sm:inline">{assignee}</span>}
+        {deleted && (
+          <button
+            type="button"
+            onClick={() => onDelete(item)}
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-destructive opacity-70 transition-opacity hover:bg-destructive/10 hover:opacity-100"
+            aria-label="Delete local requirement"
+            title="Delete local requirement"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+        <ArrowRight className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+      </div>
+    </div>
+  )
+}
+
+function IssueListSection({ status, items, collapsed, labelsById, onToggleCollapsed, onOpen, onDelete }: {
+  status: string
+  items: ExternalRequirementItem[]
+  collapsed: boolean
+  labelsById: Record<string, string[]>
+  onToggleCollapsed: (status: string) => void
+  onOpen: (item: ExternalRequirementItem) => void
+  onDelete: (item: ExternalRequirementItem) => void
+}) {
   return (
     <section className="rounded-[14px]">
       <button
@@ -516,9 +857,8 @@ function IssueListSection({ status, items, collapsed, onToggleCollapsed, onOpen 
         onClick={() => onToggleCollapsed(status)}
         className="flex h-11 w-full items-center gap-3 rounded-[12px] bg-foreground/[0.025] px-4 text-left ring-1 ring-foreground/[0.035] transition-colors hover:bg-foreground/[0.04]"
       >
-        <span className="h-4 w-4 rounded-[4px] border border-foreground/35" />
         <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform', !collapsed && 'rotate-90')} />
-        <IssueStatusDot status={status} />
+        <IssueStatusIcon status={status} />
         <span className="font-semibold text-foreground">{status}</span>
         <span className="font-mono text-sm text-muted-foreground tabular-nums">{items.length}</span>
       </button>
@@ -526,37 +866,61 @@ function IssueListSection({ status, items, collapsed, onToggleCollapsed, onOpen 
         <div className="flex h-24 items-center justify-center text-[14px] text-muted-foreground">No issues</div>
       ) : (
         <div className="py-2">
-          {items.map(item => <IssueRow key={item.sourceItemId} item={item} onOpen={onOpen} />)}
+          {items.map(item => (
+            <IssueRow
+              key={item.sourceItemId}
+              item={item}
+              labels={labelsById[item.sourceItemId] ?? []}
+              onOpen={onOpen}
+              onDelete={onDelete}
+            />
+          ))}
         </div>
       ))}
     </section>
   )
 }
 
-function BoardIssueCard({ item, onOpen }: { item: ExternalRequirementItem; onOpen: (item: ExternalRequirementItem) => void }) {
+function BoardIssueCard({ item, labels, onOpen, onDelete }: IssueItemProps) {
   const assignee = item.assignees?.[0]
+  const expectedTestTimeRaw = getExpectedTestTime(item)
+  const deleted = isDeletedStatus(item.status)
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(item)}
-      className="group w-full rounded-[14px] bg-background p-4 text-left shadow-sm ring-1 ring-foreground/[0.08] transition-[transform,box-shadow] hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-    >
-      <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
-        <span>—</span>
-        <span className="font-mono tabular-nums">TAPD-{getRequirementShortId(item)}</span>
-      </div>
-      <h3 className="mt-3 line-clamp-2 text-[15px] font-semibold leading-5 text-foreground">{item.title}</h3>
-      {item.summary && <p className="mt-2 line-clamp-2 text-[13px] leading-5 text-muted-foreground">{item.summary}</p>}
-      <div className="mt-4 flex items-center gap-2 text-[12px] text-muted-foreground">
+    <div className="group w-full rounded-[14px] bg-background p-4 text-left shadow-sm ring-1 ring-foreground/[0.08] transition-[transform,box-shadow] hover:-translate-y-0.5 hover:shadow-md focus-within:ring-2 focus-within:ring-accent/40">
+      <button type="button" onClick={() => onOpen(item)} className="block w-full text-left focus-visible:outline-none">
+        <h3 className="line-clamp-2 text-[15px] font-semibold leading-5 text-foreground">{item.title}</h3>
+        {item.summary && <p className="mt-2 line-clamp-2 text-[13px] leading-5 text-muted-foreground">{item.summary}</p>}
+      </button>
+      <div className="mt-4 flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
         {assignee && <span className="truncate">{assignee}</span>}
-        {item.binding && <MetaPill className="bg-success/10 text-success">Bound</MetaPill>}
-        {item.priority && <MetaPill className="bg-foreground/[0.045] text-foreground/60">{item.priority}</MetaPill>}
+        <PriorityChip priority={item.priority} />
+        <ExpectedTestDateChip value={expectedTestTimeRaw} />
+        <TapdRequirementLabels labels={labels} />
+        {deleted && (
+          <button
+            type="button"
+            onClick={() => onDelete(item)}
+            className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-[8px] text-destructive opacity-70 transition-opacity hover:bg-destructive/10 hover:opacity-100"
+            aria-label="Delete local requirement"
+            title="Delete local requirement"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
-    </button>
+    </div>
   )
 }
 
-function IssueBoardColumn({ status, items, collapsed, onToggleCollapsed, onOpen }: { status: string; items: ExternalRequirementItem[]; collapsed: boolean; onToggleCollapsed: (status: string) => void; onOpen: (item: ExternalRequirementItem) => void }) {
+function IssueBoardColumn({ status, items, collapsed, labelsById, onToggleCollapsed, onOpen, onDelete }: {
+  status: string
+  items: ExternalRequirementItem[]
+  collapsed: boolean
+  labelsById: Record<string, string[]>
+  onToggleCollapsed: (status: string) => void
+  onOpen: (item: ExternalRequirementItem) => void
+  onDelete: (item: ExternalRequirementItem) => void
+}) {
   const presentation = getStatusPresentation(status)
   return (
     <section className={cn('flex h-full min-h-[520px] shrink-0 flex-col rounded-[18px] p-4 transition-[width]', collapsed ? 'w-[220px]' : 'w-[310px]', presentation.column)}>
@@ -564,7 +928,7 @@ function IssueBoardColumn({ status, items, collapsed, onToggleCollapsed, onOpen 
         <button type="button" onClick={() => onToggleCollapsed(status)} className="rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground" aria-label={collapsed ? 'Expand column' : 'Collapse column'}>
           <ChevronRight className={cn('h-4 w-4 transition-transform', !collapsed && 'rotate-90')} />
         </button>
-        <IssueStatusDot status={status} />
+        <IssueStatusIcon status={status} />
         <span className={cn('truncate font-semibold', presentation.text)}>{status}</span>
         <span className="font-mono text-sm text-muted-foreground tabular-nums">{items.length}</span>
         <button type="button" className="ml-auto rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground" aria-label="Column menu">
@@ -575,7 +939,15 @@ function IssueBoardColumn({ status, items, collapsed, onToggleCollapsed, onOpen 
         <div className="flex flex-1 items-center justify-center text-[14px] text-muted-foreground">No issues</div>
       ) : (
         <div className="space-y-3">
-          {items.map(item => <BoardIssueCard key={item.sourceItemId} item={item} onOpen={onOpen} />)}
+          {items.map(item => (
+            <BoardIssueCard
+              key={item.sourceItemId}
+              item={item}
+              labels={labelsById[item.sourceItemId] ?? []}
+              onOpen={onOpen}
+              onDelete={onDelete}
+            />
+          ))}
         </div>
       ))}
     </section>
@@ -732,6 +1104,7 @@ function TapdLinkImportDialog({
 
 export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?: string }) {
   const { activeWorkspaceId } = useAppShellContext()
+  const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   // TAPD Requirements is a built-in plugin view. A live tapd-mcp-http source is
   // only required for importing/refreshing from TAPD; synced local cache should
   // remain visible even when the source is absent or disconnected in this workspace.
@@ -749,6 +1122,7 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
   const [collapsedStatuses, setCollapsedStatuses] = React.useState<Set<string>>(() => new Set(initialUiState.collapsedStatuses ?? []))
   const [expandedDefaultCollapsedStatuses, setExpandedDefaultCollapsedStatuses] = React.useState<Set<string>>(() => new Set(initialUiState.expandedDefaultCollapsedStatuses ?? []))
   const [syncingHome, setSyncingHome] = React.useState(false)
+  const [labelStore, setLabelStore] = React.useState<TapdRequirementLabelStore>(() => readTapdRequirementLabelStore(activeWorkspaceId))
   const [openTabs, setOpenTabs] = React.useState<TapdOpenRequirementTab[]>(() => initialUiState.tabs ?? [])
   const [activeTabId, setActiveTabId] = React.useState(initialSourceItemId ?? TAPD_HOME_TAB_ID)
 
@@ -765,12 +1139,44 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
     return sortStatusLabels(Array.from(new Set(visibleItems.map(getIssueStatusLabel))))
   }, [filters.status, visibleItems])
   const groupedItems = React.useMemo(() => groupRequirementsByStatus(visibleItems, visibleStatuses), [visibleItems, visibleStatuses])
+  const labelsById = React.useMemo(() => Object.fromEntries(Object.entries(labelStore.labelsByRequirement).map(([sourceItemId, labels]) => [sourceItemId, labels.map(label => label.name)])), [labelStore.labelsByRequirement])
   const workingCount = React.useMemo(() => visibleItems.filter(item => isInProgressStatus(getIssueStatusLabel(item))).length, [visibleItems])
   const filterActive = hasActiveTapdFilters(filters)
 
   const persistTabs = React.useCallback((tabs: TapdOpenRequirementTab[]) => {
     writeTapdHomeUiState(activeWorkspaceId, { tabs })
   }, [activeWorkspaceId])
+
+  const refreshRequirementLabels = React.useCallback(() => {
+    setLabelStore(readTapdRequirementLabelStore(activeWorkspaceId))
+  }, [activeWorkspaceId])
+
+  const deleteLocalRequirement = React.useCallback(async (item: ExternalRequirementItem) => {
+    if (!activeWorkspaceId || !isDeletedStatus(item.status)) return
+    const confirmed = window.confirm(`Delete the local copy of “${item.title}”? This does not delete anything from TAPD.`)
+    if (!confirmed) return
+    try {
+      if (item.binding) {
+        await window.electronAPI.unlinkRequirementItemFromGroup(activeWorkspaceId, { pluginId: TAPD_PLUGIN_ID, sourceItemId: item.sourceItemId })
+      }
+      removeTapdRequirementLabels(activeWorkspaceId, item.sourceItemId)
+      const nextCache = removeTapdCachedItem(activeWorkspaceId, item.sourceItemId)
+      setCache(nextCache)
+      refreshRequirementLabels()
+      setOpenTabs(current => {
+        const next = current.filter(tab => tab.sourceItemId !== item.sourceItemId)
+        persistTabs(next)
+        return next
+      })
+      if (activeTabId === item.sourceItemId) {
+        setActiveTabId(TAPD_HOME_TAB_ID)
+        navigate(routes.view.plugins(TAPD_PLUGIN_ID, 'board'))
+      }
+      toast.success('Deleted local TAPD requirement', { description: item.title })
+    } catch (err) {
+      toast.error('Could not delete local TAPD requirement', { description: err instanceof Error ? err.message : String(err) })
+    }
+  }, [activeTabId, activeWorkspaceId, persistTabs, refreshRequirementLabels])
 
   const openRequirementTab = React.useCallback((sourceItemId: string) => {
     setOpenTabs(current => {
@@ -822,6 +1228,7 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
     setFilters(stored.filters ?? EMPTY_TAPD_HOME_FILTERS)
     setCollapsedStatuses(new Set(stored.collapsedStatuses ?? []))
     setExpandedDefaultCollapsedStatuses(new Set(stored.expandedDefaultCollapsedStatuses ?? []))
+    setLabelStore(readTapdRequirementLabelStore(activeWorkspaceId))
     setOpenTabs(stored.tabs ?? [])
     setActiveTabId(initialSourceItemId ?? TAPD_HOME_TAB_ID)
   }, [activeWorkspaceId, initialSourceItemId])
@@ -910,19 +1317,34 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
     if (syncingHome) return
 
     setSyncingHome(true)
+    const startedAt = Date.now()
     try {
       const current = readCache(activeWorkspaceId)
       const itemsById = { ...current.itemsById }
       const syncedIds: string[] = []
+      const syncedIdSet = new Set<string>()
       let total: number | undefined
       let page = 1
+      let pageCount = 0
       let hasMore = true
+      let markedDeleted = 0
+      let autoDeleted = 0
 
       while (hasMore && page <= TAPD_SYNC_MAX_PAGES) {
+        const pageStartedAt = Date.now()
         const result = await window.electronAPI.listRequirementItems(activeWorkspaceId, TAPD_PLUGIN_ID, {
           workspaceId: tapdWorkspaceId,
           page,
           limit: TAPD_SYNC_PAGE_LIMIT,
+          skipCount: page > 1,
+        })
+        pageCount += 1
+        console.info('[TAPD] Home sync page finished', {
+          page,
+          items: result.items.length,
+          hasMore: result.hasMore,
+          total: result.total,
+          durationMs: Date.now() - pageStartedAt,
         })
         total = result.total ?? total
         for (const liveItem of result.items) {
@@ -940,14 +1362,59 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
           }
           itemsById[nextItem.sourceItemId] = nextItem
           syncedIds.push(nextItem.sourceItemId)
+          syncedIdSet.add(nextItem.sourceItemId)
         }
         hasMore = result.hasMore === true
         page += 1
       }
 
+      const syncComplete = !hasMore
+      if (syncComplete) {
+        let allRuns: AgentRun[] | null = null
+        const getAllRuns = async () => {
+          if (allRuns) return allRuns
+          try {
+            allRuns = await window.electronAPI.listAgentRuns(activeWorkspaceId, {})
+          } catch {
+            allRuns = []
+          }
+          return allRuns
+        }
+
+        for (const sourceItemId of current.listOrder) {
+          if (syncedIdSet.has(sourceItemId)) continue
+          const existing = itemsById[sourceItemId]
+          if (!existing || !itemBelongsToTapdWorkspace(existing, tapdWorkspaceId)) continue
+          const hasLocalState = requirementHasLocalState(existing, labelsById, openTabs, activeWorkspaceId)
+          const hasLinkedSession = Array.from(sessionMetaMap.values()).some(session => sessionLinkedToRequirement(session, existing, activeWorkspaceId))
+          const runs = hasLocalState || hasLinkedSession ? [] : await getAllRuns()
+          const hasAgentRun = runs.some(run => agentRunLinkedToRequirement(run, existing))
+
+          if (!hasLocalState && !hasLinkedSession && !hasAgentRun) {
+            delete itemsById[sourceItemId]
+            removeTapdRequirementLabels(activeWorkspaceId, sourceItemId)
+            autoDeleted += 1
+            continue
+          }
+
+          if (!isDeletedStatus(existing.status)) markedDeleted += 1
+          let deletedItem: ExternalRequirementItem = {
+            ...existing,
+            status: TAPD_DELETED_STATUS,
+            updatedAt: new Date().toISOString(),
+          }
+          if (deletedItem.binding) {
+            deletedItem = await persistRequirementBindingSnapshot(deletedItem)
+          }
+          itemsById[sourceItemId] = deletedItem
+        }
+      } else {
+        console.warn('[TAPD] Home sync stopped before exhausting all pages; skipping missing-item deletion pass.', { pageCount, maxPages: TAPD_SYNC_MAX_PAGES })
+      }
+
       const listOrder = [
         ...syncedIds,
-        ...current.listOrder.filter(id => !syncedIds.includes(id)),
+        ...current.listOrder.filter(id => !syncedIdSet.has(id)),
       ].filter((id, index, arr) => Boolean(itemsById[id]) && arr.indexOf(id) === index)
       const now = Date.now()
       const next: TapdRequirementCache = {
@@ -960,14 +1427,20 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
       }
       writeCache(activeWorkspaceId, next)
       setCache(next)
-      if (options?.manual) toast.success('TAPD requirements synced', { description: `${syncedIds.length} updated` })
+      refreshRequirementLabels()
+      const durationMs = Date.now() - startedAt
+      console.info('[TAPD] Home sync finished', { pageCount, updated: syncedIds.length, markedDeleted, autoDeleted, durationMs })
+      if (options?.manual) {
+        const deletedSummary = markedDeleted || autoDeleted ? ` · ${markedDeleted} marked deleted · ${autoDeleted} auto-deleted` : ''
+        toast.success('TAPD requirements synced', { description: `${syncedIds.length} updated${deletedSummary} · ${(durationMs / 1000).toFixed(1)}s` })
+      }
     } catch (err) {
       if (options?.manual) toast.error(err instanceof Error ? err.message : String(err))
       else console.warn('[TAPD] Background sync failed:', err)
     } finally {
       setSyncingHome(false)
     }
-  }, [activeWorkspaceId, connected, persistRequirementBindingSnapshot, plugin?.connectionError, syncingHome, tapdInstalled, tapdWorkspaceId])
+  }, [activeWorkspaceId, connected, labelsById, openTabs, persistRequirementBindingSnapshot, plugin?.connectionError, refreshRequirementLabels, sessionMetaMap, syncingHome, tapdInstalled, tapdWorkspaceId])
 
   React.useEffect(() => {
     if (activeTabId !== TAPD_HOME_TAB_ID || !tapdWorkspaceId || syncingHome) return
@@ -1132,22 +1605,13 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
           <RequirementDetailPage
             sourceItemId={activeRequirementId}
             onItemUpdated={() => setCache(readCache(activeWorkspaceId))}
+            onLabelsUpdated={refreshRequirementLabels}
           />
         </div>
       ) : (
         <div className="min-h-0 flex-1 bg-foreground/[0.018] p-4">
           <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[18px] bg-background shadow-sm ring-1 ring-foreground/[0.08]">
             <div className="flex h-[64px] shrink-0 items-center gap-2 border-b border-foreground/[0.06] px-6">
-              {viewMode === 'list' && (
-                <PanelHeaderCenterButton
-                  icon={syncingHome ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                  tooltip="Sync TAPD requirements"
-                  aria-label="Sync TAPD requirements"
-                  onClick={() => void syncTapdHome({ manual: true })}
-                  disabled={syncingHome}
-                  className="h-9 w-9 rounded-[10px] p-0 opacity-100 ring-1 ring-foreground/[0.08]"
-                />
-              )}
               <button
                 type="button"
                 onClick={resetFilters}
@@ -1163,7 +1627,7 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
                     onClick={() => toggleFilterValue('status', status)}
                     className={cn('inline-flex h-9 shrink-0 items-center gap-2 rounded-[10px] px-3 text-[14px] font-medium ring-1 ring-foreground/[0.08] transition-colors', filters.status.includes(status) ? 'bg-foreground/[0.055] text-foreground' : 'text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground')}
                   >
-                    <IssueStatusDot status={status} />
+                    <IssueStatusIcon status={status} />
                     {status}
                     <span className="font-mono text-xs tabular-nums text-muted-foreground/70">{allItems.filter(item => getIssueStatusLabel(item) === status).length}</span>
                   </button>
@@ -1184,6 +1648,14 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
 
               <div className="ml-auto flex shrink-0 items-center gap-2">
                 <span className="hidden h-9 items-center rounded-[10px] px-3 text-[14px] text-muted-foreground ring-1 ring-foreground/[0.08] sm:inline-flex">{workingCount} working</span>
+                <PanelHeaderCenterButton
+                  icon={syncingHome ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  tooltip="Sync TAPD requirements"
+                  aria-label="Sync TAPD requirements"
+                  onClick={() => void syncTapdHome({ manual: true })}
+                  disabled={syncingHome}
+                  className="h-9 w-9 rounded-[10px] p-0 opacity-100 ring-1 ring-foreground/[0.08]"
+                />
                 <TapdFilterMenu
                   filters={filters}
                   statusOptions={statusLabels}
@@ -1243,8 +1715,10 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
                       status={group.status}
                       items={group.items}
                       collapsed={collapsedStatuses.has(group.status)}
+                      labelsById={labelsById}
                       onToggleCollapsed={toggleStatusCollapsed}
                       onOpen={item => openRequirementTab(item.sourceItemId)}
+                      onDelete={deleteLocalRequirement}
                     />
                   ))}
                 </div>
@@ -1258,8 +1732,10 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
                       status={group.status}
                       items={group.items}
                       collapsed={collapsedStatuses.has(group.status)}
+                      labelsById={labelsById}
                       onToggleCollapsed={toggleStatusCollapsed}
                       onOpen={item => openRequirementTab(item.sourceItemId)}
+                      onDelete={deleteLocalRequirement}
                     />
                   ))}
                 </div>
@@ -2411,7 +2887,7 @@ function RequirementInfoPopover({
   )
 }
 
-export function RequirementDetailPage({ sourceItemId, onItemUpdated }: { sourceItemId: string; onItemUpdated?: (item: ExternalRequirementItem) => void }) {
+export function RequirementDetailPage({ sourceItemId, onItemUpdated, onLabelsUpdated }: { sourceItemId: string; onItemUpdated?: (item: ExternalRequirementItem) => void; onLabelsUpdated?: () => void }) {
   const { activeWorkspaceId, onOpenUrl, onSessionLabelsChange, onSessionOptionsChange } = useAppShellContext()
   const { navigateToSession } = useNavigation()
   // Keep synced cached requirements readable even when tapd-mcp-http is not enabled in this workspace.
@@ -2427,6 +2903,8 @@ export function RequirementDetailPage({ sourceItemId, onItemUpdated }: { sourceI
   const [infoFilesError, setInfoFilesError] = React.useState<string | null>(null)
   const [localComments, setLocalComments] = React.useState<RequirementComment[]>([])
   const [creatingSession, setCreatingSession] = React.useState(false)
+  const [requirementLabels, setRequirementLabels] = React.useState<string[]>(() => readTapdRequirementLabels(activeWorkspaceId, sourceItemId).map(label => label.name))
+  const [recentRequirementLabels, setRecentRequirementLabels] = React.useState<string[]>(() => getRecentTapdRequirementLabelNames(activeWorkspaceId, 5))
   const [workContext, setWorkContext] = React.useState<TapdRequirementWorkContext>(() => readTapdRequirementWorkContext(activeWorkspaceId, sourceItemId))
   const [requirementAgentIds, setRequirementAgentIds] = React.useState<string[]>(() => readTapdRequirementAgentSelection(activeWorkspaceId, sourceItemId).agentIds)
   const [agents, setAgents] = React.useState<AgentProfile[]>([])
@@ -2446,6 +2924,8 @@ export function RequirementDetailPage({ sourceItemId, onItemUpdated }: { sourceI
     setGroupName(cached ? cached.binding?.groupName ?? defaultGroupName(cached) : '')
     const nextWorkContext = readTapdRequirementWorkContext(activeWorkspaceId, sourceItemId)
     setWorkContext(nextWorkContext)
+    setRequirementLabels(readTapdRequirementLabels(activeWorkspaceId, sourceItemId).map(label => label.name))
+    setRecentRequirementLabels(getRecentTapdRequirementLabelNames(activeWorkspaceId, 5))
     setRequirementAgentIds(readTapdRequirementAgentSelection(activeWorkspaceId, sourceItemId).agentIds)
   }, [activeWorkspaceId, sourceItemId, tapdInstalled])
 
@@ -2672,6 +3152,32 @@ export function RequirementDetailPage({ sourceItemId, onItemUpdated }: { sourceI
     toast.success(next.workingDirectory ? 'Working directory saved' : 'Working directory cleared')
   }, [activeWorkspaceId, sourceItemId])
 
+  const refreshDetailLabels = React.useCallback(() => {
+    setRequirementLabels(readTapdRequirementLabels(activeWorkspaceId, sourceItemId).map(label => label.name))
+    setRecentRequirementLabels(getRecentTapdRequirementLabelNames(activeWorkspaceId, 5))
+    onLabelsUpdated?.()
+  }, [activeWorkspaceId, onLabelsUpdated, sourceItemId])
+
+  const updateDetailLabels = React.useCallback((updater: (current: string[]) => string[]) => {
+    const nextNames = updater(requirementLabels)
+    writeTapdRequirementLabels(activeWorkspaceId, sourceItemId, nextNames)
+    refreshDetailLabels()
+  }, [activeWorkspaceId, refreshDetailLabels, requirementLabels, sourceItemId])
+
+  const addDetailLabel = React.useCallback((label: string) => {
+    updateDetailLabels(current => current.some(existing => existing.toLowerCase() === label.toLowerCase()) ? current : [...current, label])
+  }, [updateDetailLabels])
+
+  const renameDetailLabel = React.useCallback((from: string, to: string) => {
+    updateDetailLabels(current => current
+      .map(label => label === from ? to : label)
+      .filter((label, index, arr) => arr.findIndex(candidate => candidate.toLowerCase() === label.toLowerCase()) === index))
+  }, [updateDetailLabels])
+
+  const removeDetailLabel = React.useCallback((label: string) => {
+    updateDetailLabels(current => current.filter(existing => existing !== label))
+  }, [updateDetailLabels])
+
   const addRequirementAgent = React.useCallback((agentId: string) => {
     const next = addTapdRequirementAgentId(activeWorkspaceId, sourceItemId, agentId)
     setRequirementAgentIds(next.agentIds)
@@ -2897,7 +3403,19 @@ export function RequirementDetailPage({ sourceItemId, onItemUpdated }: { sourceI
           <div className="space-y-5">
             <DetailSection title="Properties" open={propertiesOpen} onOpenChange={setPropertiesOpen}>
               <OptionalPropertyRow label="Status" value={item.status ? <MetaPill className={statusTone(item.status)}>{item.status}</MetaPill> : undefined} />
-              <OptionalPropertyRow label="Priority" value={item.priority ? <MetaPill className={TAPD_DETAIL_THEME.pill}>{item.priority}</MetaPill> : undefined} />
+              <OptionalPropertyRow label="Priority" value={item.priority ? <PriorityChip priority={item.priority} /> : undefined} />
+              <PropertyRow
+                label="Labels"
+                value={(
+                  <TapdRequirementLabelEditor
+                    labels={requirementLabels}
+                    recentLabels={recentRequirementLabels}
+                    onAddLabel={addDetailLabel}
+                    onRenameLabel={renameDetailLabel}
+                    onRemoveLabel={removeDetailLabel}
+                  />
+                )}
+              />
               <OptionalPropertyRow label="Assignee" value={assigneeText ? <InlineValue>{assigneeText}</InlineValue> : undefined} />
               <OptionalPropertyRow label="Due date" value={dueText} />
               <OptionalPropertyRow label="Project" value={item.project ? <InlineValue>{item.project}</InlineValue> : undefined} />

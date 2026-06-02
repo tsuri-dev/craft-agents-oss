@@ -24,6 +24,16 @@ export interface TapdRequirementAgentSelection {
   updatedAt?: number
 }
 
+export interface TapdRequirementLabelEntry {
+  name: string
+  updatedAt: number
+}
+
+export interface TapdRequirementLabelStore {
+  version: 1
+  labelsByRequirement: Record<string, TapdRequirementLabelEntry[]>
+}
+
 export const TAPD_REQUIREMENT_AGENT_TASKS: TapdRequirementAgentTask[] = [
   {
     id: 'research-requirement',
@@ -94,6 +104,119 @@ export function upsertTapdCachedItem(workspaceId: string | null | undefined, ite
   }
   writeTapdRequirementCache(workspaceId, next)
   return next
+}
+
+export function removeTapdCachedItem(workspaceId: string | null | undefined, sourceItemId: string) {
+  const current = readTapdRequirementCache(workspaceId)
+  const { [sourceItemId]: _removed, ...itemsById } = current.itemsById
+  const next: TapdRequirementCache = {
+    ...current,
+    total: undefined,
+    itemsById,
+    listOrder: current.listOrder.filter(id => id !== sourceItemId),
+    lastSyncedAt: Date.now(),
+  }
+  writeTapdRequirementCache(workspaceId, next)
+  return next
+}
+
+export function getTapdRequirementLabelStorageKey(workspaceId: string | null | undefined) {
+  return `requirement-board.${TAPD_PLUGIN_ID}.labels.${workspaceId ?? 'default'}.v1`
+}
+
+function normalizeTapdLabelName(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim().replace(/\s+/g, ' ')
+  return normalized ? normalized.slice(0, 32) : null
+}
+
+function normalizeTapdRequirementLabelEntries(value: unknown): TapdRequirementLabelEntry[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const labels: TapdRequirementLabelEntry[] = []
+  for (const entry of value) {
+    const record = entry && typeof entry === 'object' ? entry as Partial<TapdRequirementLabelEntry> : null
+    const name = normalizeTapdLabelName(record ? record.name : entry)
+    if (!name || seen.has(name.toLowerCase())) continue
+    seen.add(name.toLowerCase())
+    labels.push({ name, updatedAt: typeof record?.updatedAt === 'number' ? record.updatedAt : Date.now() })
+  }
+  return labels.sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+export function emptyTapdRequirementLabelStore(): TapdRequirementLabelStore {
+  return { version: TAPD_CACHE_STORAGE_VERSION, labelsByRequirement: {} }
+}
+
+export function readTapdRequirementLabelStore(workspaceId: string | null | undefined): TapdRequirementLabelStore {
+  if (typeof window === 'undefined' || !window.localStorage) return emptyTapdRequirementLabelStore()
+  try {
+    const raw = window.localStorage.getItem(getTapdRequirementLabelStorageKey(workspaceId))
+    if (!raw) return emptyTapdRequirementLabelStore()
+    const parsed = JSON.parse(raw) as Partial<TapdRequirementLabelStore>
+    const labelsByRequirement: Record<string, TapdRequirementLabelEntry[]> = {}
+    if (parsed.labelsByRequirement && typeof parsed.labelsByRequirement === 'object') {
+      for (const [sourceItemId, labels] of Object.entries(parsed.labelsByRequirement)) {
+        const normalized = normalizeTapdRequirementLabelEntries(labels)
+        if (normalized.length > 0) labelsByRequirement[sourceItemId] = normalized
+      }
+    }
+    return { version: TAPD_CACHE_STORAGE_VERSION, labelsByRequirement }
+  } catch {
+    return emptyTapdRequirementLabelStore()
+  }
+}
+
+export function writeTapdRequirementLabelStore(workspaceId: string | null | undefined, store: TapdRequirementLabelStore) {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  try {
+    window.localStorage.setItem(getTapdRequirementLabelStorageKey(workspaceId), JSON.stringify(store))
+  } catch {
+    // Labels are a local UI convenience; ignore storage failures.
+  }
+}
+
+export function readTapdRequirementLabels(workspaceId: string | null | undefined, sourceItemId: string): TapdRequirementLabelEntry[] {
+  return readTapdRequirementLabelStore(workspaceId).labelsByRequirement[sourceItemId] ?? []
+}
+
+export function writeTapdRequirementLabels(workspaceId: string | null | undefined, sourceItemId: string, names: readonly string[]) {
+  const store = readTapdRequirementLabelStore(workspaceId)
+  const now = Date.now()
+  const existing = new Map((store.labelsByRequirement[sourceItemId] ?? []).map(label => [label.name.toLowerCase(), label.updatedAt]))
+  const labels = normalizeTapdRequirementLabelEntries(names.map(name => ({ name, updatedAt: existing.get(name.trim().toLowerCase()) ?? now })))
+  const labelsByRequirement = { ...store.labelsByRequirement }
+  if (labels.length > 0) labelsByRequirement[sourceItemId] = labels
+  else delete labelsByRequirement[sourceItemId]
+  const next: TapdRequirementLabelStore = { version: TAPD_CACHE_STORAGE_VERSION, labelsByRequirement }
+  writeTapdRequirementLabelStore(workspaceId, next)
+  return labels
+}
+
+export function removeTapdRequirementLabels(workspaceId: string | null | undefined, sourceItemId: string) {
+  const store = readTapdRequirementLabelStore(workspaceId)
+  if (!store.labelsByRequirement[sourceItemId]) return store
+  const labelsByRequirement = { ...store.labelsByRequirement }
+  delete labelsByRequirement[sourceItemId]
+  const next: TapdRequirementLabelStore = { version: TAPD_CACHE_STORAGE_VERSION, labelsByRequirement }
+  writeTapdRequirementLabelStore(workspaceId, next)
+  return next
+}
+
+export function getRecentTapdRequirementLabelNames(workspaceId: string | null | undefined, limit = 5): string[] {
+  const store = readTapdRequirementLabelStore(workspaceId)
+  const latestByName = new Map<string, { name: string; updatedAt: number }>()
+  for (const labels of Object.values(store.labelsByRequirement)) {
+    for (const label of labels) {
+      const key = label.name.toLowerCase()
+      const current = latestByName.get(key)
+      if (!current || label.updatedAt > current.updatedAt) latestByName.set(key, label)
+    }
+  }
+  return Array.from(latestByName.values())
+    .sort((a, b) => b.updatedAt - a.updatedAt || a.name.localeCompare(b.name))
+    .slice(0, limit)
+    .map(label => label.name)
 }
 
 export function getTapdRequirementWorkContextStorageKey(workspaceId: string | null | undefined, sourceItemId: string) {

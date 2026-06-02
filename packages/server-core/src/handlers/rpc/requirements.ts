@@ -27,6 +27,7 @@ import type { LoadedSource } from '@craft-agent/shared/sources'
 
 const TAPD_PLUGIN_ID = 'tapd'
 const TAPD_SOURCE_SLUG = 'tapd-mcp-http'
+const TAPD_DELETED_STATUS = '已删除'
 const BINDINGS_FILENAME = 'requirement-bindings.json'
 
 export const HANDLED_CHANNELS = [
@@ -236,7 +237,22 @@ function normalizeTapdStory(
     ...splitPeople(raw.developer),
   ].filter((person, index, arr) => arr.indexOf(person) === index)
   const priority = text(raw.priority_name ?? raw.priority_label ?? raw.v_priority ?? raw.priority)
-  const dueAt = text(raw.due ?? raw.due_date ?? raw.release_time ?? raw.release_date ?? raw.completed)
+  const dueAt = text(
+    raw.expected_test_time
+      ?? raw.expected_test_date
+      ?? raw.estimated_test_time
+      ?? raw.estimated_test_date
+      ?? raw.test_time
+      ?? raw.test_date
+      ?? raw['预计提测时间']
+      ?? raw['预计提测']
+      ?? raw['提测时间']
+      ?? raw.due
+      ?? raw.due_date
+      ?? raw.release_time
+      ?? raw.release_date
+      ?? raw.completed,
+  )
   const beginAt = text(raw.begin ?? raw.begin_date)
   const createdAt = text(raw.created ?? raw.created_at)
   const updatedAt = text(raw.modified ?? raw.modified_at ?? raw.updated_at)
@@ -378,7 +394,7 @@ function buildTapdArgs(filters: RequirementListFilters, detailId?: string): Reco
     limit: filters.limit ?? 30,
     page: filters.page ?? 1,
     order: 'modified desc',
-    fields: 'id,name,status,v_status,owner,developer,creator,begin,due,due_date,workspace_id,created,modified,priority,workitem_type_id,category_id,category_name,label,description,version,version_name,release_id,release_name',
+    fields: 'id,name,status,v_status,owner,developer,creator,begin,due,due_date,expected_test_time,expected_test_date,estimated_test_time,estimated_test_date,test_time,test_date,custom_fields,custom_field_values,workspace_id,created,modified,priority,workitem_type_id,category_id,category_name,label,description,version,version_name,release_id,release_name',
   }
   if (detailId) {
     args.id = detailId
@@ -651,10 +667,12 @@ export function registerRequirementsHandlers(server: RpcServer, deps: HandlerDep
     const args = buildTapdArgs(filters)
     const [listPayload, countPayload] = await Promise.all([
       callTapdTool(source, 'stories_get', args),
-      callTapdTool(source, 'stories_count', { ...args, limit: undefined, page: undefined, fields: undefined, order: undefined }).catch(error => {
-        log.warn('TAPD stories_count failed:', error)
-        return null
-      }),
+      filters.skipCount
+        ? Promise.resolve(null)
+        : callTapdTool(source, 'stories_count', { ...args, limit: undefined, page: undefined, fields: undefined, order: undefined }).catch(error => {
+          log.warn('TAPD stories_count failed:', error)
+          return null
+        }),
     ])
     const bindings = readBindingStore(workspace.rootPath).bindings
     let items: ExternalRequirementItem[] = extractStoryRows(listPayload).map(row => {
@@ -693,7 +711,12 @@ export function registerRequirementsHandlers(server: RpcServer, deps: HandlerDep
     }
     const payload = await callTapdTool(source, 'stories_get', buildTapdArgs(filters, sourceItemId))
     const row = extractStoryRows(payload)[0]
-    const baseItem = normalizeTapdStory(row ?? { id: sourceItemId }, filters.workspaceId, binding)
+    if (!row) {
+      const deletedItem = normalizeTapdStory({ ...(binding?.itemSnapshot ?? {}), id: sourceItemId, status: TAPD_DELETED_STATUS, v_status: TAPD_DELETED_STATUS }, filters.workspaceId, binding)
+      writeTapdRequirementSnapshot(workspace.rootPath, deletedItem)
+      return { item: deletedItem }
+    }
+    const baseItem = normalizeTapdStory(row, filters.workspaceId, binding)
     let contentImages: ExternalRequirementItem['contentImages'] = []
     let comments: ExternalRequirementItem['comments'] = []
     if (filters.workspaceId) {
@@ -722,7 +745,7 @@ export function registerRequirementsHandlers(server: RpcServer, deps: HandlerDep
       contentImages = extractDescImages(imagePayload)
       comments = normalizeTapdComments(commentsPayload)
     }
-    const item = normalizeTapdStory(row ?? { id: sourceItemId }, filters.workspaceId, binding, contentImages, comments)
+    const item = normalizeTapdStory(row, filters.workspaceId, binding, contentImages, comments)
     writeTapdRequirementSnapshot(workspace.rootPath, item)
     return { item }
   })

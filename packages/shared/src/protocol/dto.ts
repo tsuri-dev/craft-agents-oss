@@ -266,6 +266,8 @@ export interface RequirementListFilters {
   bindingState?: 'all' | 'bound' | 'unbound'
   page?: number
   limit?: number
+  /** Skip the expensive TAPD count call. Pagination falls back to `items.length >= limit`. */
+  skipCount?: boolean
 }
 
 export interface RequirementListResult {
