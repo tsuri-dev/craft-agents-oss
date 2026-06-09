@@ -157,6 +157,8 @@
   "chat.learnMore": "Dowiedz się więcej",
   "chat.mentionFilesSkillsSources": "Wspomnij pliki, umiejętności, źródła",
   "chat.modelPicker.contextSection": "Kontekst",
+  "chat.modelPicker.fastMode": "Tryb szybki",
+  "chat.modelPicker.fastModeDesc": "Preferuj niższe opóźnienia, gdy są obsługiwane",
   "chat.modelPicker.modelsSection": "Modele",
   "chat.modelPicker.openAiSettings": "Otwórz ustawienia AI",
   "chat.modelPicker.supportsImagesOff": "Obrazy wyłączone — kliknij, aby włączyć",
@@ -261,6 +263,7 @@
   "chatInput.placeholder.typeMessage": "Napisz wiadomość...",
   "chatInput.placeholder.workOn": "Nad czym chcesz pracować?",
   "commands.searchCommands": "Szukaj poleceń...",
+  "common.agent": "Agent",
   "common.back": "Wstecz",
   "common.backToList": "Wróć do listy",
   "common.browse": "Przeglądaj",
@@ -1042,6 +1045,8 @@
   "settings.tools.builtInBrowser": "Wbudowana przeglądarka",
   "settings.tools.builtInBrowserDesc": "Wyłącz, jeśli używasz zewnętrznych narzędzi przeglądarki, takich jak Playwright, Puppeteer lub serwery MCP przeglądarki.",
   "settings.tools.title": "Narzędzia",
+  "settings.usage.description": "Token usage and cost",
+  "settings.usage.title": "Usage",
   "settings.workspace.advanced": "Zaawansowane",
   "settings.workspace.atLeast2Modes": "Wymagane co najmniej 2 tryby",
   "settings.workspace.defaultMode": "Domyślny tryb",
@@ -1437,7 +1442,5 @@
   "workspace.selectWorkspaceDesc": "Wybierz Workspace na tym serwerze lub utwórz nowy.",
   "workspace.selectWorkspacePlaceholder": "Wybierz Workspace...",
   "workspace.serverAuthToken": "Token uwierzytelniający serwera",
-  "workspace.underDefaultFolder": "w folderze .craft-agent",
-  "settings.usage.title": "Usage",
-  "settings.usage.description": "Token usage and cost"
+  "workspace.underDefaultFolder": "w folderze .craft-agent"
 }

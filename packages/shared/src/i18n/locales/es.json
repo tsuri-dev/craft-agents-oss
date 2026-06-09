@@ -157,6 +157,8 @@
   "chat.learnMore": "Más información",
   "chat.mentionFilesSkillsSources": "Menciona archivos, habilidades, fuentes",
   "chat.modelPicker.contextSection": "Contexto",
+  "chat.modelPicker.fastMode": "Modo rápido",
+  "chat.modelPicker.fastModeDesc": "Preferir menor latencia cuando sea compatible",
   "chat.modelPicker.modelsSection": "Modelos",
   "chat.modelPicker.openAiSettings": "Abrir ajustes de IA",
   "chat.modelPicker.supportsImagesOff": "Imágenes deshabilitadas — haz clic para habilitar",
@@ -261,6 +263,7 @@
   "chatInput.placeholder.typeMessage": "Escribe un mensaje...",
   "chatInput.placeholder.workOn": "¿En qué te gustaría trabajar?",
   "commands.searchCommands": "Buscar comandos...",
+  "common.agent": "Agente",
   "common.back": "Atrás",
   "common.backToList": "Volver a la lista",
   "common.browse": "Explorar",
@@ -1042,6 +1045,8 @@
   "settings.tools.builtInBrowser": "Navegador integrado",
   "settings.tools.builtInBrowserDesc": "Desactiva si usas herramientas de navegador externas como Playwright, Puppeteer o servidores MCP de navegador.",
   "settings.tools.title": "Herram.",
+  "settings.usage.description": "Token usage and cost",
+  "settings.usage.title": "Usage",
   "settings.workspace.advanced": "Avanzado",
   "settings.workspace.atLeast2Modes": "Se requieren al menos 2 modos",
   "settings.workspace.defaultMode": "Modo predeterminado",
@@ -1437,7 +1442,5 @@
   "workspace.selectWorkspaceDesc": "Elige un Workspace en este servidor o crea uno nuevo.",
   "workspace.selectWorkspacePlaceholder": "Selecciona un Workspace...",
   "workspace.serverAuthToken": "Token de autenticación del servidor",
-  "workspace.underDefaultFolder": "bajo la carpeta .craft-agent",
-  "settings.usage.title": "Usage",
-  "settings.usage.description": "Token usage and cost"
+  "workspace.underDefaultFolder": "bajo la carpeta .craft-agent"
 }

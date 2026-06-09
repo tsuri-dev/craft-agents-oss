@@ -263,6 +263,7 @@
   "chatInput.placeholder.typeMessage": "Type a message...",
   "chatInput.placeholder.workOn": "What would you like to work on?",
   "commands.searchCommands": "Search commands...",
+  "common.agent": "Agent",
   "common.back": "Back",
   "common.backToList": "Back to list",
   "common.browse": "Browse",
@@ -1044,6 +1045,8 @@
   "settings.tools.builtInBrowser": "Built-in browser",
   "settings.tools.builtInBrowserDesc": "Disable if you use external browser tools like Playwright, Puppeteer, or browser MCP servers.",
   "settings.tools.title": "Tools",
+  "settings.usage.description": "Token usage and cost",
+  "settings.usage.title": "Usage",
   "settings.workspace.advanced": "Advanced",
   "settings.workspace.atLeast2Modes": "At least 2 modes required",
   "settings.workspace.defaultMode": "Default mode",
@@ -1439,7 +1442,5 @@
   "workspace.selectWorkspaceDesc": "Choose a workspace on this server, or create a new one.",
   "workspace.selectWorkspacePlaceholder": "Select a workspace...",
   "workspace.serverAuthToken": "Server authentication token",
-  "workspace.underDefaultFolder": "under .craft-agent folder",
-  "settings.usage.title": "Usage",
-  "settings.usage.description": "Token usage and cost"
+  "workspace.underDefaultFolder": "under .craft-agent folder"
 }

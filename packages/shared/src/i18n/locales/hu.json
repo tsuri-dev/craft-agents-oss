@@ -157,6 +157,8 @@
   "chat.learnMore": "Tudj meg többet",
   "chat.mentionFilesSkillsSources": "Fájlok, skillek, források megemlítése",
   "chat.modelPicker.contextSection": "Kontextus",
+  "chat.modelPicker.fastMode": "Gyors mód",
+  "chat.modelPicker.fastModeDesc": "Alacsonyabb késleltetés előnyben részesítése, ha támogatott",
   "chat.modelPicker.modelsSection": "Modellek",
   "chat.modelPicker.openAiSettings": "AI beállítások megnyitása",
   "chat.modelPicker.supportsImagesOff": "Képbevitel kikapcsolva — kattints a bekapcsoláshoz",
@@ -261,6 +263,7 @@
   "chatInput.placeholder.typeMessage": "Írj egy üzenetet...",
   "chatInput.placeholder.workOn": "Min szeretnél dolgozni?",
   "commands.searchCommands": "Parancsok keresése...",
+  "common.agent": "Ügynök",
   "common.back": "Vissza",
   "common.backToList": "Vissza a listához",
   "common.browse": "Tallózás",
@@ -1042,6 +1045,8 @@
   "settings.tools.builtInBrowser": "Beépített böngésző",
   "settings.tools.builtInBrowserDesc": "Tiltsd le, ha külső böngészőeszközöket használsz, például Playwright, Puppeteer vagy böngésző MCP szervereket.",
   "settings.tools.title": "Eszközök",
+  "settings.usage.description": "Token usage and cost",
+  "settings.usage.title": "Usage",
   "settings.workspace.advanced": "Speciális",
   "settings.workspace.atLeast2Modes": "Legalább 2 mód szükséges",
   "settings.workspace.defaultMode": "Alapértelmezett mód",
@@ -1437,7 +1442,5 @@
   "workspace.selectWorkspaceDesc": "Válassz egy munkaterületet ezen a szerveren, vagy hozz létre újat.",
   "workspace.selectWorkspacePlaceholder": "Válassz munkaterületet...",
   "workspace.serverAuthToken": "Szerver hitelesítési token",
-  "workspace.underDefaultFolder": "a .craft-agent mappában",
-  "settings.usage.title": "Usage",
-  "settings.usage.description": "Token usage and cost"
+  "workspace.underDefaultFolder": "a .craft-agent mappában"
 }

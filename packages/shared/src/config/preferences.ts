@@ -117,11 +117,13 @@ export function setPersistedUiLanguage(code: LanguageCode): void {
 /**
  * Format preferences for inclusion in system prompt
  */
-export function formatPreferencesForPrompt(): string {
+export function formatPreferencesForPrompt(options?: { languageCode?: LanguageCode }): string {
   const prefs = loadPreferences();
 
-  // Derive language from the app's i18n setting (Appearance > Language).
-  const langCode = (i18n.resolvedLanguage ?? 'en') as LanguageCode;
+  // Prefer an explicit per-session language (session.preferredLanguage) when
+  // provided; otherwise fall back to the app's global i18n setting (Appearance
+  // > Language).
+  const langCode = (options?.languageCode ?? i18n.resolvedLanguage ?? 'en') as LanguageCode;
   const langEntry = LOCALE_REGISTRY[langCode];
   const langName = langEntry?.nativeName ?? 'English';
 

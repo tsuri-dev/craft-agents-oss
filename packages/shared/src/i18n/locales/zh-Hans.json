@@ -263,6 +263,7 @@
   "chatInput.placeholder.typeMessage": "输入消息...",
   "chatInput.placeholder.workOn": "想做什么?",
   "commands.searchCommands": "搜索命令...",
+  "common.agent": "Agent",
   "common.back": "返回",
   "common.backToList": "返回列表",
   "common.browse": "浏览",
@@ -1044,6 +1045,8 @@
   "settings.tools.builtInBrowser": "内置浏览器",
   "settings.tools.builtInBrowserDesc": "如果使用外部浏览器工具 (如 Playwright、Puppeteer 或浏览器 MCP 服务器) 则禁用。",
   "settings.tools.title": "工具",
+  "settings.usage.description": "Token 用量和成本",
+  "settings.usage.title": "用量",
   "settings.workspace.advanced": "高级",
   "settings.workspace.atLeast2Modes": "至少需要 2 种模式",
   "settings.workspace.defaultMode": "默认模式",
@@ -1439,7 +1442,5 @@
   "workspace.selectWorkspaceDesc": "选择此服务器上的 Workspace 或创建新的。",
   "workspace.selectWorkspacePlaceholder": "选择 Workspace...",
   "workspace.serverAuthToken": "服务器认证令牌",
-  "workspace.underDefaultFolder": ".craft-agent 文件夹下",
-  "settings.usage.title": "用量",
-  "settings.usage.description": "Token 用量和成本"
+  "workspace.underDefaultFolder": ".craft-agent 文件夹下"
 }

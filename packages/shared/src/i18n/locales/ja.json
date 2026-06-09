@@ -157,6 +157,8 @@
   "chat.learnMore": "詳細を見る",
   "chat.mentionFilesSkillsSources": "ファイル、スキル、ソースをメンション",
   "chat.modelPicker.contextSection": "コンテキスト",
+  "chat.modelPicker.fastMode": "高速モード",
+  "chat.modelPicker.fastModeDesc": "対応時は低レイテンシを優先",
   "chat.modelPicker.modelsSection": "モデル",
   "chat.modelPicker.openAiSettings": "AI 設定を開く",
   "chat.modelPicker.supportsImagesOff": "画像入力は無効 — クリックして有効化",
@@ -261,6 +263,7 @@
   "chatInput.placeholder.typeMessage": "メッセージを入力...",
   "chatInput.placeholder.workOn": "何に取り組みますか？",
   "commands.searchCommands": "コマンドを検索...",
+  "common.agent": "エージェント",
   "common.back": "戻る",
   "common.backToList": "リストに戻る",
   "common.browse": "参照",
@@ -1042,6 +1045,8 @@
   "settings.tools.builtInBrowser": "組み込みブラウザ",
   "settings.tools.builtInBrowserDesc": "Playwright、Puppeteer、またはブラウザMCPサーバーなどの外部ブラウザツールを使用する場合は無効にしてください。",
   "settings.tools.title": "ツール",
+  "settings.usage.description": "Token usage and cost",
+  "settings.usage.title": "Usage",
   "settings.workspace.advanced": "詳細設定",
   "settings.workspace.atLeast2Modes": "少なくとも2つのモードが必要です",
   "settings.workspace.defaultMode": "デフォルトモード",
@@ -1437,7 +1442,5 @@
   "workspace.selectWorkspaceDesc": "このサーバー上のWorkspaceを選択するか、新規作成してください。",
   "workspace.selectWorkspacePlaceholder": "Workspaceを選択...",
   "workspace.serverAuthToken": "サーバー認証トークン",
-  "workspace.underDefaultFolder": ".craft-agentフォルダ内",
-  "settings.usage.title": "Usage",
-  "settings.usage.description": "Token usage and cost"
+  "workspace.underDefaultFolder": ".craft-agentフォルダ内"
 }

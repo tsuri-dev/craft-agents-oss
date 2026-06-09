@@ -42,7 +42,7 @@ import { debug } from '../utils/debug.ts';
 import { getStatusCategory } from '../statuses/storage.ts';
 import { readSessionHeader, readSessionJsonl } from './jsonl.ts';
 import { sessionPersistenceQueue } from './persistence-queue.ts';
-import { getPreferredLanguageCode } from '../config/preferences.ts';
+import { getPersistedUiLanguage } from '../config/preferences.ts';
 
 // Re-export types for convenience
 export type { SessionConfig } from './types.ts';
@@ -213,7 +213,7 @@ export async function createSession(
     lastUsedAt: now,
     workingDirectory: options?.workingDirectory,
     remoteTarget: options?.remoteTarget,
-    preferredLanguage: options?.preferredLanguage ?? getPreferredLanguageCode(),
+    preferredLanguage: options?.preferredLanguage ?? getPersistedUiLanguage(),
     sdkCwd,
     permissionMode: options?.permissionMode,
     enabledSourceSlugs: options?.enabledSourceSlugs,
@@ -279,7 +279,7 @@ export async function getOrCreateSessionById(
     id: sessionId,
     workspaceRootPath,
     sdkCwd,
-    preferredLanguage: getPreferredLanguageCode(),
+    preferredLanguage: getPersistedUiLanguage(),
     createdAt: now,
     lastUsedAt: now,
   };
