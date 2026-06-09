@@ -368,7 +368,9 @@ Please continue the conversation naturally from where we left off.
     }
 
     // Load and format preferences (function loads internally)
-    this.pinnedPreferencesPrompt = formatPreferencesForPrompt();
+    this.pinnedPreferencesPrompt = formatPreferencesForPrompt({
+      languageCode: this.config.session?.preferredLanguage,
+    });
     return this.pinnedPreferencesPrompt;
   }
 

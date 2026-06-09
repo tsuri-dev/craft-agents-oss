@@ -86,6 +86,9 @@ interface CompactSessionListFilterProps {
   isStateSubView: boolean
   showAgentTasks: boolean
   onShowAgentTasksChange: (show: boolean | ((prev: boolean) => boolean)) => void
+  agentRunningFilter: boolean
+  onAgentRunningFilterChange: (show: boolean | ((prev: boolean) => boolean)) => void
+  runningAgentSessionCount: number
   onOpenSearch: () => void
 }
 
@@ -103,6 +106,9 @@ export function CompactSessionListFilter({
   isStateSubView,
   showAgentTasks,
   onShowAgentTasksChange,
+  agentRunningFilter,
+  onAgentRunningFilterChange,
+  runningAgentSessionCount,
   onOpenSearch,
 }: CompactSessionListFilterProps) {
   const { t } = useTranslation()
@@ -132,7 +138,7 @@ export function CompactSessionListFilter({
     }
   }, [isSearching, trimmedQuery, effectiveSessionStatuses, flatLabelItems])
 
-  const hasUserFilter = listFilter.size > 0 || labelFilter.size > 0 || showAgentTasks
+  const hasUserFilter = listFilter.size > 0 || labelFilter.size > 0 || showAgentTasks || agentRunningFilter
   const hasAnyFilter =
     hasUserFilter
     || pinnedFilters.pinnedFlagged
@@ -208,6 +214,7 @@ export function CompactSessionListFilter({
               onClick={() => {
                 setListFilter(new Map())
                 setLabelFilter(new Map())
+                onAgentRunningFilterChange(false)
                 onShowAgentTasksChange(false)
               }}
               className="text-xs text-muted-foreground hover:text-foreground"
@@ -251,6 +258,17 @@ export function CompactSessionListFilter({
 
           {!isSearching && (
             <Section title="Visibility">
+              <FilterRow
+                icon={<Bot className="h-4 w-4" />}
+                label={
+                  <span className="flex items-center gap-2">
+                    <span>Agent</span>
+                    <span className="text-[10px] tabular-nums text-muted-foreground">{runningAgentSessionCount}</span>
+                  </span>
+                }
+                radioSelected={agentRunningFilter}
+                onTap={() => onAgentRunningFilterChange(prev => !prev)}
+              />
               <FilterRow
                 icon={<Bot className="h-4 w-4" />}
                 label="Show agent tasks"

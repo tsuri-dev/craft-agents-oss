@@ -523,6 +523,7 @@ export function buildTapdAgentInstructionPrompt(
   agentProfileId: string,
   item: ExternalRequirementItem,
   workContext?: TapdRequirementWorkContext,
+  userInstructions?: string,
 ): string {
   void agentProfileId
   void workContext
@@ -534,6 +535,16 @@ export function buildTapdAgentInstructionPrompt(
     'Save requirement-specific notes and artifacts in the requirement folder when useful.',
     'Return a concise final summary that can be posted as a requirement comment.',
   ]
+
+  const trimmedInstructions = userInstructions?.trim()
+  if (trimmedInstructions) {
+    lines.push(
+      '',
+      'The user added specific instructions for this run:',
+      trimmedInstructions,
+      'Prioritize these instructions while still following your Agent Profile.',
+    )
+  }
 
   return lines.join('\n')
 }

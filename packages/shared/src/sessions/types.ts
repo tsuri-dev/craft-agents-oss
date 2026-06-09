@@ -10,6 +10,7 @@
  */
 
 import type { PermissionMode } from '../agent/mode-manager.ts';
+import type { LanguageCode } from '../i18n/registry.ts';
 import type { ThinkingLevel } from '../agent/thinking-levels.ts';
 import type { StoredAttachment, MessageRole, ToolStatus, AuthRequestType, AuthStatus, CredentialInputMode, StoredMessage } from '@craft-agent/core/types';
 
@@ -33,7 +34,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   // Read tracking
   'lastReadMessageId', 'hasUnread',
   // Config
-  'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory', 'remoteTarget',
+  'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory', 'remoteTarget', 'preferredLanguage',
   // Model/Connection
   'model', 'llmConnection', 'connectionLocked', 'thinkingLevel', 'fastMode', 'modelSwitchFromSdkSessionId',
   // Sharing
@@ -149,6 +150,8 @@ export interface SessionConfig {
   workingDirectory?: string;
   /** Remote execution target metadata for SSH-backed sessions. */
   remoteTarget?: SessionRemoteTarget;
+  /** Preferred assistant language snapped at session creation. */
+  preferredLanguage?: LanguageCode;
   /** SDK cwd for session storage - set once at creation, never changes. Ensures SDK can find session transcripts regardless of workingDirectory changes. */
   sdkCwd?: string;
   /** Shared viewer URL (if shared via viewer) */
@@ -273,6 +276,8 @@ export interface SessionHeader {
   workingDirectory?: string;
   /** Remote execution target metadata for SSH-backed sessions. */
   remoteTarget?: SessionRemoteTarget;
+  /** Preferred assistant language snapped at session creation. */
+  preferredLanguage?: LanguageCode;
   /** SDK cwd for session storage - set once at creation, never changes */
   sdkCwd?: string;
   /** Shared viewer URL (if shared via viewer) */
@@ -368,6 +373,8 @@ export interface SessionMetadata {
   workingDirectory?: string;
   /** Remote execution target metadata for SSH-backed sessions. */
   remoteTarget?: SessionRemoteTarget;
+  /** Preferred assistant language snapped at session creation. */
+  preferredLanguage?: LanguageCode;
   /** SDK cwd for session storage - set once at creation, never changes */
   sdkCwd?: string;
   /** Role/type of the last message (for badge display without loading messages) */

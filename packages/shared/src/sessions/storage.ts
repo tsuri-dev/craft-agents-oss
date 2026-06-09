@@ -42,6 +42,7 @@ import { debug } from '../utils/debug.ts';
 import { getStatusCategory } from '../statuses/storage.ts';
 import { readSessionHeader, readSessionJsonl } from './jsonl.ts';
 import { sessionPersistenceQueue } from './persistence-queue.ts';
+import { getPreferredLanguageCode } from '../config/preferences.ts';
 
 // Re-export types for convenience
 export type { SessionConfig } from './types.ts';
@@ -180,6 +181,7 @@ export async function createSession(
     name?: string;
     workingDirectory?: string;
     remoteTarget?: SessionConfig['remoteTarget'];
+    preferredLanguage?: SessionConfig['preferredLanguage'];
     permissionMode?: SessionConfig['permissionMode'];
     enabledSourceSlugs?: string[];
     model?: string;
@@ -211,6 +213,7 @@ export async function createSession(
     lastUsedAt: now,
     workingDirectory: options?.workingDirectory,
     remoteTarget: options?.remoteTarget,
+    preferredLanguage: options?.preferredLanguage ?? getPreferredLanguageCode(),
     sdkCwd,
     permissionMode: options?.permissionMode,
     enabledSourceSlugs: options?.enabledSourceSlugs,
@@ -258,6 +261,7 @@ export async function getOrCreateSessionById(
       lastUsedAt: existing.lastUsedAt,
       sdkCwd: existing.sdkCwd,
       workingDirectory: existing.workingDirectory,
+      preferredLanguage: existing.preferredLanguage,
     };
   }
 
@@ -275,6 +279,7 @@ export async function getOrCreateSessionById(
     id: sessionId,
     workspaceRootPath,
     sdkCwd,
+    preferredLanguage: getPreferredLanguageCode(),
     createdAt: now,
     lastUsedAt: now,
   };
@@ -538,6 +543,7 @@ export async function updateSessionMetadata(
     | 'workingDirectory'
     | 'sdkCwd'
     | 'permissionMode'
+    | 'preferredLanguage'
     | 'sharedUrl'
     | 'sharedId'
     | 'model'
@@ -558,6 +564,7 @@ export async function updateSessionMetadata(
   if (updates.workingDirectory !== undefined) session.workingDirectory = updates.workingDirectory;
   if (updates.sdkCwd !== undefined) session.sdkCwd = updates.sdkCwd;
   if (updates.permissionMode !== undefined) session.permissionMode = updates.permissionMode;
+  if (updates.preferredLanguage !== undefined) session.preferredLanguage = updates.preferredLanguage;
   if ('lastReadMessageId' in updates) session.lastReadMessageId = updates.lastReadMessageId;
   if ('hasUnread' in updates) session.hasUnread = updates.hasUnread;
   if ('sharedUrl' in updates) session.sharedUrl = updates.sharedUrl;

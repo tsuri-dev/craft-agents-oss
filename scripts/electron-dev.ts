@@ -24,6 +24,18 @@ const MAIN_PROCESS_ALIAS: Record<string, string> = {
   "abort-controller": join(ROOT_DIR, "apps/electron/src/main/shims/abort-controller.cjs"),
 };
 
+// claude-agent-sdk@0.2.123 ships sdk.mjs which calls createRequire(import.meta.url)
+// at module load. esbuild's ESM→CJS bundle leaves import.meta.url undefined in the CJS
+// output, so createRequire throws and the entire main process fails to boot. Inject a
+// CJS-safe import.meta.url (the bundle's own file URL) so createRequire resolves correctly.
+const MAIN_IMPORT_META_URL_IDENT = "__craftCjsImportMetaUrl";
+const MAIN_PROCESS_BANNER: Record<string, string> = {
+  js: `const ${MAIN_IMPORT_META_URL_IDENT} = require("url").pathToFileURL(__filename).href;`,
+};
+function mainProcessDefines(base: Record<string, string>): Record<string, string> {
+  return { ...base, "import.meta.url": MAIN_IMPORT_META_URL_IDENT };
+}
+
 // MCP server paths
 const SESSION_SERVER_DIR = join(ROOT_DIR, "packages/session-mcp-server");
 const SESSION_SERVER_OUTPUT = join(SESSION_SERVER_DIR, "dist/index.js");
@@ -308,7 +320,7 @@ async function runEsbuild(
   entryPoint: string,
   outfile: string,
   defines: Record<string, string> = {},
-  options: { packagesExternal?: boolean; alias?: Record<string, string> } = {}
+  options: { packagesExternal?: boolean; alias?: Record<string, string>; banner?: Record<string, string> } = {}
 ): Promise<{ success: boolean; error?: string }> {
   try {
     await esbuild.build({
@@ -320,6 +332,7 @@ async function runEsbuild(
       external: MAIN_BUNDLE_EXTERNALS,
       ...(options.packagesExternal ? { packages: "external" as const } : {}),
       ...(options.alias ? { alias: options.alias } : {}),
+      ...(options.banner ? { banner: options.banner } : {}),
       define: defines,
       logLevel: "warning",
     });
@@ -462,8 +475,8 @@ async function main(): Promise<void> {
     runEsbuild(
       "apps/electron/src/main/index.ts",
       "apps/electron/dist/main.cjs",
-      oauthDefines,
-      { alias: MAIN_PROCESS_ALIAS }
+      mainProcessDefines(oauthDefines),
+      { alias: MAIN_PROCESS_ALIAS, banner: MAIN_PROCESS_BANNER }
     ),
     runEsbuild(
       "apps/electron/src/preload/bootstrap.ts",
@@ -556,7 +569,8 @@ async function main(): Promise<void> {
     outfile: join(ROOT_DIR, "apps/electron/dist/main.cjs"),
     external: MAIN_BUNDLE_EXTERNALS,
     alias: MAIN_PROCESS_ALIAS,
-    define: oauthDefines,
+    banner: MAIN_PROCESS_BANNER,
+    define: mainProcessDefines(oauthDefines),
     logLevel: "info",
   });
   await mainContext.watch();

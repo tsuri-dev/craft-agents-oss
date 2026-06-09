@@ -936,6 +936,8 @@ interface ManagedSession {
   workingDirectory?: string
   // Remote execution target metadata for SSH-backed sessions
   remoteTarget?: import('@craft-agent/shared/protocol').SessionRemoteTarget
+  // Preferred assistant language snapped at session creation
+  preferredLanguage?: import('@craft-agent/shared/protocol').Session['preferredLanguage']
   // SDK cwd for session storage - set once at creation, never changes.
   // Ensures SDK can find session transcripts regardless of workingDirectory changes.
   sdkCwd?: string
@@ -3013,12 +3015,16 @@ export class SessionManager implements ISessionManager {
       })
     }
 
+    const preferredLanguage = options?.preferredLanguage
+      ?? validatedBranch?.sourceSession.preferredLanguage
+
     // Use storage layer to create and persist the session
     const storedSession = await createStoredSession(workspaceRootPath, {
       name: options?.name,
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
       remoteTarget: options?.remoteTarget,
+      preferredLanguage,
       hidden: options?.hidden,
       sessionStatus: options?.sessionStatus,
       labels: options?.labels,
@@ -3104,6 +3110,7 @@ export class SessionManager implements ISessionManager {
       permissionMode: defaultPermissionMode,
       workingDirectory: resolvedWorkingDir,
       remoteTarget: options?.remoteTarget,
+      preferredLanguage: storedSession.preferredLanguage,
       model: resolvedModel,
       llmConnection: options?.llmConnection,
       thinkingLevel: defaultThinkingLevel,
@@ -3524,6 +3531,7 @@ export class SessionManager implements ISessionManager {
         permissionMode: managed.permissionMode,
         previousPermissionMode: managed.previousPermissionMode,
         modelSwitchFromSdkSessionId: managed.modelSwitchFromSdkSessionId,
+        preferredLanguage: managed.preferredLanguage,
       }
 
       const onSdkSessionIdUpdate = (sdkSessionId: string) => {
@@ -4317,6 +4325,7 @@ export class SessionManager implements ISessionManager {
           thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,
           labels: request.labels ?? managed.labels,
           workingDirectory: request.workingDirectory,
+          preferredLanguage: managed.preferredLanguage,
         })
 
         // Build FileAttachment[] from paths (if any)
@@ -6444,6 +6453,7 @@ export class SessionManager implements ISessionManager {
           permissionMode: this.resolveAgentProfileChildPermissionMode(parent, profile),
           enabledSourceSlugs: profile.sourceSlugs,
           workingDirectory: parent.workingDirectory,
+          preferredLanguage: parent.preferredLanguage,
           labels: withAgentTaskLabel(parent.labels),
         })
 

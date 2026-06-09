@@ -14,7 +14,7 @@
  * baseline count and validating relative to it.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync, realpathSync, lstatSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -242,6 +242,25 @@ Use linear tools.
     expect(skill).not.toBeNull();
     expect(skill!.iconPath).toBeUndefined();
   });
+
+  it('should load a skill from a symlinked directory', () => {
+    const externalSkillsDir = join(tempDir, 'external-skills');
+    const targetDir = createSkill(externalSkillsDir, 'target-skill', {
+      name: 'Linked Skill',
+      description: 'Loaded through a directory symlink',
+    });
+    const linkedDir = join(workspaceRoot, 'skills', 'linked-skill');
+    symlinkSync(targetDir, linkedDir, 'dir');
+
+    const skill = loadSkill(workspaceRoot, 'linked-skill');
+
+    expect(skill).not.toBeNull();
+    expect(skill!.slug).toBe('linked-skill');
+    expect(skill!.metadata.name).toBe('Linked Skill');
+    expect(skill!.path).toBe(linkedDir);
+    expect(skill!.isSymlink).toBe(true);
+    expect(skill!.realPath).toBe(realpathSync(targetDir));
+  });
 });
 
 // ============================================================
@@ -309,6 +328,18 @@ describe('loadWorkspaceSkills', () => {
 
     expect(skills).toHaveLength(1);
     expect(skills[0]!.slug).toBe('real-skill');
+  });
+
+  it('should include symlinked skill directories', () => {
+    const skillsDir = join(workspaceRoot, 'skills');
+    createSkill(skillsDir, 'real-skill');
+    const targetDir = createSkill(join(tempDir, 'external-skills'), 'linked-target');
+    symlinkSync(targetDir, join(skillsDir, 'linked-skill'), 'dir');
+
+    const skills = loadWorkspaceSkills(workspaceRoot);
+
+    expect(skills.map(skill => skill.slug).sort()).toEqual(['linked-skill', 'real-skill']);
+    expect(skills.find(skill => skill.slug === 'linked-skill')!.isSymlink).toBe(true);
   });
 });
 
@@ -576,6 +607,17 @@ describe('listSkillSlugs', () => {
     const slugs = listSkillSlugs(join(tempDir, 'nonexistent'));
     expect(slugs).toEqual([]);
   });
+
+  it('should include valid symlinked skill directories', () => {
+    const skillsDir = join(workspaceRoot, 'skills');
+    createSkill(skillsDir, 'alpha');
+    const targetDir = createSkill(join(tempDir, 'external-skills'), 'linked-target');
+    symlinkSync(targetDir, join(skillsDir, 'linked'), 'dir');
+
+    const slugs = listSkillSlugs(workspaceRoot);
+
+    expect(slugs.sort()).toEqual(['alpha', 'linked']);
+  });
 });
 
 // ============================================================
@@ -631,5 +673,18 @@ describe('deleteSkill', () => {
   it('should return false for non-existent skill', () => {
     const result = deleteSkill(workspaceRoot, 'nonexistent');
     expect(result).toBe(false);
+  });
+
+  it('should delete a symlinked workspace skill without deleting the target directory', () => {
+    const targetDir = createSkill(join(tempDir, 'external-skills'), 'target-skill');
+    const linkedDir = join(workspaceRoot, 'skills', 'linked-skill');
+    symlinkSync(targetDir, linkedDir, 'dir');
+    expect(lstatSync(linkedDir).isSymbolicLink()).toBe(true);
+
+    const result = deleteSkill(workspaceRoot, 'linked-skill');
+
+    expect(result).toBe(true);
+    expect(existsSync(linkedDir)).toBe(false);
+    expect(existsSync(join(targetDir, 'SKILL.md'))).toBe(true);
   });
 });

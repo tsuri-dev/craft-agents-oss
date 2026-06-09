@@ -340,6 +340,10 @@ function FilterMenuRow({
   )
 }
 
+function isRunningAgentSession(meta: SessionMeta): boolean {
+  return hasAgentTaskLabel(meta.labels) && meta.isProcessing === true && meta.isArchived !== true
+}
+
 /**
  * FilterLabelItems - Recursive component for rendering label tree in the filter dropdown.
  *
@@ -686,7 +690,7 @@ function AppShellContent({
   // has its own independent set of status and label filters.
   // Each filter entry stores a mode ('include' or 'exclude') for tri-state filtering.
   type FilterEntry = Record<string, FilterMode> // id → mode
-  type ViewFiltersMap = Record<string, { statuses: FilterEntry, labels: FilterEntry, projects?: FilterEntry, groups?: FilterEntry, groupingMode?: ChatGroupingMode }>
+  type ViewFiltersMap = Record<string, { statuses: FilterEntry, labels: FilterEntry, projects?: FilterEntry, groups?: FilterEntry, agentRunning?: boolean, groupingMode?: ChatGroupingMode }>
 
   // Compute a stable key for the current chat filter view
   const sessionFilterKey = useMemo(() => {
@@ -762,6 +766,12 @@ function AppShellContent({
     return new Map<string, FilterMode>(Object.entries(entry) as [string, FilterMode][])
   }, [viewFiltersMap, sessionFilterKey])
 
+  // Whether the current view is narrowed to running agent child sessions.
+  const agentRunningFilter = useMemo(() => {
+    if (!sessionFilterKey) return false
+    return viewFiltersMap[sessionFilterKey]?.agentRunning === true
+  }, [viewFiltersMap, sessionFilterKey])
+
   // Setter for status filter — updates only the current view's entry in the map
   const setListFilter = useCallback((updater: Map<SessionStatusId, FilterMode> | ((prev: Map<SessionStatusId, FilterMode>) => Map<SessionStatusId, FilterMode>)) => {
     setViewFiltersMap(prev => {
@@ -814,6 +824,19 @@ function AppShellContent({
       return {
         ...prev,
         [sessionFilterKey]: { ...existing, groups: Object.fromEntries(next) }
+      }
+    })
+  }, [sessionFilterKey])
+
+  const setAgentRunningFilter = useCallback((updater: boolean | ((prev: boolean) => boolean)) => {
+    setViewFiltersMap(prev => {
+      if (!sessionFilterKey) return prev
+      const existing = prev[sessionFilterKey] ?? { statuses: {}, labels: {}, projects: {}, groups: {} }
+      const current = existing.agentRunning === true
+      const next = typeof updater === 'function' ? updater(current) : updater
+      return {
+        ...prev,
+        [sessionFilterKey]: { ...existing, agentRunning: next }
       }
     })
   }, [sessionFilterKey])
@@ -1503,6 +1526,11 @@ function AppShellContent({
     [activeSessionMetas],
   )
 
+  const runningAgentSessionCount = useMemo(
+    () => workspaceSessionMetas.filter(isRunningAgentSession).length,
+    [workspaceSessionMetas],
+  )
+
   const [sshKeys, setSshKeys] = useState<SshPrivateKeyRecord[]>([])
   const [sshProfiles, setSshProfiles] = useState<SshConnectionProfile[]>([])
   const [sshKeyDialogOpen, setSshKeyDialogOpen] = useState(false)
@@ -1776,36 +1804,44 @@ function AppShellContent({
     }
 
     let result: SessionMeta[]
+    // Running-agent filter must be able to surface agent child sessions even
+    // when the general "Show agent tasks" visibility toggle is off.
+    const activeMetasForPrimaryFilter = agentRunningFilter
+      ? workspaceSessionMetas.filter(s => !s.isArchived)
+      : activeSessionMetas
+    const navigatorMetasForPrimaryFilter = agentRunningFilter
+      ? workspaceSessionMetas
+      : navigatorSessionMetas
 
     switch (sessionFilter.kind) {
       case 'allSessions':
         // "All Sessions" - shows active (non-archived) sessions
-        result = activeSessionMetas
+        result = activeMetasForPrimaryFilter
         break
       case 'inbox':
         // Inbox shows unread sessions across regular and agent-task sessions.
         result = inboxSessionMetas
         break
       case 'flagged':
-        result = activeSessionMetas.filter(s => s.isFlagged)
+        result = activeMetasForPrimaryFilter.filter(s => s.isFlagged)
         break
       case 'archived':
         // Archived view shows only archived sessions
-        result = navigatorSessionMetas.filter(s => s.isArchived)
+        result = navigatorMetasForPrimaryFilter.filter(s => s.isArchived)
         break
       case 'state':
         // Filter by specific todo state (excludes archived)
-        result = activeSessionMetas.filter(s => (s.sessionStatus || 'todo') === sessionFilter.stateId)
+        result = activeMetasForPrimaryFilter.filter(s => (s.sessionStatus || 'todo') === sessionFilter.stateId)
         break
       case 'label': {
         if (sessionFilter.labelId === '__all__') {
           // "Labels" header: show all active sessions that have at least one label
-          result = activeSessionMetas.filter(s => s.labels && s.labels.length > 0)
+          result = activeMetasForPrimaryFilter.filter(s => s.labels && s.labels.length > 0)
         } else {
           // Specific label: includes sessions tagged with this label or any descendant
           const descendants = getDescendantIds(labelConfigs, sessionFilter.labelId)
           const matchIds = new Set([sessionFilter.labelId, ...descendants])
-          result = activeSessionMetas.filter(
+          result = activeMetasForPrimaryFilter.filter(
             s => s.labels?.some(l => matchIds.has(extractLabelId(l)))
           )
         }
@@ -1814,7 +1850,7 @@ function AppShellContent({
       case 'view': {
         // Filter by view: __all__ shows any session matched by any view,
         // otherwise filter to the specific view (excludes archived)
-        result = activeSessionMetas.filter(s => {
+        result = activeMetasForPrimaryFilter.filter(s => {
           const matched = evaluateViews(s)
           if (sessionFilter.viewId === '__all__') {
             return matched.length > 0
@@ -1824,7 +1860,7 @@ function AppShellContent({
         break
       }
       default:
-        result = activeSessionMetas
+        result = activeMetasForPrimaryFilter
     }
 
     // Apply secondary filters (status + labels, AND-ed together) in ALL views.
@@ -1873,8 +1909,12 @@ function AppShellContent({
     result = filterSessionsByProjectFilter(result, projectFilter)
     result = filterSessionsByGroupFilter(result, groupFilter)
 
+    if (agentRunningFilter) {
+      result = result.filter(isRunningAgentSession)
+    }
+
     return result
-  }, [navigatorSessionMetas, activeSessionMetas, inboxSessionMetas, sessionFilter, listFilter, labelFilter, projectFilter, groupFilter, labelConfigs])
+  }, [navigatorSessionMetas, activeSessionMetas, workspaceSessionMetas, inboxSessionMetas, sessionFilter, listFilter, labelFilter, projectFilter, groupFilter, agentRunningFilter, labelConfigs])
 
   // Derive "pinned" (non-removable) filters from the current sessionFilter path.
   // These represent filters that are implicit in the current deeplink/route and
@@ -2016,7 +2056,7 @@ function AppShellContent({
     navigate(routes.view.allSessions())
     setViewFiltersMap(prev => ({
       ...prev,
-      allSessions: { statuses: {}, labels: {}, projects: {}, groups: {}, groupingMode: 'date' },
+      allSessions: { statuses: {}, labels: {}, projects: {}, groups: {}, agentRunning: false, groupingMode: 'date' },
     }))
   }, [])
 
@@ -2024,7 +2064,7 @@ function AppShellContent({
     navigate(routes.view.inbox())
     setViewFiltersMap(prev => ({
       ...prev,
-      inbox: { statuses: {}, labels: {}, projects: {}, groups: {}, groupingMode: 'date' },
+      inbox: { statuses: {}, labels: {}, projects: {}, groups: {}, agentRunning: false, groupingMode: 'date' },
     }))
   }, [])
 
@@ -2041,6 +2081,7 @@ function AppShellContent({
           labels: {},
           projects,
           groups: {},
+          agentRunning: false,
         },
       }
     })
@@ -2052,6 +2093,25 @@ function AppShellContent({
       .map(project => project.id)
     setAllSessionsProjectFilter(projectIds)
   }, [projectFilterOptions, setAllSessionsProjectFilter])
+
+  const handleRunningAgentsClick = useCallback(() => {
+    navigate(routes.view.allSessions())
+    setViewFiltersMap(prev => {
+      const existing = prev.allSessions ?? { statuses: {}, labels: {}, projects: {}, groups: {} }
+      return {
+        ...prev,
+        allSessions: {
+          ...existing,
+          statuses: {},
+          labels: {},
+          projects: {},
+          groups: {},
+          agentRunning: true,
+          groupingMode: 'date',
+        },
+      }
+    })
+  }, [navigate])
 
   const handleProjectClick = useCallback((projectId: string) => {
     setAllSessionsProjectFilter([projectId])
@@ -2342,6 +2402,7 @@ function AppShellContent({
     for (const state of effectiveSessionStatuses) {
       result.push({ id: `nav:state:${state.id}`, type: 'nav', action: () => handleSessionStatusClick(state.id) })
     }
+    result.push({ id: 'nav:agent-running', type: 'nav', action: handleRunningAgentsClick })
     // Projects and Labels live under All Sessions, with Projects first.
     result.push({ id: 'nav:projects', type: 'nav', action: handleProjectsClick })
     for (const project of projectFilterOptions) {
@@ -2374,7 +2435,7 @@ function AppShellContent({
     result.push({ id: 'nav:whats-new', type: 'nav', action: handleWhatsNewClick })
 
     return result
-  }, [handleInboxClick, handleAllSessionsClick, handleSessionStatusClick, effectiveSessionStatuses, handleProjectsClick, projectFilterOptions, handleProjectClick, handleLabelClick, labelTree, handleFlaggedClick, handleArchivedClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleAgentsClick, handlePluginsClick, tapdPluginInstalled, handleSettingsClick, handleWhatsNewClick])
+  }, [handleInboxClick, handleAllSessionsClick, handleSessionStatusClick, effectiveSessionStatuses, handleProjectsClick, handleRunningAgentsClick, projectFilterOptions, handleProjectClick, handleLabelClick, labelTree, handleFlaggedClick, handleArchivedClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleAgentsClick, handlePluginsClick, tapdPluginInstalled, handleSettingsClick, handleWhatsNewClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -2482,15 +2543,15 @@ function AppShellContent({
   }, [sidebarFocused, focusedSidebarItemId, unifiedSidebarItems])
 
 
-  const hasSessionSecondaryFilters = listFilter.size > 0 || labelFilter.size > 0 || projectFilter.size > 0 || groupFilter.size > 0
+  const hasSessionSecondaryFilters = listFilter.size > 0 || labelFilter.size > 0 || projectFilter.size > 0 || groupFilter.size > 0 || agentRunningFilter
   const hasSessionFilterButtonState = hasSessionSecondaryFilters || showAgentTasks
 
   const activeStandaloneProjectId = React.useMemo(() => {
     if (sessionFilter?.kind !== 'allSessions') return null
-    if (listFilter.size > 0 || labelFilter.size > 0 || groupFilter.size > 0 || projectFilter.size !== 1) return null
+    if (listFilter.size > 0 || labelFilter.size > 0 || groupFilter.size > 0 || agentRunningFilter || projectFilter.size !== 1) return null
     const [[projectId, mode]] = Array.from(projectFilter)
     return mode === 'include' ? projectId : null
-  }, [sessionFilter, listFilter, labelFilter, groupFilter, projectFilter])
+  }, [sessionFilter, listFilter, labelFilter, groupFilter, projectFilter, agentRunningFilter])
 
   const activeStandaloneProject = React.useMemo(
     () => activeStandaloneProjectId ? projectFilterOptions.find(option => option.id === activeStandaloneProjectId) ?? null : null,
@@ -2544,13 +2605,14 @@ function AppShellContent({
       case 'view':
         return sessionFilter.viewId === '__all__' ? t("sidebar.views") : viewConfigs.find(v => v.id === sessionFilter.viewId)?.name || t("sidebar.views")
       case 'allSessions':
+        if (agentRunningFilter) return 'Agent'
         if (activeStandaloneProject) return activeStandaloneProject.label
-        if (projectFilter.size > 1 && listFilter.size === 0 && labelFilter.size === 0 && groupFilter.size === 0) return t("sidebar.projects")
+        if (projectFilter.size > 1 && listFilter.size === 0 && labelFilter.size === 0 && groupFilter.size === 0 && !agentRunningFilter) return t("sidebar.projects")
         return t("sidebar.allSessions")
       default:
         return t("sidebar.allSessions")
     }
-  }, [navState, t, sessionFilter, automationFilter, labelConfigs, viewConfigs, effectiveSessionStatuses, activeStandaloneProject, projectFilter, listFilter, labelFilter, groupFilter])
+  }, [navState, t, sessionFilter, automationFilter, labelConfigs, viewConfigs, effectiveSessionStatuses, activeStandaloneProject, projectFilter, listFilter, labelFilter, groupFilter, agentRunningFilter])
 
   const handleSessionBoardModeChange = useCallback((mode: 'list' | 'board') => {
     setSessionBoardViewMode(mode)
@@ -2877,6 +2939,14 @@ function AppShellContent({
                         })),
                         // Separator: SortableStatusList splits here — items after become non-sortable trailingItems
                         { id: 'separator:states-secondary', type: 'separator' as const },
+                        {
+                          id: "nav:agent-running",
+                          title: "Agent",
+                          label: String(runningAgentSessionCount),
+                          icon: Bot,
+                          variant: (sessionFilter?.kind === 'allSessions' && agentRunningFilter ? "default" : "ghost") as "default" | "ghost",
+                          onClick: handleRunningAgentsClick,
+                        },
                         // Projects and Labels live under All Sessions, with Projects first.
                         {
                           id: "nav:projects",
@@ -2885,7 +2955,7 @@ function AppShellContent({
                             ? String(projectFilterOptions.filter(project => project.id !== NO_PROJECT_FILTER_ID).length)
                             : undefined,
                           icon: FolderOpen,
-                          variant: (sessionFilter?.kind === 'allSessions' && projectFilter.size > 1 && listFilter.size === 0 && labelFilter.size === 0 && groupFilter.size === 0 ? "default" : "ghost") as "default" | "ghost",
+                          variant: (sessionFilter?.kind === 'allSessions' && projectFilter.size > 1 && listFilter.size === 0 && labelFilter.size === 0 && groupFilter.size === 0 && !agentRunningFilter ? "default" : "ghost") as "default" | "ghost",
                           onClick: handleProjectsClick,
                           expandable: true,
                           expanded: isExpanded('nav:projects'),
@@ -3210,6 +3280,9 @@ function AppShellContent({
                         isStateSubView={isStateSubView}
                         showAgentTasks={showAgentTasks}
                         onShowAgentTasksChange={setShowAgentTasks}
+                        agentRunningFilter={agentRunningFilter}
+                        onAgentRunningFilterChange={setAgentRunningFilter}
+                        runningAgentSessionCount={runningAgentSessionCount}
                         onOpenSearch={() => setSearchActive(true)}
                       />
                     ) : (
@@ -3253,6 +3326,7 @@ function AppShellContent({
                                 setLabelFilter(new Map())
                                 setProjectFilter(new Map())
                                 setGroupFilter(new Map())
+                                setAgentRunningFilter(false)
                                 setShowAgentTasks(false)
                               }}
                               className="text-xs text-muted-foreground hover:text-foreground"
@@ -3358,6 +3432,15 @@ function AppShellContent({
 
                         {!filterDropdownQuery.trim() && (
                           <>
+                            <StyledDropdownMenuItem onClick={() => setAgentRunningFilter(prev => !prev)}>
+                              <FilterMenuRow
+                                icon={<Bot className="h-3.5 w-3.5" />}
+                                label="Agent"
+                                accessory={agentRunningFilter
+                                  ? <Check className="h-3 w-3 text-muted-foreground" />
+                                  : <span className="text-[10px] tabular-nums text-muted-foreground">{runningAgentSessionCount}</span>}
+                              />
+                            </StyledDropdownMenuItem>
                             <StyledDropdownMenuItem onClick={() => setShowAgentTasks(prev => !prev)}>
                               <FilterMenuRow
                                 icon={<Bot className="h-3.5 w-3.5" />}
@@ -3375,7 +3458,7 @@ function AppShellContent({
                             {/* === HIERARCHICAL MODE (default) === */}
 
                             {/* Active filter chips: pinned (non-removable) + user-added (removable) */}
-                            {(pinnedFilters.pinnedFlagged || pinnedFilters.pinnedStatusId || pinnedFilters.pinnedLabelId || listFilter.size > 0 || labelFilter.size > 0 || projectFilter.size > 0 || groupFilter.size > 0) && (
+                            {(pinnedFilters.pinnedFlagged || pinnedFilters.pinnedStatusId || pinnedFilters.pinnedLabelId || agentRunningFilter || listFilter.size > 0 || labelFilter.size > 0 || projectFilter.size > 0 || groupFilter.size > 0) && (
                               <>
                                 {/* Pinned: flagged */}
                                 {pinnedFilters.pinnedFlagged && (
@@ -3419,6 +3502,15 @@ function AppShellContent({
                                     </StyledDropdownMenuItem>
                                   )
                                 })()}
+                                {agentRunningFilter && (
+                                  <StyledDropdownMenuItem onClick={(e) => { e.preventDefault(); setAgentRunningFilter(false) }}>
+                                    <FilterMenuRow
+                                      icon={<Bot className="h-3.5 w-3.5" />}
+                                      label="Agent"
+                                      accessory={<Check className="h-3 w-3 text-muted-foreground" />}
+                                    />
+                                  </StyledDropdownMenuItem>
+                                )}
                                 {/* User-added: selected projects with mode pill (include/exclude) */}
                                 {Array.from(projectFilter).map(([projectId, mode]) => {
                                   const project = projectFilterOptions.find(option => option.id === projectId)
@@ -4346,6 +4438,11 @@ function AppShellContent({
                   onNavigateToSession={panelCount > 1 ? navigateToSessionInPanel : undefined}
                   hasPendingPrompt={hasPendingPrompt}
                   activeChatMatchInfo={chatMatchInfo}
+                  emptyStateOverride={agentRunningFilter ? {
+                    icon: <Bot />,
+                    title: 'No running agent sessions',
+                    description: 'Agent sessions that are currently running will appear here.',
+                  } : undefined}
                 />
               </>
             )}

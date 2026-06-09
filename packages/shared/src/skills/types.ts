@@ -61,8 +61,12 @@ export interface LoadedSkill {
   content: string;
   /** Absolute path to icon file if exists */
   iconPath?: string;
-  /** Absolute path to skill directory */
+  /** Absolute path to skill directory (the symlink path when loaded through a linked directory) */
   path: string;
+  /** Whether path is a symbolic link to a skill directory */
+  isSymlink?: boolean;
+  /** Resolved real directory when path is a symbolic link */
+  realPath?: string;
   /** Where this skill was loaded from */
   source: SkillSource;
 }

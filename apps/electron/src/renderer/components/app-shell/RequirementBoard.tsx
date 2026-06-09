@@ -1,12 +1,14 @@
 import * as React from 'react'
 import mediumZoom from 'medium-zoom'
 import ReactMarkdown from 'react-markdown'
+import { useTranslation } from 'react-i18next'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
 import { useAtomValue, useSetAtom } from 'jotai'
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   ArrowUpRight,
   AppWindow,
   BadgeAlert,
@@ -26,9 +28,11 @@ import {
   Link2,
   List,
   Loader2,
+  MessageCircle,
   MoreHorizontal,
   Pencil,
   Pin,
+  Play,
   Plus,
   RefreshCw,
   Square,
@@ -1999,7 +2003,7 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
                 </button>
               </div>
 
-              <div className="ml-auto flex shrink-0 items-center gap-2">
+              <div className="ml-auto flex shrink-0 items-center gap-1">
                 <span className="hidden h-9 items-center rounded-[10px] px-3 text-[14px] text-muted-foreground ring-1 ring-foreground/[0.08] sm:inline-flex">{workingCount} working</span>
                 <PanelHeaderCenterButton
                   icon={syncingHome ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -2470,35 +2474,126 @@ function AgentRunRow({
   )
 }
 
-function AgentStarterRow({ agent, agentName, isWorking, onOpenAgent, onRun }: { agent?: AgentProfile | null; agentName: string; isWorking: boolean; onOpenAgent: () => void; onRun: () => void }) {
+function AgentStarterRow({ agent, agentName, isWorking, onOpenAgent, onRun, onRunWithInput }: { agent?: AgentProfile | null; agentName: string; isWorking: boolean; onOpenAgent: () => void; onRun: () => void; onRunWithInput: (instructions: string) => void }) {
+  const [composerOpen, setComposerOpen] = React.useState(false)
+  const [draft, setDraft] = React.useState('')
+  const textareaRef = React.useRef<HTMLTextAreaElement | null>(null)
+  const { i18n } = useTranslation()
+  const language = (i18n.resolvedLanguage || i18n.language || '').toLowerCase()
+  const composerPlaceholder = language.startsWith('zh')
+    ? '输入对 Agent 的额外指令…'
+    : 'Enter additional instructions for the agent…'
+  const runDisabled = !agent || isWorking
+
+  React.useEffect(() => {
+    if (!composerOpen) return
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [composerOpen])
+
+  const submitWithInput = React.useCallback(() => {
+    const text = draft.trim()
+    if (!text || runDisabled) return
+    onRunWithInput(text)
+    setDraft('')
+    setComposerOpen(false)
+  }, [draft, onRunWithInput, runDisabled])
+
   return (
-    <div className="group relative flex items-center gap-2 rounded px-1 py-1.5 transition-colors hover:bg-accent/40">
-      <AgentAvatar agent={agent ?? { id: agentName, name: agentName }} className="h-5 w-5 text-[8px]" />
-      <button
-        type="button"
-        className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left text-xs text-muted-foreground hover:text-foreground"
-        style={TRIGGER_MASK_STYLE}
-        onClick={onOpenAgent}
-        disabled={!agent}
-        title={agent ? `Open ${agentName} Activity` : undefined}
-      >
-        {agentName}
-      </button>
-      {isWorking && (
-        <span className="shrink-0 whitespace-nowrap text-xs text-info">Working</span>
+    <div className="rounded px-1 py-1.5">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="shrink-0 rounded-full"
+          onClick={event => {
+            event.stopPropagation()
+            onOpenAgent()
+          }}
+          disabled={!agent}
+          title={agent ? `Open ${agentName} Activity` : undefined}
+        >
+          <AgentAvatar agent={agent ?? { id: agentName, name: agentName }} className="h-5 w-5 text-[8px]" />
+        </button>
+        <button
+          type="button"
+          className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left text-xs text-muted-foreground"
+          style={TRIGGER_MASK_STYLE}
+          onClick={onOpenAgent}
+          disabled={!agent}
+          title={agent ? `Open ${agentName} Activity` : undefined}
+        >
+          {agentName}
+        </button>
+        {isWorking && (
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-info/10 px-1.5 py-0.5 text-[10px] font-medium text-info">
+            <span className="h-1.5 w-1.5 rounded-full bg-info" />
+            Running
+          </span>
+        )}
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            className="flex h-6 w-6 items-center justify-center rounded-[6px] text-muted-foreground disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={runDisabled}
+            aria-label={`Run ${agentName}`}
+            title={`Run ${agentName}`}
+            onClick={event => {
+              event.stopPropagation()
+              onRun()
+            }}
+          >
+            {isWorking ? <Spinner className="text-[10px]" /> : <Play className="h-3.5 w-3.5 stroke-[1.8]" />}
+          </button>
+          <button
+            type="button"
+            className={cn(
+              'flex h-6 w-6 items-center justify-center rounded-[6px] text-muted-foreground disabled:cursor-not-allowed disabled:opacity-45',
+              composerOpen && 'bg-accent/50 text-foreground',
+            )}
+            disabled={!agent}
+            aria-label={`Add instructions for ${agentName}`}
+            title="Run with additional instructions"
+            onClick={event => {
+              event.stopPropagation()
+              setComposerOpen(open => !open)
+            }}
+          >
+            <MessageCircle className="h-3.5 w-3.5 stroke-[1.8]" />
+          </button>
+        </div>
+      </div>
+
+      {composerOpen && (
+        <div className="relative mt-1.5">
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={event => setDraft(event.target.value)}
+            onClick={event => event.stopPropagation()}
+            onKeyDown={event => {
+              event.stopPropagation()
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault()
+                submitWithInput()
+              }
+            }}
+            placeholder={composerPlaceholder}
+            className="box-border h-[58px] min-h-[58px] max-h-[58px] w-full resize-none overflow-y-auto rounded-[8px] border border-border/70 bg-transparent px-2.5 py-2 pr-10 text-[12px] leading-5 text-foreground outline-none placeholder:text-muted-foreground/55 focus:border-border/70 focus:outline-none focus:ring-0"
+          />
+          <button
+            type="button"
+            className="absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-full border border-border/70 bg-background/70 text-foreground transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={runDisabled || !draft.trim()}
+            aria-label="Run with additional instructions"
+            title="Run with additional instructions"
+            onClick={event => {
+              event.stopPropagation()
+              submitWithInput()
+            }}
+          >
+            <ArrowUp className="h-3.5 w-3.5 stroke-[2.2]" />
+          </button>
+        </div>
       )}
-      <Button
-        size="sm"
-        variant="ghost"
-        className="h-6 rounded px-1.5 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-        disabled={!agent || isWorking}
-        onClick={event => {
-          event.stopPropagation()
-          onRun()
-        }}
-      >
-        {isWorking ? <Spinner className="text-[10px]" /> : 'Run'}
-      </Button>
     </div>
   )
 }
@@ -2543,6 +2638,7 @@ function ExecutionLogSection({
   startingAgentId,
   cancellingRunId,
   onRun,
+  onRunWithInput,
   onAddAgent,
   onCancelRun,
   onOpenSessionInNewWindow,
@@ -2557,6 +2653,7 @@ function ExecutionLogSection({
   startingAgentId?: string | null
   cancellingRunId?: string | null
   onRun: (agent: AgentProfile) => void
+  onRunWithInput: (agent: AgentProfile, instructions: string) => void
   onAddAgent: (agentId: string) => void
   onCancelRun: (run: AgentRun) => void
   onOpenSessionInNewWindow: (sessionId: string) => void
@@ -2604,6 +2701,7 @@ function ExecutionLogSection({
                   isWorking={isWorking}
                   onOpenAgent={() => openAgentActivity(agent.id)}
                   onRun={() => onRun(agent)}
+                  onRunWithInput={instructions => onRunWithInput(agent, instructions)}
                 />
                 {agentActiveRuns.map(run => (
                   <AgentRunRow
@@ -3637,10 +3735,10 @@ export function RequirementDetailPage({ sourceItemId, onItemUpdated, onLabelsUpd
     toast.success('Agent added to requirement', { description: added?.name ?? agentId })
   }, [activeWorkspaceId, agents, sourceItemId])
 
-  const runRequirementAgent = React.useCallback(async (agent: AgentProfile) => {
+  const runRequirementAgent = React.useCallback(async (agent: AgentProfile, options?: { userInstructions?: string }) => {
     if (!activeWorkspaceId || !item || startingTapdAgentId === agent.id) return
     if (relevantAgentRuns.some(run => run.agentProfileId === agent.id && ACTIVE_AGENT_RUN_STATUSES.has(run.status))) return
-    const prompt = buildTapdAgentInstructionPrompt(agent.id, item, workContext)
+    const prompt = buildTapdAgentInstructionPrompt(agent.id, item, workContext, options?.userInstructions)
     setStartingTapdAgentId(agent.id)
     try {
       const result = await window.electronAPI.startRequirementAgentRun(activeWorkspaceId, {
@@ -3928,6 +4026,7 @@ export function RequirementDetailPage({ sourceItemId, onItemUpdated, onLabelsUpd
               startingAgentId={startingTapdAgentId}
               cancellingRunId={cancellingRunId}
               onRun={runRequirementAgent}
+              onRunWithInput={(agent, instructions) => runRequirementAgent(agent, { userInstructions: instructions })}
               onAddAgent={addRequirementAgent}
               onCancelRun={cancelTapdAgentRun}
               onOpenSessionInNewWindow={openSessionInNewWindow}

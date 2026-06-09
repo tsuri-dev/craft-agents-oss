@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { isToday, isYesterday, format, startOfDay } from "date-fns"
 import { getDateLocale } from "@craft-agent/shared/i18n"
 import { useAction } from "@/actions"
-import { Inbox, Archive } from "lucide-react"
+import { Bot, Inbox, Archive } from "lucide-react"
 
 import { getSessionStatus } from "@/utils/session"
 import * as storage from "@/lib/local-storage"
@@ -115,6 +115,12 @@ interface SessionListProps {
   hasPendingPrompt?: (sessionId: string) => boolean
   /** DOM-verified match info for the active session (from ChatDisplay) */
   activeChatMatchInfo?: { sessionId: string | null; count: number; isHighlighting?: boolean }
+  /** Custom empty state for narrow secondary filters (e.g. running agent sessions). */
+  emptyStateOverride?: {
+    icon?: React.ReactNode
+    title: string
+    description: string
+  }
 }
 
 // Re-export SessionStatusId for use by parent components
@@ -167,6 +173,7 @@ export function SessionList({
   onNavigateToSession,
   hasPendingPrompt,
   activeChatMatchInfo,
+  emptyStateOverride,
 }: SessionListProps) {
   const { t, i18n } = useTranslation()
   const setSendToWorkspace = useSetAtom(sendToWorkspaceAtom)
@@ -888,6 +895,17 @@ export function SessionList({
           icon={<Archive />}
           title={t("session.noArchivedSessions")}
           description={t("session.noArchivedSessionsDesc")}
+          className="h-full"
+        />
+      )
+    }
+
+    if (emptyStateOverride) {
+      return (
+        <EntityListEmptyScreen
+          icon={emptyStateOverride.icon ?? <Bot />}
+          title={emptyStateOverride.title}
+          description={emptyStateOverride.description}
           className="h-full"
         />
       )

@@ -17,6 +17,7 @@ import type {
 } from '@craft-agent/core/types'
 import type { PermissionMode } from '../agent/mode-types'
 import type { ThinkingLevel } from '../agent/thinking-levels'
+import type { LanguageCode } from '../i18n/registry'
 import type { CustomEndpointConfig } from '../config/llm-connections'
 import type {
   AuthRequest as SharedAuthRequest,
@@ -86,6 +87,8 @@ export interface Session {
   enabledSourceSlugs?: string[]
   workingDirectory?: string
   remoteTarget?: SessionRemoteTarget
+  /** Preferred assistant language snapped at session creation. */
+  preferredLanguage?: LanguageCode
   sessionFolderPath?: string
   sharedUrl?: string
   sharedId?: string
@@ -371,6 +374,7 @@ export interface CreateSessionOptions {
    */
   workingDirectory?: string | 'user_default' | 'none'
   remoteTarget?: SessionRemoteTarget
+  preferredLanguage?: LanguageCode
   model?: string
   llmConnection?: string
   systemPromptPreset?: 'default' | 'mini' | string

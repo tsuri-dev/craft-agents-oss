@@ -7,9 +7,11 @@
 
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -110,6 +112,36 @@ function parseSkillFile(content: string): { metadata: SkillMetadata; body: strin
 // Load Operations
 // ============================================================
 
+interface SkillDirectoryInfo {
+  isSymlink: boolean;
+  realPath?: string;
+}
+
+/**
+ * Return directory info for a skill path. Directory symlinks are accepted;
+ * symlinks to files and broken symlinks are ignored.
+ */
+function getSkillDirectoryInfo(skillDir: string): SkillDirectoryInfo | null {
+  try {
+    const linkStats = lstatSync(skillDir);
+    if (linkStats.isDirectory()) {
+      return { isSymlink: false };
+    }
+
+    if (!linkStats.isSymbolicLink()) {
+      return null;
+    }
+
+    if (!statSync(skillDir).isDirectory()) {
+      return null;
+    }
+
+    return { isSymlink: true, realPath: realpathSync(skillDir) };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Load a single skill from a directory
  * @param skillsDir - Absolute path to skills directory
@@ -120,8 +152,9 @@ function loadSkillFromDir(skillsDir: string, slug: string, source: SkillSource):
   const skillDir = join(skillsDir, slug);
   const skillFile = join(skillDir, 'SKILL.md');
 
-  // Check directory exists
-  if (!existsSync(skillDir) || !statSync(skillDir).isDirectory()) {
+  // Check directory exists. Directory symlinks are valid skill directories.
+  const directoryInfo = getSkillDirectoryInfo(skillDir);
+  if (!directoryInfo) {
     return null;
   }
 
@@ -149,6 +182,8 @@ function loadSkillFromDir(skillsDir: string, slug: string, source: SkillSource):
     content: parsed.body,
     iconPath: findIconFile(skillDir),
     path: skillDir,
+    isSymlink: directoryInfo.isSymlink || undefined,
+    realPath: directoryInfo.realPath,
     source,
   };
 }
@@ -168,7 +203,7 @@ function loadSkillsFromDir(skillsDir: string, source: SkillSource): LoadedSkill[
   try {
     const entries = readdirSync(skillsDir, { withFileTypes: true });
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
 
       const skill = loadSkillFromDir(skillsDir, entry.name, source);
       if (skill) {
@@ -403,12 +438,10 @@ export function deleteSkill(workspaceRoot: string, slug: string): boolean {
   const skillsDir = getWorkspaceSkillsPath(workspaceRoot);
   const skillDir = join(skillsDir, slug);
 
-  if (!existsSync(skillDir)) {
-    return false;
-  }
-
   try {
-    rmSync(skillDir, { recursive: true });
+    const linkStats = lstatSync(skillDir);
+    rmSync(skillDir, linkStats.isSymbolicLink() ? undefined : { recursive: true });
+    invalidateSkillsCache();
     return true;
   } catch {
     return false;
@@ -446,8 +479,10 @@ export function listSkillSlugs(workspaceRoot: string): string[] {
   try {
     return readdirSync(skillsDir, { withFileTypes: true })
       .filter((entry) => {
-        if (!entry.isDirectory()) return false;
-        const skillFile = join(skillsDir, entry.name, 'SKILL.md');
+        if (!entry.isDirectory() && !entry.isSymbolicLink()) return false;
+        const skillDir = join(skillsDir, entry.name);
+        if (!getSkillDirectoryInfo(skillDir)) return false;
+        const skillFile = join(skillDir, 'SKILL.md');
         return existsSync(skillFile);
       })
       .map((entry) => entry.name);
