@@ -423,6 +423,14 @@ async function main(): Promise<void> {
       // fails every Telegram API call with a TypeError.
       "--alias:node-fetch=./apps/electron/src/main/shims/node-fetch.cjs",
       "--alias:abort-controller=./apps/electron/src/main/shims/abort-controller.cjs",
+      // Bundled ESM deps (e.g. @anthropic-ai/claude-agent-sdk) call
+      // `createRequire(import.meta.url)`. esbuild lowers `import.meta` to an
+      // empty `{}` for CJS output, so `import.meta.url` becomes `undefined` and
+      // `createRequire(undefined)` throws ERR_INVALID_ARG_VALUE at startup in
+      // the packaged app. Define `import.meta.url` to the bundle's own file URL
+      // so createRequire/fileURLToPath get a valid absolute path at runtime.
+      "--define:import.meta.url=CRAFT_IMPORT_META_URL",
+      "--banner:js=const CRAFT_IMPORT_META_URL=require('url').pathToFileURL(__filename).href;",
       ...buildDefines,
     ],
     cwd: ROOT_DIR,
