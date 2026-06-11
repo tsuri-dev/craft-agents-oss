@@ -23,6 +23,7 @@ import { registerSkillsHandlers } from './skills'
 import { registerSourcesHandlers } from './sources'
 import { registerSshHandlers } from './ssh'
 import { registerStatusesHandlers } from './statuses'
+import { registerStoreHandlers } from './store'
 import { registerSystemCoreHandlers } from './system'
 import { registerTransferHandlers } from './transfer'
 import { registerWorkspaceCoreHandlers } from './workspace'
@@ -51,6 +52,7 @@ export function registerCoreRpcHandlers(
   registerSourcesHandlers(server, deps)
   registerSshHandlers(server, deps)
   registerStatusesHandlers(server, deps)
+  registerStoreHandlers(server, deps)
   registerSystemCoreHandlers(server, deps)
   registerTransferHandlers(server)
   registerWorkspaceCoreHandlers(server, deps)

@@ -267,6 +267,13 @@ export const CHANNEL_MAP = {
   openSkillInFinder: invoke(RPC_CHANNELS.skills.OPEN_FINDER),
   onSkillsChanged: listener(RPC_CHANNELS.skills.CHANGED),
 
+  // Store (P0.5 skill packages)
+  listStorePackages: invoke(RPC_CHANNELS.store.LIST_PACKAGES),
+  getStorePackage: invoke(RPC_CHANNELS.store.GET_PACKAGE),
+  installStorePackage: invoke(RPC_CHANNELS.store.INSTALL_PACKAGE),
+  uninstallStorePackage: invoke(RPC_CHANNELS.store.UNINSTALL_PACKAGE),
+  listInstalledStorePackages: invoke(RPC_CHANNELS.store.LIST_INSTALLED),
+
   // Statuses
   listStatuses: invoke(RPC_CHANNELS.statuses.LIST),
   reorderStatuses: invoke(RPC_CHANNELS.statuses.REORDER),

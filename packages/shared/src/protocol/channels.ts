@@ -304,6 +304,13 @@ export const RPC_CHANNELS = {
     OPEN_FINDER: 'skills:openFinder',
     CHANGED: 'skills:changed',
   },
+  store: {
+    LIST_PACKAGES: 'store:listPackages',
+    GET_PACKAGE: 'store:getPackage',
+    INSTALL_PACKAGE: 'store:installPackage',
+    UNINSTALL_PACKAGE: 'store:uninstallPackage',
+    LIST_INSTALLED: 'store:listInstalled',
+  },
   statuses: {
     LIST: 'statuses:list',
     REORDER: 'statuses:reorder',

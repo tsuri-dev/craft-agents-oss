@@ -13,6 +13,8 @@ export interface SkillMetadata {
   name: string;
   /** Brief description shown in skill list */
   description: string;
+  /** Optional semantic version for store-distributed skills */
+  version?: string;
   /** Optional file patterns that trigger this skill */
   globs?: string[];
   /** Optional tools to always allow when skill is active */

@@ -661,6 +661,7 @@ import { basename, extname } from 'path';
 export const SkillMetadataSchema = z.object({
   name: z.string().min(1, "Add a 'name' field with a human-readable title (e.g., 'Git Commit Helper')"),
   description: z.string().min(1, "Add a 'description' field explaining what this skill does and when to use it (1-2 sentences)"),
+  version: z.string().regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/, 'Version must be semver, e.g. 1.2.0').optional(),
   globs: z.array(z.string()).optional(),
   alwaysAllow: z.array(z.string()).optional(),
 });

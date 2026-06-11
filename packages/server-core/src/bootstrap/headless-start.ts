@@ -2,7 +2,7 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs'
 import { uptime as osUptime } from 'node:os'
 import { join } from 'node:path'
 import { OAuthFlowStore } from '@craft-agent/shared/auth'
-import { ensureConfigDir, loadStoredConfig, saveConfig } from '@craft-agent/shared/config'
+import { ensureConfigDir, getWorkspaces, loadStoredConfig, saveConfig } from '@craft-agent/shared/config'
 import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
 import { setBundledAssetsRoot } from '@craft-agent/shared/utils'
 import { WsRpcServer, type WsRpcTlsOptions } from '../transport/server'
@@ -255,6 +255,82 @@ function ensureGlobalConfigExists(platform: PlatformServices): void {
   platform.logger.info('[bootstrap] Initialized missing global config')
 }
 
+interface BootstrapPackageSpec {
+  packageId: string
+  version: string
+}
+
+function parseBootstrapPackageSpecs(value: string | undefined): BootstrapPackageSpec[] {
+  if (!value?.trim()) return []
+  return value
+    .split(',')
+    .map(entry => entry.trim())
+    .filter(Boolean)
+    .map(entry => {
+      const at = entry.lastIndexOf('@')
+      if (at <= 0 || at === entry.length - 1) {
+        throw new Error(`Invalid CRAFT_BOOTSTRAP_PACKAGES entry: ${entry}. Expected package@version.`)
+      }
+      const packageId = entry.slice(0, at).trim()
+      const version = entry.slice(at + 1).trim()
+      if (version.startsWith('^') || version.startsWith('~')) {
+        throw new Error(`Version ranges are not supported in CRAFT_BOOTSTRAP_PACKAGES yet: ${entry}. Use an exact version.`)
+      }
+      return { packageId, version }
+    })
+}
+
+async function bootstrapStorePackages(platform: PlatformServices): Promise<void> {
+  const specs = parseBootstrapPackageSpecs(process.env.CRAFT_BOOTSTRAP_PACKAGES)
+  if (!specs.length) return
+
+  const {
+    getStorePackageKey,
+    installStorePackage,
+    listInstalledStorePackages,
+    resolveStoreRegistryUrl,
+  } = await import('@craft-agent/shared/store')
+
+  let registryUrl: string
+  try {
+    registryUrl = resolveStoreRegistryUrl(process.env.CRAFT_STORE_REGISTRY_URL)
+  } catch (error) {
+    platform.logger.error('[bootstrap] CRAFT_BOOTSTRAP_PACKAGES requires CRAFT_STORE_REGISTRY_URL:', error)
+    return
+  }
+
+  const workspaces = getWorkspaces()
+  if (!workspaces.length) {
+    platform.logger.warn('[bootstrap] CRAFT_BOOTSTRAP_PACKAGES set but no workspaces are configured')
+    return
+  }
+
+  for (const workspace of workspaces) {
+    for (const spec of specs) {
+      const packageKey = getStorePackageKey(registryUrl, spec.packageId)
+      const installed = listInstalledStorePackages(workspace.rootPath)[packageKey]
+      if (installed?.version === spec.version) {
+        platform.logger.info(`[bootstrap] Store package already installed in ${workspace.name}: ${spec.packageId}@${spec.version}`)
+        continue
+      }
+      try {
+        const result = await installStorePackage(workspace.rootPath, {
+          registryUrl,
+          packageId: spec.packageId,
+          version: spec.version,
+          conflictStrategy: 'reuse',
+        })
+        platform.logger.info(`[bootstrap] Installed store package in ${workspace.name}: ${result.manifest.packageId}@${result.manifest.version}`)
+        for (const warning of result.warnings) {
+          platform.logger.warn(`[bootstrap] ${result.manifest.packageId}: ${warning}`)
+        }
+      } catch (error) {
+        platform.logger.error(`[bootstrap] Failed to install store package ${spec.packageId}@${spec.version} in ${workspace.name}:`, error)
+      }
+    }
+  }
+}
+
 export async function bootstrapServer<TSessionManager, THandlerDeps>(
   options: ServerBootstrapOptions<TSessionManager, THandlerDeps>,
 ): Promise<ServerInstance<TSessionManager>> {
@@ -345,6 +421,8 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
   options.setSessionEventSink(sessionManager, wsServer.push.bind(wsServer))
 
   await options.initializeSessionManager(sessionManager)
+
+  await bootstrapStorePackages(platform)
 
   modelRefreshService.startAll()
 

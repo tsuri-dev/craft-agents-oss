@@ -26,6 +26,19 @@ import type {
 } from '../agent/index'
 import type { AgentRun, AgentRunStatus } from '../agent-runs'
 
+export type {
+  StoreGetPackageInput,
+  StoreInstallPackageInput,
+  StoreInstallPackageResult,
+  StoreInstalledPackageReceipt,
+  StoreListPackagesInput,
+  StorePackageDetail,
+  StorePackageManifest,
+  StorePackageSummary,
+  StoreReceiptsFile,
+  StoreUninstallPackageInput,
+} from '../store/types.ts'
+
 // Re-export generateMessageId for handler convenience
 export { generateMessageId } from '@craft-agent/core/types'
 

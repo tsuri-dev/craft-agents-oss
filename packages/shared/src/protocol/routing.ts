@@ -401,6 +401,13 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.skills.DELETE,
   RPC_CHANNELS.skills.CHANGED,
 
+  // store — package browsing/install on the workspace-owning server
+  RPC_CHANNELS.store.LIST_PACKAGES,
+  RPC_CHANNELS.store.GET_PACKAGE,
+  RPC_CHANNELS.store.INSTALL_PACKAGE,
+  RPC_CHANNELS.store.UNINSTALL_PACKAGE,
+  RPC_CHANNELS.store.LIST_INSTALLED,
+
   // statuses — workspace metadata
   RPC_CHANNELS.statuses.LIST,
   RPC_CHANNELS.statuses.REORDER,

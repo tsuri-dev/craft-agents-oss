@@ -4358,6 +4358,20 @@ function AppShellContent({
                 workspaceRootPath={activeWorkspace?.rootPath}
                 onSkillClick={handleSkillSelect}
                 onDeleteSkill={handleDeleteSkill}
+                onStoreInstalled={async () => {
+                  const [loadedSkills, loadedProfiles] = await Promise.all([
+                    window.electronAPI.getSkills(activeWorkspaceId, activeSessionWorkingDirectory).catch(err => {
+                      console.error('[Store] Failed to refresh skills after install:', err)
+                      return []
+                    }),
+                    window.electronAPI.listAgentProfiles(activeWorkspaceId).catch(err => {
+                      console.error('[Store] Failed to refresh agent profiles after install:', err)
+                      return []
+                    }),
+                  ])
+                  setSkills(loadedSkills || [])
+                  setAgentProfilesAtom(loadedProfiles || [])
+                }}
                 selectedSkillSlug={isSkillsNavigation(navState) && navState.details?.type === 'skill' ? navState.details.skillSlug : null}
               />
             )}

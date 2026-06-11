@@ -241,6 +241,14 @@ import type {
   RequirementReplyToAgentInput,
   RequirementAgentRunResult,
   RequirementComment,
+  StoreGetPackageInput,
+  StoreInstallPackageInput,
+  StoreInstallPackageResult,
+  StoreListPackagesInput,
+  StorePackageDetail,
+  StorePackageSummary,
+  StoreReceiptsFile,
+  StoreUninstallPackageInput,
 } from '@craft-agent/shared/protocol'
 
 export interface ElectronAPI {
@@ -546,6 +554,13 @@ export interface ElectronAPI {
 
   // Skills change listener (live updates when skills are added/removed/modified)
   onSkillsChanged(callback: (workspaceId: string, skills: LoadedSkill[]) => void): () => void
+
+  // Store (P0.5 skill packages)
+  listStorePackages(input?: StoreListPackagesInput): Promise<StorePackageSummary[]>
+  getStorePackage(input: StoreGetPackageInput): Promise<StorePackageDetail>
+  installStorePackage(workspaceId: string, input: StoreInstallPackageInput): Promise<StoreInstallPackageResult>
+  uninstallStorePackage(workspaceId: string, input: StoreUninstallPackageInput): Promise<StoreReceiptsFile['installedPackages']>
+  listInstalledStorePackages(workspaceId: string): Promise<StoreReceiptsFile['installedPackages']>
 
   // Statuses (workspace-scoped)
   listStatuses(workspaceId: string): Promise<import('@craft-agent/shared/statuses').StatusConfig[]>

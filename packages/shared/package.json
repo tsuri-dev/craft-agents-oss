@@ -32,6 +32,7 @@
     "./sessions": "./src/sessions/index.ts",
     "./sources": "./src/sources/index.ts",
     "./sources/types": "./src/sources/types.ts",
+    "./store": "./src/store/index.ts",
     "./skills": "./src/skills/index.ts",
     "./workspaces": "./src/workspaces/index.ts",
     "./utils": "./src/utils/index.ts",
@@ -81,7 +82,8 @@
     "shell-quote": "^1.8.3",
     "@mariozechner/pi-agent-core": "0.73.1",
     "@mariozechner/pi-ai": "0.73.1",
-    "@mariozechner/pi-coding-agent": "0.73.1"
+    "@mariozechner/pi-coding-agent": "0.73.1",
+    "tar": "^7.5.2"
   },
   "peerDependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.170",
