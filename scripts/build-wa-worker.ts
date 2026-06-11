@@ -18,7 +18,7 @@
 
 import { spawn } from "bun";
 import { execSync } from "child_process";
-import { existsSync, mkdirSync, statSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 
 /**
@@ -60,8 +60,18 @@ async function verifyJsFile(filePath: string): Promise<{ valid: boolean; error?:
   });
   const stderr = await new Response(proc.stderr).text();
   const exitCode = await proc.exited;
-  if (exitCode !== 0) return { valid: false, error: stderr || "Syntax error" };
-  return { valid: true };
+  if (exitCode === 0) return { valid: true };
+
+  // Dev machines may have a Volta shim without a default Node installed.
+  // Fall back to the current JS runtime parser so `electron:dev` is not blocked
+  // by local Node toolchain setup. Syntax errors still fail here.
+  try {
+    // eslint-disable-next-line no-new-func
+    new Function(readFileSync(filePath, "utf-8"));
+    return { valid: true };
+  } catch (err) {
+    return { valid: false, error: `${stderr || "node --check failed"}\n${err instanceof Error ? err.message : String(err)}`.trim() };
+  }
 }
 
 async function main(): Promise<void> {

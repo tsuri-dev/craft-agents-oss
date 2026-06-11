@@ -46,8 +46,9 @@ const PI_AGENT_SERVER_OUTPUT = join(PI_AGENT_SERVER_DIR, "dist/index.js");
 // Platform-specific binary paths (bun creates .exe on Windows, no extension on Unix)
 const IS_WINDOWS = process.platform === "win32";
 const BIN_EXT = IS_WINDOWS ? ".exe" : "";
-const VITE_BIN = join(ROOT_DIR, `node_modules/.bin/vite${BIN_EXT}`);
-const ELECTRON_BIN = join(ROOT_DIR, `node_modules/.bin/electron${BIN_EXT}`);
+const ELECTRON_BIN = process.platform === "darwin"
+  ? join(ROOT_DIR, "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron")
+  : join(ROOT_DIR, `node_modules/electron/dist/electron${BIN_EXT}`);
 
 function resolveBuildPlatform(): Platform {
   if (process.platform === "darwin") return "darwin";
@@ -388,10 +389,22 @@ async function verifyJsFile(filePath: string): Promise<{ valid: boolean; error?:
     });
     const stderr = await new Response(proc.stderr).text();
     const exitCode = await proc.exited;
-    if (exitCode !== 0) {
-      return { valid: false, error: stderr.trim() || `node --check exited ${exitCode}` };
+    if (exitCode === 0) {
+      return { valid: true };
     }
-    return { valid: true };
+
+    // Dev machines may have a Volta shim without a default Node installed.
+    // Fall back to the current JS runtime parser so local dev can still start.
+    try {
+      // eslint-disable-next-line no-new-func
+      new Function(readFileSync(filePath, "utf-8"));
+      return { valid: true };
+    } catch (fallbackErr) {
+      return {
+        valid: false,
+        error: `${stderr.trim() || `node --check exited ${exitCode}`}\n${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`.trim(),
+      };
+    }
   } catch (err) {
     return { valid: false, error: String(err) };
   }
@@ -551,7 +564,7 @@ async function main(): Promise<void> {
 
   // 1. Vite dev server (strictPort ensures we don't silently switch ports)
   const viteProc = spawn({
-    cmd: [VITE_BIN, "dev", "--config", "apps/electron/vite.config.ts", "--port", vitePort, "--strictPort"],
+    cmd: ["bun", join(ROOT_DIR, "node_modules/vite/bin/vite.js"), "dev", "--config", "apps/electron/vite.config.ts", "--port", vitePort, "--strictPort"],
     cwd: ROOT_DIR,
     stdin: "ignore",
     stdout: "inherit",
