@@ -366,6 +366,9 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.requirements.BIND_ITEM_TO_GROUP,
   RPC_CHANNELS.requirements.UNLINK_ITEM_FROM_GROUP,
   RPC_CHANNELS.requirements.CREATE_SESSION_FOR_ITEM,
+  RPC_CHANNELS.requirements.LIST_COMMENTS,
+  RPC_CHANNELS.requirements.START_AGENT_RUN,
+  RPC_CHANNELS.requirements.REPLY_TO_AGENT,
 
   // sources — source config per-workspace
   RPC_CHANNELS.sources.GET,
