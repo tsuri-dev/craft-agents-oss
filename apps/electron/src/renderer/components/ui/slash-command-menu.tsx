@@ -686,6 +686,8 @@ export function useInlineSlashCommand({
     // Now safe to trigger state changes
     onSelectCommand(commandId)
     setIsOpen(false)
+    setFilter('')
+    setSlashStart(-1)
 
     return result
   }, [onSelectCommand, slashStart])
@@ -705,6 +707,8 @@ export function useInlineSlashCommand({
     // Trigger working directory change
     onSelectFolder(path)
     setIsOpen(false)
+    setFilter('')
+    setSlashStart(-1)
 
     return result
   }, [onSelectFolder, slashStart])

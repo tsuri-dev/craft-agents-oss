@@ -745,7 +745,9 @@ export function useInlineMention({
 
     onSelect(item)
     setIsOpen(false)
+    setFilter('')
     setCommittedFilter('')
+    setAtStart(-1)
     // Clear file search state and cache to prevent stale results on next open
     if (fileSearchTimeout.current) {
       clearTimeout(fileSearchTimeout.current)
