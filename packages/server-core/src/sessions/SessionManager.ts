@@ -82,7 +82,7 @@ import { collectDirectoryFiles, restoreFiles, type BundleFile } from '@craft-age
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SessionUsageEntry, type UsageStats, type UsageStatsRange, type UsageTotals, type RequirementBinding, type RequirementStartAgentRunInput, type RequirementReplyToAgentInput, type RequirementAgentRunResult, type RequirementComment, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
-import { withAgentTaskLabel } from '@craft-agent/shared/agent-runs'
+import { hasAgentTaskLabel, withAgentTaskLabel } from '@craft-agent/shared/agent-runs'
 import type { AgentRun, AgentRunStatus, AgentRunTriggerType } from '@craft-agent/shared/agent-runs'
 import type { AgentProfileDetail } from '@craft-agent/shared/agent-profiles'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@craft-agent/core/types'
@@ -6196,6 +6196,40 @@ export class SessionManager implements ISessionManager {
     return lines.join('\n')
   }
 
+  private mergeUniqueStrings(...lists: Array<readonly string[] | undefined>): string[] {
+    return [...new Set(lists.flatMap(list => list ?? []).map(value => value.trim()).filter(Boolean))]
+  }
+
+  private resolveRequirementAgentRuntime(profile: AgentProfileDetail): { llmConnection?: string; model?: string } {
+    const defaultConnectionSlug = getDefaultLlmConnection()
+    const defaultConnection = defaultConnectionSlug ? getLlmConnection(defaultConnectionSlug) : null
+    const firstModel = defaultConnection?.models?.[0]
+    const defaultModel = defaultConnection?.defaultModel
+      ?? (typeof firstModel === 'string' ? firstModel : firstModel?.id)
+    return {
+      llmConnection: defaultConnection ? (defaultConnectionSlug ?? undefined) : profile.connectionSlug,
+      model: defaultModel ?? profile.model,
+    }
+  }
+
+  private buildRequirementAgentSessionName(workspaceId: string, profileName: string, item: RequirementStartAgentRunInput['item']): string {
+    const agentName = (sanitizeForTitle(profileName).replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'agent').slice(0, 40)
+    const requirementTitle = (sanitizeForTitle(item.title).slice(0, 64) || `TAPD-${item.sourceItemId}`)
+    const baseName = `${agentName}-tapd ${requirementTitle}`
+    const escapedBase = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const numberedNamePattern = new RegExp(`^${escapedBase}-(\\d+)$`)
+    const tapdLabel = formatLabelEntry('tapd', item.sourceItemId)
+    let maxIndex = 0
+    for (const managed of this.sessions.values()) {
+      if (managed.workspace.id !== workspaceId) continue
+      if (!managed.labels?.includes(tapdLabel) || !hasAgentTaskLabel(managed.labels)) continue
+      const match = (managed.name ?? '').match(numberedNamePattern)
+      if (!match) continue
+      maxIndex = Math.max(maxIndex, Number(match[1] ?? 0))
+    }
+    return `${baseName}-${maxIndex + 1}`
+  }
+
   async startRequirementAgentRun(workspaceId: string, input: RequirementStartAgentRunInput): Promise<RequirementAgentRunResult> {
     if (input.pluginId !== 'tapd') throw new Error(`Unknown requirement plugin: ${input.pluginId}`)
     const workspace = getWorkspaceByNameOrId(workspaceId)
@@ -6207,20 +6241,20 @@ export class SessionManager implements ISessionManager {
     const requirementDirPath = getTapdRequirementBaseDir(workspace.rootPath, sourceItemId)
     const snapshotPath = getTapdRequirementSnapshotPath(workspace.rootPath, sourceItemId)
     const runBaseDir = getTapdRequirementAgentRunsDir(workspace.rootPath, sourceItemId)
-    const promptSnippet = sanitizeForTitle(input.item.title || input.prompt).slice(0, 48)
     const labels = [
       ...(input.groupName || input.item.binding?.groupName ? [formatLabelEntry('group', input.groupName || input.item.binding!.groupName)] : []),
       formatLabelEntry('source', 'tapd'),
       formatLabelEntry('tapd', sourceItemId),
     ]
 
+    const runtime = this.resolveRequirementAgentRuntime(profile)
     const session = await this.createSession(workspaceId, {
-      name: `${profile.name}: TAPD-${sourceItemId}${promptSnippet ? ` ${promptSnippet}` : ''}`,
-      llmConnection: profile.connectionSlug,
-      model: profile.model,
+      name: this.buildRequirementAgentSessionName(workspaceId, profile.name, input.item),
+      llmConnection: runtime.llmConnection,
+      model: runtime.model,
       thinkingLevel: profile.thinkingLevel,
       permissionMode: profile.permissionMode ?? 'ask',
-      enabledSourceSlugs: profile.sourceSlugs,
+      enabledSourceSlugs: this.mergeUniqueStrings(profile.sourceSlugs, input.enabledSourceSlugs),
       workingDirectory: input.workingDirectory?.trim() || undefined,
       labels: withAgentTaskLabel(labels),
     })
@@ -6249,8 +6283,9 @@ export class SessionManager implements ISessionManager {
       infoDirPath,
       requirementDirPath,
     })
+    const skillSlugs = this.mergeUniqueStrings(profile.skillSlugs, input.skillSlugs)
     this.sendMessage(session.id, childPrompt, undefined, undefined, {
-      skillSlugs: profile.skillSlugs.length > 0 ? profile.skillSlugs : undefined,
+      skillSlugs: skillSlugs.length > 0 ? skillSlugs : undefined,
     }).then(() => {
       void this.appendAgentRunLog(run.transcriptPath, {
         type: 'requirement_agent_run_prompt_accepted',
@@ -6279,6 +6314,10 @@ export class SessionManager implements ISessionManager {
     }
     await this.ensureMessagesLoaded(child)
     this.syncAgentChildWorkingDirectory(child, input.workingDirectory)
+    const mergedSourceSlugs = this.mergeUniqueStrings(child.enabledSourceSlugs, profile.sourceSlugs, input.enabledSourceSlugs)
+    if (mergedSourceSlugs.length > 0 && mergedSourceSlugs.join('\u0000') !== (child.enabledSourceSlugs ?? []).join('\u0000')) {
+      await this.setSessionSources(child.id, mergedSourceSlugs)
+    }
 
     const sourceItemId = input.sourceItemId
     const infoDirPath = ensureTapdRequirementInfoDir(workspace.rootPath, sourceItemId)
@@ -6314,8 +6353,9 @@ export class SessionManager implements ISessionManager {
       infoDirPath,
       requirementDirPath,
     })
+    const skillSlugs = this.mergeUniqueStrings(profile.skillSlugs, input.skillSlugs)
     this.sendMessage(input.childSessionId, childPrompt, undefined, undefined, {
-      skillSlugs: profile.skillSlugs.length > 0 ? profile.skillSlugs : undefined,
+      skillSlugs: skillSlugs.length > 0 ? skillSlugs : undefined,
     }).then(() => {
       void this.appendAgentRunLog(run.transcriptPath, {
         type: 'requirement_agent_run_follow_up_prompt_accepted',

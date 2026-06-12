@@ -8,7 +8,6 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import {
   ArrowLeft,
   ArrowRight,
-  ArrowUp,
   ArrowUpRight,
   AppWindow,
   BadgeAlert,
@@ -62,10 +61,11 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DocumentFormattedMarkdownOverlay, Spinner } from '@craft-agent/ui'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
-import { WorkingDirectoryBadge } from './input/FreeFormInput'
+import { FreeFormInput, WorkingDirectoryBadge } from './input/FreeFormInput'
 import { SessionFilesSection } from '../right-sidebar/SessionFilesSection'
 import { InfoPopoverShell, InfoPopoverTriggerButton } from './SessionInfoPopover'
 import { cn } from '@/lib/utils'
+import { parseMentions } from '@/lib/mentions'
 import { navigate, openRouteInNewWindow, routes } from '@/lib/navigate'
 import { useNavigation } from '@/contexts/NavigationContext'
 import { addSessionAtom, sessionMetaMapAtom } from '@/atoms/sessions'
@@ -108,6 +108,8 @@ import type {
   RequirementPluginDescriptor,
   AgentProfile,
   AgentRun,
+  LoadedSkill,
+  LoadedSource,
 } from '../../../shared/types'
 
 const DIALOG_SELECT_CONTENT_STYLE: React.CSSProperties = { zIndex: 'calc(var(--z-modal, 200) + 1)' }
@@ -2394,7 +2396,7 @@ function RunRowActions({ children }: { children: React.ReactNode }) {
 function AgentRunRow({
   run,
   agent,
-  onOpenAgent,
+  onOpenSession,
   onOpenSessionInNewWindow,
   onCancel,
   cancelling,
@@ -2402,7 +2404,7 @@ function AgentRunRow({
 }: {
   run: AgentRun
   agent?: AgentProfile | null
-  onOpenAgent: () => void
+  onOpenSession: () => void
   onOpenSessionInNewWindow: (sessionId: string) => void
   onCancel: (run: AgentRun) => void
   cancelling: boolean
@@ -2417,13 +2419,13 @@ function AgentRunRow({
       role="button"
       tabIndex={0}
       className="group relative flex items-center gap-2 rounded px-1 py-1.5 transition-colors hover:bg-accent/40"
-      onClick={onOpenAgent}
+      onClick={onOpenSession}
       onKeyDown={event => {
         if (event.key !== 'Enter' && event.key !== ' ') return
         event.preventDefault()
-        onOpenAgent()
+        onOpenSession()
       }}
-      title="Open agent Activity"
+      title={run.childSessionId ? 'Open agent session' : 'Open agent Activity'}
     >
       <span className="relative shrink-0">
         <AgentAvatar agent={agent ?? { id: run.agentProfileId, name: run.agentProfileId }} className="h-5 w-5 text-[8px]" />
@@ -2474,29 +2476,67 @@ function AgentRunRow({
   )
 }
 
-function AgentStarterRow({ agent, agentName, isWorking, onOpenAgent, onRun, onRunWithInput }: { agent?: AgentProfile | null; agentName: string; isWorking: boolean; onOpenAgent: () => void; onRun: () => void; onRunWithInput: (instructions: string) => void }) {
+interface RequirementAgentInstructionInput {
+  userInstructions: string
+  skillSlugs?: string[]
+  enabledSourceSlugs?: string[]
+  workingDirectory?: string
+}
+
+function AgentStarterRow({
+  agent,
+  agentName,
+  isWorking,
+  onOpenAgent,
+  onRun,
+  onRunWithInput,
+  sources,
+  skills,
+  workspaceId,
+  currentConnection,
+  currentModel,
+}: {
+  agent?: AgentProfile | null
+  agentName: string
+  isWorking: boolean
+  onOpenAgent: () => void
+  onRun: () => void
+  onRunWithInput: (input: RequirementAgentInstructionInput) => void
+  sources: LoadedSource[]
+  skills: LoadedSkill[]
+  workspaceId?: string
+  currentConnection?: string
+  currentModel: string
+}) {
   const [composerOpen, setComposerOpen] = React.useState(false)
   const [draft, setDraft] = React.useState('')
-  const textareaRef = React.useRef<HTMLTextAreaElement | null>(null)
+  const [selectedSourceSlugs, setSelectedSourceSlugs] = React.useState<string[]>([])
+  const [selectedWorkingDirectory, setSelectedWorkingDirectory] = React.useState<string | undefined>(undefined)
   const { i18n } = useTranslation()
   const language = (i18n.resolvedLanguage || i18n.language || '').toLowerCase()
   const composerPlaceholder = language.startsWith('zh')
-    ? '输入对 Agent 的额外指令…'
-    : 'Enter additional instructions for the agent…'
+    ? '输入对 Agent 的额外指令，可使用 / 和 @…'
+    : 'Add instructions for the agent. / and @ are supported…'
   const runDisabled = !agent || isWorking
 
-  React.useEffect(() => {
-    if (!composerOpen) return
-    requestAnimationFrame(() => textareaRef.current?.focus())
-  }, [composerOpen])
-
-  const submitWithInput = React.useCallback(() => {
-    const text = draft.trim()
+  const submitWithInput = React.useCallback((message: string, skillSlugs?: string[]) => {
+    const text = message.trim()
     if (!text || runDisabled) return
-    onRunWithInput(text)
+    const sourceSlugs = sources.map(source => source.config.slug)
+    const parsedMentions = parseMentions(text, skills.map(skill => skill.slug), sourceSlugs)
+    const mergedSkillSlugs = [...new Set([...(skillSlugs ?? []), ...parsedMentions.skills])]
+    const mergedSourceSlugs = [...new Set([...selectedSourceSlugs, ...parsedMentions.sources])]
+    onRunWithInput({
+      userInstructions: text,
+      ...(mergedSkillSlugs.length ? { skillSlugs: mergedSkillSlugs } : {}),
+      ...(mergedSourceSlugs.length ? { enabledSourceSlugs: mergedSourceSlugs } : {}),
+      ...(selectedWorkingDirectory ? { workingDirectory: selectedWorkingDirectory } : {}),
+    })
     setDraft('')
+    setSelectedSourceSlugs([])
+    setSelectedWorkingDirectory(undefined)
     setComposerOpen(false)
-  }, [draft, onRunWithInput, runDisabled])
+  }, [onRunWithInput, runDisabled, selectedSourceSlugs, selectedWorkingDirectory, skills, sources])
 
   return (
     <div className="rounded px-1 py-1.5">
@@ -2554,7 +2594,11 @@ function AgentStarterRow({ agent, agentName, isWorking, onOpenAgent, onRun, onRu
             title="Run with additional instructions"
             onClick={event => {
               event.stopPropagation()
-              setComposerOpen(open => !open)
+              setComposerOpen(open => {
+                const nextOpen = !open
+                if (!nextOpen) setSelectedWorkingDirectory(undefined)
+                return nextOpen
+              })
             }}
           >
             <MessageCircle className="h-3.5 w-3.5 stroke-[1.8]" />
@@ -2563,35 +2607,42 @@ function AgentStarterRow({ agent, agentName, isWorking, onOpenAgent, onRun, onRu
       </div>
 
       {composerOpen && (
-        <div className="relative mt-1.5">
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={event => setDraft(event.target.value)}
-            onClick={event => event.stopPropagation()}
-            onKeyDown={event => {
-              event.stopPropagation()
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                event.preventDefault()
-                submitWithInput()
-              }
-            }}
+        <div className="mt-1.5 rounded-[8px] border border-border/70 bg-background/60" onClick={event => event.stopPropagation()}>
+          <FreeFormInput
+            variant="inline-agent"
             placeholder={composerPlaceholder}
-            className="box-border h-[58px] min-h-[58px] max-h-[58px] w-full resize-none overflow-y-auto rounded-[8px] border border-border/70 bg-transparent px-2.5 py-2 pr-10 text-[12px] leading-5 text-foreground outline-none placeholder:text-muted-foreground/55 focus:border-border/70 focus:outline-none focus:ring-0"
+            disabled={runDisabled}
+            inputValue={draft}
+            onInputChange={setDraft}
+            onSubmit={(message, _attachments, skillSlugs) => submitWithInput(message, skillSlugs)}
+            currentModel={currentModel}
+            onModelChange={() => undefined}
+            currentConnection={currentConnection}
+            permissionMode="ask"
+            sources={sources}
+            enabledSourceSlugs={selectedSourceSlugs}
+            onSourcesChange={setSelectedSourceSlugs}
+            skills={skills}
+            agentProfiles={[]}
+            workspaceId={workspaceId}
+            workingDirectory={selectedWorkingDirectory}
+            onWorkingDirectoryChange={setSelectedWorkingDirectory}
+            unstyled
+            compactMode
           />
-          <button
-            type="button"
-            className="absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-full border border-border/70 bg-background/70 text-foreground transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-45"
-            disabled={runDisabled || !draft.trim()}
-            aria-label="Run with additional instructions"
-            title="Run with additional instructions"
-            onClick={event => {
-              event.stopPropagation()
-              submitWithInput()
-            }}
-          >
-            <ArrowUp className="h-3.5 w-3.5 stroke-[2.2]" />
-          </button>
+          {selectedWorkingDirectory && (
+            <div className="flex items-center gap-1.5 border-t border-border/40 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+              <span className="min-w-0 flex-1 truncate">Context: {selectedWorkingDirectory}</span>
+              <button
+                type="button"
+                className="flex h-4 w-4 shrink-0 items-center justify-center rounded hover:bg-accent/60 hover:text-foreground"
+                aria-label="Clear selected context"
+                onClick={() => setSelectedWorkingDirectory(undefined)}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -2642,6 +2693,12 @@ function ExecutionLogSection({
   onAddAgent,
   onCancelRun,
   onOpenSessionInNewWindow,
+  onNavigateSession,
+  sources,
+  skills,
+  workspaceId,
+  currentConnection,
+  currentModel,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -2653,10 +2710,16 @@ function ExecutionLogSection({
   startingAgentId?: string | null
   cancellingRunId?: string | null
   onRun: (agent: AgentProfile) => void
-  onRunWithInput: (agent: AgentProfile, instructions: string) => void
+  onRunWithInput: (agent: AgentProfile, input: RequirementAgentInstructionInput) => void
   onAddAgent: (agentId: string) => void
   onCancelRun: (run: AgentRun) => void
   onOpenSessionInNewWindow: (sessionId: string) => void
+  onNavigateSession: (sessionId: string) => void
+  sources: LoadedSource[]
+  skills: LoadedSkill[]
+  workspaceId?: string
+  currentConnection?: string
+  currentModel: string
 }) {
   const activeRuns = runs.filter(run => ACTIVE_AGENT_RUN_STATUSES.has(run.status))
   const pastRuns = runs.filter(run => !ACTIVE_AGENT_RUN_STATUSES.has(run.status))
@@ -2701,14 +2764,19 @@ function ExecutionLogSection({
                   isWorking={isWorking}
                   onOpenAgent={() => openAgentActivity(agent.id)}
                   onRun={() => onRun(agent)}
-                  onRunWithInput={instructions => onRunWithInput(agent, instructions)}
+                  onRunWithInput={input => onRunWithInput(agent, input)}
+                  sources={sources}
+                  skills={skills}
+                  workspaceId={workspaceId}
+                  currentConnection={currentConnection}
+                  currentModel={currentModel}
                 />
                 {agentActiveRuns.map(run => (
                   <AgentRunRow
                     key={run.id}
                     run={run}
                     agent={agent}
-                    onOpenAgent={() => openAgentActivity(run.agentProfileId)}
+                    onOpenSession={() => run.childSessionId ? onNavigateSession(run.childSessionId) : openAgentActivity(run.agentProfileId)}
                     onOpenSessionInNewWindow={onOpenSessionInNewWindow}
                     onCancel={onCancelRun}
                     cancelling={cancellingRunId === run.id}
@@ -2738,7 +2806,7 @@ function ExecutionLogSection({
                       key={run.id}
                       run={run}
                       agent={agentsById.get(run.agentProfileId)}
-                      onOpenAgent={() => openAgentActivity(run.agentProfileId)}
+                      onOpenSession={() => run.childSessionId ? onNavigateSession(run.childSessionId) : openAgentActivity(run.agentProfileId)}
                       onOpenSessionInNewWindow={onOpenSessionInNewWindow}
                       onCancel={onCancelRun}
                       cancelling={false}
@@ -3434,7 +3502,16 @@ function RequirementInfoPopover({
 }
 
 export function RequirementDetailPage({ sourceItemId, onItemUpdated, onLabelsUpdated }: { sourceItemId: string; onItemUpdated?: (item: ExternalRequirementItem) => void; onLabelsUpdated?: () => void }) {
-  const { activeWorkspaceId, onOpenUrl, onSessionLabelsChange, onSessionOptionsChange } = useAppShellContext()
+  const {
+    activeWorkspaceId,
+    onOpenUrl,
+    onSessionLabelsChange,
+    onSessionOptionsChange,
+    enabledSources = [],
+    skills: workspaceSkills = [],
+    llmConnections,
+    workspaceDefaultLlmConnection,
+  } = useAppShellContext()
   const { navigateToSession } = useNavigation()
   // Keep synced cached requirements readable even when tapd-mcp-http is not enabled in this workspace.
   const tapdInstalled = true
@@ -3573,6 +3650,19 @@ export function RequirementDetailPage({ sourceItemId, onItemUpdated, onLabelsUpd
     () => mainSession ? [mainSession, ...groupSessions.filter(session => session.id !== mainSession.id && !hasAgentTaskLabel(session.labels))] : [],
     [groupSessions, mainSession],
   )
+  const defaultComposerConnection = React.useMemo(() => {
+    const connections = llmConnections ?? []
+    return connections.find(connection => connection.slug === workspaceDefaultLlmConnection)
+      ?? connections.find(connection => connection.isAuthenticated)
+      ?? connections[0]
+      ?? null
+  }, [llmConnections, workspaceDefaultLlmConnection])
+  const defaultComposerModel = React.useMemo(() => {
+    const firstModel = defaultComposerConnection?.models?.[0]
+    return defaultComposerConnection?.defaultModel
+      ?? (typeof firstModel === 'string' ? firstModel : firstModel?.id)
+      ?? 'claude-opus-4-8'
+  }, [defaultComposerConnection])
   const requirementAgents = React.useMemo(() => resolveTapdRequirementAgents(agents, requirementAgentIds), [agents, requirementAgentIds])
   const requirementAgentIdsSet = React.useMemo(() => new Set(requirementAgents.map(agent => agent.id)), [requirementAgents])
   const availableRequirementAgents = React.useMemo(
@@ -3735,10 +3825,13 @@ export function RequirementDetailPage({ sourceItemId, onItemUpdated, onLabelsUpd
     toast.success('Agent added to requirement', { description: added?.name ?? agentId })
   }, [activeWorkspaceId, agents, sourceItemId])
 
-  const runRequirementAgent = React.useCallback(async (agent: AgentProfile, options?: { userInstructions?: string }) => {
+  const runRequirementAgent = React.useCallback(async (agent: AgentProfile, options?: Partial<RequirementAgentInstructionInput>) => {
     if (!activeWorkspaceId || !item || startingTapdAgentId === agent.id) return
     if (relevantAgentRuns.some(run => run.agentProfileId === agent.id && ACTIVE_AGENT_RUN_STATUSES.has(run.status))) return
-    const prompt = buildTapdAgentInstructionPrompt(agent.id, item, workContext, options?.userInstructions)
+    const runWorkContext = options?.workingDirectory
+      ? { ...workContext, workingDirectory: options.workingDirectory }
+      : workContext
+    const prompt = buildTapdAgentInstructionPrompt(agent.id, item, runWorkContext, options?.userInstructions)
     setStartingTapdAgentId(agent.id)
     try {
       const result = await window.electronAPI.startRequirementAgentRun(activeWorkspaceId, {
@@ -3746,8 +3839,10 @@ export function RequirementDetailPage({ sourceItemId, onItemUpdated, onLabelsUpd
         item,
         agentProfileId: agent.id,
         prompt,
-        workingDirectory: workContext.workingDirectory,
+        workingDirectory: runWorkContext.workingDirectory,
         groupName: item.binding?.groupName,
+        skillSlugs: options?.skillSlugs,
+        enabledSourceSlugs: options?.enabledSourceSlugs,
       })
       setLocalComments(current => [
         ...current.filter(comment => comment.id !== result.comment.id),
@@ -4026,10 +4121,16 @@ export function RequirementDetailPage({ sourceItemId, onItemUpdated, onLabelsUpd
               startingAgentId={startingTapdAgentId}
               cancellingRunId={cancellingRunId}
               onRun={runRequirementAgent}
-              onRunWithInput={(agent, instructions) => runRequirementAgent(agent, { userInstructions: instructions })}
+              onRunWithInput={(agent, input) => runRequirementAgent(agent, input)}
               onAddAgent={addRequirementAgent}
               onCancelRun={cancelTapdAgentRun}
               onOpenSessionInNewWindow={openSessionInNewWindow}
+              onNavigateSession={navigateToSession}
+              sources={enabledSources}
+              skills={workspaceSkills}
+              workspaceId={activeWorkspaceId ?? undefined}
+              currentConnection={defaultComposerConnection?.slug ?? workspaceDefaultLlmConnection}
+              currentModel={defaultComposerModel}
             />
 
             {requirementAgents.length === 0 && (

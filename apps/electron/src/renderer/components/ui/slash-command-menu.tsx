@@ -534,6 +534,10 @@ export interface UseInlineSlashCommandOptions {
   activeCommands?: SlashCommandId[]
   recentFolders?: string[]
   homeDir?: string
+  /** Whether mode/compact commands should appear in the inline slash menu. */
+  includeCommands?: boolean
+  /** Whether recent working directory entries should appear in the inline slash menu. */
+  includeFolders?: boolean
 }
 
 export interface UseInlineSlashCommandReturn {
@@ -555,6 +559,8 @@ export function useInlineSlashCommand({
   activeCommands = [],
   recentFolders = [],
   homeDir,
+  includeCommands = true,
+  includeFolders = true,
 }: UseInlineSlashCommandOptions): UseInlineSlashCommandReturn {
   const [isOpen, setIsOpen] = React.useState(false)
   const [filter, setFilter] = React.useState('')
@@ -567,22 +573,24 @@ export function useInlineSlashCommand({
   const sections = React.useMemo((): SlashSection[] => {
     const result: SlashSection[] = []
 
-    // Modes section
-    result.push({
-      id: 'modes',
-      label: 'Modes',
-      items: permissionModeCommands,
-    })
+    if (includeCommands) {
+      // Modes section
+      result.push({
+        id: 'modes',
+        label: 'Modes',
+        items: permissionModeCommands,
+      })
 
-    // Commands section
-    result.push({
-      id: 'commands',
-      label: 'Commands',
-      items: [compactCommand],
-    })
+      // Commands section
+      result.push({
+        id: 'commands',
+        label: 'Commands',
+        items: [compactCommand],
+      })
+    }
 
     // Recent folders section - sorted alphabetically by folder name, show all
-    if (recentFolders.length > 0) {
+    if (includeFolders && recentFolders.length > 0) {
       const sortedFolders = [...recentFolders]
         .sort((a, b) => {
           const nameA = getFolderName(a).toLowerCase()
@@ -604,7 +612,7 @@ export function useInlineSlashCommand({
     }
 
     return result
-  }, [recentFolders, homeDir])
+  }, [includeCommands, includeFolders, recentFolders, homeDir])
 
   const handleInputChange = React.useCallback((value: string, cursorPosition: number) => {
     // Store current state for handleSelect

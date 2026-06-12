@@ -154,6 +154,8 @@ export interface FreeFormInputProps {
   placeholder?: string | string[]
   /** Whether input is disabled */
   disabled?: boolean
+  /** Minimal inline variant used for scoped agent instructions. */
+  variant?: 'default' | 'inline-agent'
   /** Whether the session is currently processing */
   isProcessing?: boolean
   /** Callback when message is submitted (skillSlugs from @mentions) */
@@ -294,6 +296,7 @@ export interface FreeFormInputProps {
 export function FreeFormInput({
   placeholder,
   disabled = false,
+  variant = 'default',
   isProcessing = false,
   onSubmit,
   onStop,
@@ -345,6 +348,7 @@ export function FreeFormInput({
   onRequestExpand,
 }: FreeFormInputProps) {
   const { t } = useTranslation()
+  const isInlineAgentInput = variant === 'inline-agent'
 
   // Default rotating placeholders for onboarding/empty state (i18n-aware)
   const defaultPlaceholders = React.useMemo(() => [
@@ -923,7 +927,7 @@ export function FreeFormInput({
   // Listen for craft:paste-files events (for global paste when input not focused)
   React.useEffect(() => {
     const handlePasteFiles = async (e: CustomEvent<{ files: File[]; sessionId?: string }>) => {
-      if (disabled) return
+      if (disabled || isInlineAgentInput) return
 
       const targetSessionId = e.detail?.sessionId
       if (!shouldHandleScopedInputEvent({ sessionId, isFocusedPanel, targetSessionId })) return
@@ -961,7 +965,7 @@ export function FreeFormInput({
 
     window.addEventListener('craft:paste-files', handlePasteFiles as unknown as EventListener)
     return () => window.removeEventListener('craft:paste-files', handlePasteFiles as unknown as EventListener)
-  }, [disabled, sessionId, isFocusedPanel, richInputRef])
+  }, [disabled, isInlineAgentInput, sessionId, isFocusedPanel, richInputRef])
 
   // Build active commands list for slash command menu
   const activeCommands = React.useMemo(() => {
@@ -975,11 +979,12 @@ export function FreeFormInput({
 
   // Handle slash command selection (mode/feature commands)
   const handleSlashCommand = React.useCallback((commandId: SlashCommandId) => {
+    if (isInlineAgentInput) return
     if (commandId === 'safe') onPermissionModeChange?.('safe')
     else if (commandId === 'ask') onPermissionModeChange?.('ask')
     else if (commandId === 'allow-all') onPermissionModeChange?.('allow-all')
     else if (commandId === 'compact' && !isProcessing) onSubmit('/compact', undefined)
-  }, [onPermissionModeChange, isProcessing, onSubmit])
+  }, [isInlineAgentInput, onPermissionModeChange, isProcessing, onSubmit])
 
   // Handle folder selection from slash command menu
   const handleSlashFolderSelect = React.useCallback((path: string) => {
@@ -1008,6 +1013,8 @@ export function FreeFormInput({
     activeCommands,
     recentFolders,
     homeDir,
+    includeCommands: !isInlineAgentInput,
+    includeFolders: true,
   })
 
   // Handle mention selection (sources, skills, agents, files)
@@ -1147,6 +1154,7 @@ export function FreeFormInput({
 
   // Drag and drop handlers
   const handleDragEnter = (e: React.DragEvent) => {
+    if (isInlineAgentInput) return
     e.preventDefault()
     e.stopPropagation()
     dragCounterRef.current++
@@ -1156,6 +1164,7 @@ export function FreeFormInput({
   }
 
   const handleDragLeave = (e: React.DragEvent) => {
+    if (isInlineAgentInput) return
     e.preventDefault()
     e.stopPropagation()
     dragCounterRef.current--
@@ -1165,6 +1174,7 @@ export function FreeFormInput({
   }
 
   const handleDragOver = (e: React.DragEvent) => {
+    if (isInlineAgentInput) return
     e.preventDefault()
     e.stopPropagation()
   }
@@ -1233,7 +1243,7 @@ export function FreeFormInput({
 
   // Clipboard paste handler for files/images
   const handlePaste = async (e: React.ClipboardEvent) => {
-    if (disabled) return
+    if (disabled || isInlineAgentInput) return
 
     const clipboardItems = e.clipboardData?.files
     if (!clipboardItems || clipboardItems.length === 0) return
@@ -1261,6 +1271,7 @@ export function FreeFormInput({
 
   // Handle long text paste - convert to file attachment
   const handleLongTextPaste = React.useCallback((text: string) => {
+    if (isInlineAgentInput) return
     const nextNum = getNextPastedNumber('text', attachmentsRef.current)
     const fileName = `pasted-text-${nextNum}.txt`
     const attachment: FileAttachment = {
@@ -1274,9 +1285,10 @@ export function FreeFormInput({
     setAttachments(prev => [...prev, attachment])
     // Focus input after adding attachment
     richInputRef.current?.focus()
-  }, []) // No deps needed - uses ref
+  }, [isInlineAgentInput])
 
   const handleDrop = async (e: React.DragEvent) => {
+    if (isInlineAgentInput) return
     e.preventDefault()
     e.stopPropagation()
     dragCounterRef.current = 0
@@ -1476,7 +1488,7 @@ export function FreeFormInput({
     inlineMention.handleInputChange(nextValue, cursorPosition)
 
     // Update inline label state (for #labels)
-    inlineLabel.handleInputChange(nextValue, cursorPosition)
+    if (!isInlineAgentInput) inlineLabel.handleInputChange(nextValue, cursorPosition)
 
     // Auto-capitalize first letter (but not for slash commands, @mentions, or #labels)
     // Only if autoCapitalisation setting is enabled
@@ -1502,7 +1514,7 @@ export function FreeFormInput({
       setInput(newValue)
       syncToParent(newValue)
     }
-  }, [inlineSlash, inlineMention, inlineLabel, syncToParent, autoCapitalisation])
+  }, [inlineSlash, inlineMention, inlineLabel, syncToParent, autoCapitalisation, isInlineAgentInput])
 
   // Handle inline slash command selection (removes the /command text)
   const handleInlineSlashCommandSelect = React.useCallback((commandId: SlashCommandId) => {
@@ -1633,18 +1645,20 @@ export function FreeFormInput({
         />
 
         {/* Inline Label & State Autocomplete (#labels / #states) */}
-        <InlineLabelMenu
-          open={inlineLabel.isOpen}
-          onOpenChange={(open) => !open && inlineLabel.close()}
-          items={inlineLabel.items}
-          onSelect={handleInlineLabelSelect}
-          onAddLabel={handleAddLabel}
-          filter={inlineLabel.filter}
-          position={inlineLabel.position}
-          states={inlineLabel.states}
-          activeStateId={inlineLabel.activeStateId}
-          onSelectState={handleInlineStateSelect}
-        />
+        {!isInlineAgentInput && (
+          <InlineLabelMenu
+            open={inlineLabel.isOpen}
+            onOpenChange={(open) => !open && inlineLabel.close()}
+            items={inlineLabel.items}
+            onSelect={handleInlineLabelSelect}
+            onAddLabel={handleAddLabel}
+            filter={inlineLabel.filter}
+            position={inlineLabel.position}
+            states={inlineLabel.states}
+            activeStateId={inlineLabel.activeStateId}
+            onSelectState={handleInlineStateSelect}
+          />
+        )}
 
         {/* Controlled EditPopover for "Add New Label" — opens when user selects
             the option from the # menu with no matches.
@@ -1654,7 +1668,7 @@ export function FreeFormInput({
             fall back to the same-window deep-link path; that worked inside
             Electron but launched the desktop app from the WebUI via `craftagents://`.
             Match the AppShell pattern (which already uses spread). */}
-        {addLabelEditConfig && (
+        {!isInlineAgentInput && addLabelEditConfig && (
           <EditPopover
             trigger={<span className="absolute top-0 left-0 w-0 h-0 overflow-hidden" />}
             open={addLabelPopoverOpen}
@@ -1673,7 +1687,7 @@ export function FreeFormInput({
         {/* Pre-flight image-support warning — only for pi_compat connections
             where the renderer can both detect text-only models and offer to
             flip the per-model supportsImages override on the spot. */}
-        {showVisionWarning && effectiveConnectionDetails && (
+        {!isInlineAgentInput && showVisionWarning && effectiveConnectionDetails && (
           <ImageSupportWarningBanner
             modelName={currentModelDisplayName}
             onEnable={() => handleToggleModelVision(effectiveConnectionDetails.slug, currentModel, true)}
@@ -1681,16 +1695,18 @@ export function FreeFormInput({
         )}
 
         {/* Attachment Preview */}
-        <AttachmentPreview
-          attachments={attachments}
-          onRemove={handleRemoveAttachment}
-          disabled={disabled}
-          loadingCount={loadingCount}
-        />
+        {!isInlineAgentInput && (
+          <AttachmentPreview
+            attachments={attachments}
+            onRemove={handleRemoveAttachment}
+            disabled={disabled}
+            loadingCount={loadingCount}
+          />
+        )}
 
         {/* Agent reply target chip */}
         <AnimatePresence initial={false}>
-          {agentReplyTarget && (
+          {!isInlineAgentInput && agentReplyTarget && (
             <motion.div
               key="agent-reply-target"
               initial={{ opacity: 0, height: 0 }}
@@ -1727,7 +1743,7 @@ export function FreeFormInput({
 
         {/* Follow-up context chips */}
         <AnimatePresence initial={false}>
-          {followUpItems.length > 0 && (
+          {!isInlineAgentInput && followUpItems.length > 0 && (
             <motion.div
               key="follow-up-chips"
               layout={animateFollowUpLayout}
@@ -1834,7 +1850,10 @@ export function FreeFormInput({
           sources={sources}
           agents={agentProfiles}
           workspaceId={workspaceSlug}
-          className="pl-5 pr-4 pt-4 pb-3 overflow-y-auto min-h-[88px]"
+          className={cn(
+            'overflow-y-auto',
+            isInlineAgentInput ? 'min-h-[58px] px-3 py-2 text-[12px]' : 'min-h-[88px] pl-5 pr-4 pt-4 pb-3',
+          )}
           style={{ maxHeight: inputMaxHeight }}
           data-tutorial="chat-input"
           spellCheck={spellCheck}
@@ -1844,26 +1863,30 @@ export function FreeFormInput({
         {/* Bottom Row: Controls - wrapped in relative container for status slot overlay */}
         <div className="relative">
           {/* Status slot overlay - escape interrupt (highest priority), browser status, etc. */}
-          <ToolbarStatusSlot
-            showEscapeOverlay={isProcessing && showEscapeOverlay}
-            sessionId={sessionId}
-          />
+          {!isInlineAgentInput && (
+            <ToolbarStatusSlot
+              showEscapeOverlay={isProcessing && showEscapeOverlay}
+              sessionId={sessionId}
+            />
+          )}
 
-          <div className={cn("flex items-center gap-1 px-2 py-2", !compactMode && "border-t border-border/50")}>
+          <div className={cn("flex items-center gap-1 px-2 py-2", !compactMode && !isInlineAgentInput && "border-t border-border/50", isInlineAgentInput && "pt-0")}>
           {/* Hidden file input for attach button (shared by compact and desktop) */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={handleFileInputChange}
-          />
+          {!isInlineAgentInput && (
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={handleFileInputChange}
+            />
+          )}
 
           {/* Compact mode: permission mode drawer + standard icon badges for attach/sources/working dir.
               Wrapper absorbs all squeeze so the model label truncates first and the send button stays
               anchored to the right (craft-agents-oss#798). overflow-hidden is safe — Radix Drawer /
               dropdowns inside render via portals, so they aren't clipped. */}
-          {compactMode && (
+          {!isInlineAgentInput && compactMode && (
           <div className="flex items-center gap-1 min-w-0 shrink overflow-hidden">
           {onPermissionModeChange && (
             <CompactPermissionModeSelector
@@ -1981,7 +2004,7 @@ export function FreeFormInput({
           )}
 
           {/* Desktop: full badges row with labels and working directory */}
-          {!compactMode && (
+          {!isInlineAgentInput && !compactMode && (
           <div className="flex items-center gap-1 min-w-32 shrink overflow-hidden">
           {/* 1. Attach Files Badge */}
           <FreeFormInputContextBadge
@@ -2108,7 +2131,7 @@ export function FreeFormInput({
           {/* Right side: Model + Send - never shrink so they're always visible */}
           <div className="flex items-center shrink-0">
           {/* 5. Model/Connection Selector - Hidden in compact mode (EditPopover embedding) */}
-          {!compactMode && (
+          {!isInlineAgentInput && !compactMode && (
           <DropdownMenu open={modelDropdownOpen} onOpenChange={setModelDropdownOpen}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2482,7 +2505,7 @@ export function FreeFormInput({
           )}
 
           {/* 5.5 Context Usage Badge - shows token usage for all models; Claude can compact */}
-          {(() => {
+          {!isInlineAgentInput && (() => {
             const inputTokens = contextStatus?.inputTokens ?? 0
             if (inputTokens <= 0) return null
 

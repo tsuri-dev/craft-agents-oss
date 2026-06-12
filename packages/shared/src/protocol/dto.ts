@@ -349,6 +349,10 @@ export interface RequirementStartAgentRunInput {
   prompt: string
   workingDirectory?: string
   groupName?: string
+  /** Extra skill mentions selected from the inline requirement-agent composer. */
+  skillSlugs?: string[]
+  /** Extra source mentions selected from the inline requirement-agent composer. */
+  enabledSourceSlugs?: string[]
 }
 
 export interface RequirementReplyToAgentInput {
@@ -359,6 +363,10 @@ export interface RequirementReplyToAgentInput {
   runId?: string
   message: string
   workingDirectory?: string
+  /** Extra skill mentions selected from the inline requirement-agent composer. */
+  skillSlugs?: string[]
+  /** Extra source mentions selected from the inline requirement-agent composer. */
+  enabledSourceSlugs?: string[]
 }
 
 export interface RequirementAgentRunResult {
