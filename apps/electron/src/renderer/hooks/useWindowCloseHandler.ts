@@ -11,8 +11,9 @@ import type { WindowCloseRequest } from '../../shared/types'
  * - `window-button` closes the window directly.
  * - `keyboard-shortcut` (Cmd/Ctrl+W) uses layered dismissal:
  *   1. Close top modal
- *   2. Else close focused panel
- *   3. Else close window
+ *   2. Else close focused single-panel windows directly
+ *   3. Else close focused panel
+ *   4. Else close window
  * - `unknown` follows layered dismissal as a safe fallback.
  *
  * The main process starts a fallback timeout on each close request.
@@ -45,6 +46,12 @@ export function useWindowCloseHandler() {
       if (hasOpenModals()) {
         closeTopModal()
         window.electronAPI.cancelCloseWindow()
+        return
+      }
+
+      const isFocusedWindow = new URLSearchParams(window.location.search).get('focused') === 'true'
+      if (request.source === 'keyboard-shortcut' && isFocusedWindow && panelStack.length <= 1) {
+        window.electronAPI.confirmCloseWindow()
         return
       }
 

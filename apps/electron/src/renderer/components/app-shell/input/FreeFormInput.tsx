@@ -21,6 +21,7 @@ import {
 import { Icon_Home, Icon_Folder, Spinner } from '@craft-agent/ui'
 
 import * as storage from '@/lib/local-storage'
+import { openRouteInNewWindow, routes } from '@/lib/navigate'
 import { useDirectoryPicker } from '@/hooks/useDirectoryPicker'
 import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
 import { Button } from '@/components/ui/button'
@@ -102,6 +103,8 @@ import {
   stripPiPrefixForDisplay,
 } from './model-picker-helpers'
 import { useModelVisionToggle } from './useModelVisionToggle'
+import { getTapdRequirementId, TAPD_PLUGIN_ID } from '@/utils/session-requirement-link'
+import tapdIconUrl from '@/assets/tapd-icon.png'
 
 function formatFollowUpChipText(text: string, fallback: string, maxLength = 50): string {
   const normalized = text.replace(/\s+/g, ' ').trim()
@@ -350,6 +353,7 @@ export function FreeFormInput({
 }: FreeFormInputProps) {
   const { t } = useTranslation()
   const isInlineAgentInput = variant === 'inline-agent'
+  const tapdRequirementId = React.useMemo(() => getTapdRequirementId(sessionLabels), [sessionLabels])
 
   // Default rotating placeholders for onboarding/empty state (i18n-aware)
   const defaultPlaceholders = React.useMemo(() => [
@@ -2109,6 +2113,10 @@ export function FreeFormInput({
               workspaceId={workspaceId}
             />
           )}
+
+          {tapdRequirementId && !isInlineAgentInput && (
+            <OpenTapdRequirementButton requirementId={tapdRequirementId} />
+          )}
           </div>
           )}
 
@@ -2634,6 +2642,30 @@ function DirectoryOpenAppIcon({ app, className }: { app: DirectoryOpenAppInfo; c
   }
 
   return <Code2 className={cn('h-4 w-4', className)} />
+}
+
+function OpenTapdRequirementButton({ requirementId }: { requirementId: string }) {
+  const openTapdRequirement = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    void openRouteInNewWindow(routes.view.plugins(TAPD_PLUGIN_ID, 'requirement', requirementId))
+  }, [requirementId])
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label="Open TAPD requirement in new window"
+          onClick={openTapdRequirement}
+          className="inline-flex h-7 w-9 shrink-0 items-center justify-center rounded-[10px] border border-border/70 bg-background/80 text-muted-foreground shadow-minimal transition-colors hover:bg-foreground/5 hover:text-foreground active:scale-95"
+        >
+          <img src={tapdIconUrl} alt="" className="h-4 w-4 rounded-[3px] object-contain" draggable={false} />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top">Open TAPD requirement in new window</TooltipContent>
+    </Tooltip>
+  )
 }
 
 function OpenDirectoryAppMenu({ workingDirectory }: { workingDirectory: string }) {
