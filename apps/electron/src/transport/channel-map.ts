@@ -125,6 +125,8 @@ export const CHANNEL_MAP = {
   openUrl: invoke(RPC_CHANNELS.shell.OPEN_URL),
   openFile: invoke(RPC_CHANNELS.shell.OPEN_FILE),
   showInFolder: invoke(RPC_CHANNELS.shell.SHOW_IN_FOLDER),
+  listDirectoryOpenApps: invoke(RPC_CHANNELS.shell.LIST_DIRECTORY_OPEN_APPS),
+  openDirectoryWithApp: invoke(RPC_CHANNELS.shell.OPEN_DIRECTORY_WITH_APP),
 
   // Menu event listeners
   onMenuNewChat: listener(RPC_CHANNELS.menu.NEW_CHAT),

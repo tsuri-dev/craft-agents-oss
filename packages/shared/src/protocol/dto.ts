@@ -43,6 +43,24 @@ export type {
 export { generateMessageId } from '@craft-agent/core/types'
 
 // ---------------------------------------------------------------------------
+// Shell / local OS integration DTOs
+// ---------------------------------------------------------------------------
+
+export type DirectoryOpenAppId = 'vscode' | 'cursor' | 'zed' | 'finder' | 'terminal' | 'ghostty' | 'warp' | 'xcode'
+
+export interface DirectoryOpenAppInfo {
+  id: DirectoryOpenAppId
+  name: string
+  iconDataUrl?: string
+  available?: boolean
+}
+
+export interface OpenDirectoryWithAppInput {
+  appId: DirectoryOpenAppId
+  path: string
+}
+
+// ---------------------------------------------------------------------------
 // Session types
 // ---------------------------------------------------------------------------
 

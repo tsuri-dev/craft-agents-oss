@@ -9,6 +9,7 @@ import {
   Square,
   Check,
   Code2,
+  Terminal as TerminalIcon,
   Zap,
   DatabaseZap,
   ChevronDown,
@@ -78,7 +79,7 @@ import { CompactWorkingDirectorySelector } from '@/components/ui/CompactWorkingD
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
 import { derivePickerMode } from './picker-mode'
-import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
+import type { DirectoryOpenAppId, DirectoryOpenAppInfo, FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
 import type { AgentProfile } from '../../../../shared/agent-profiles'
 import type { PermissionMode } from '@craft-agent/shared/agent/modes'
 import { type ThinkingLevel, THINKING_LEVELS, getThinkingLevelNameKey } from '@craft-agent/shared/agent/thinking-levels'
@@ -2604,6 +2605,116 @@ export function FreeFormInput({
   )
 }
 
+const DIRECTORY_OPEN_APP_FALLBACKS: DirectoryOpenAppInfo[] = [
+  { id: 'vscode', name: 'VS Code' },
+  { id: 'cursor', name: 'Cursor' },
+  { id: 'zed', name: 'Zed' },
+  { id: 'finder', name: 'Finder' },
+  { id: 'terminal', name: 'Terminal' },
+  { id: 'ghostty', name: 'Ghostty' },
+  { id: 'warp', name: 'Warp' },
+  { id: 'xcode', name: 'Xcode' },
+]
+
+function normalizeDirectoryOpenAppId(value: unknown): DirectoryOpenAppId {
+  return DIRECTORY_OPEN_APP_FALLBACKS.some(app => app.id === value) ? value as DirectoryOpenAppId : 'vscode'
+}
+
+function DirectoryOpenAppIcon({ app, className }: { app: DirectoryOpenAppInfo; className?: string }) {
+  if (app.iconDataUrl) {
+    return <img src={app.iconDataUrl} alt="" className={cn('h-4 w-4 rounded-[4px] object-contain', className)} draggable={false} />
+  }
+
+  if (app.id === 'finder') {
+    return <Icon_Folder className={cn('h-4 w-4', className)} />
+  }
+
+  if (app.id === 'terminal' || app.id === 'ghostty' || app.id === 'warp') {
+    return <TerminalIcon className={cn('h-4 w-4', className)} />
+  }
+
+  return <Code2 className={cn('h-4 w-4', className)} />
+}
+
+function OpenDirectoryAppMenu({ workingDirectory }: { workingDirectory: string }) {
+  const [apps, setApps] = React.useState<DirectoryOpenAppInfo[]>(DIRECTORY_OPEN_APP_FALLBACKS)
+  const [selectedAppId, setSelectedAppId] = React.useState<DirectoryOpenAppId>(() => normalizeDirectoryOpenAppId(storage.get(storage.KEYS.openDirectoryApp, 'vscode')))
+  const selectedApp = apps.find(app => app.id === selectedAppId) ?? apps[0] ?? DIRECTORY_OPEN_APP_FALLBACKS[0]
+
+  React.useEffect(() => {
+    let cancelled = false
+    window.electronAPI.listDirectoryOpenApps()
+      .then(nextApps => {
+        if (cancelled || nextApps.length === 0) return
+        setApps(nextApps)
+      })
+      .catch(error => {
+        window.electronAPI.debugLog?.('[open-directory-apps] list failed:', error instanceof Error ? error.message : String(error))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const openWithApp = React.useCallback(async (app: DirectoryOpenAppInfo, event?: React.MouseEvent) => {
+    event?.preventDefault()
+    event?.stopPropagation()
+    setSelectedAppId(app.id)
+    storage.set(storage.KEYS.openDirectoryApp, app.id)
+
+    try {
+      await window.electronAPI.openDirectoryWithApp({ appId: app.id, path: workingDirectory })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `Could not open ${app.name}`
+      toast.error(`Could not open ${app.name}`, { description: message })
+    }
+  }, [workingDirectory])
+
+  return (
+    <DropdownMenu>
+      <span className="inline-flex h-7 shrink-0 overflow-hidden rounded-[10px] border border-border/70 bg-background/80 shadow-minimal">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={`Open working directory in ${selectedApp.name}`}
+              onClick={event => void openWithApp(selectedApp, event)}
+              className="inline-flex h-full w-9 items-center justify-center text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground active:scale-95"
+            >
+              <DirectoryOpenAppIcon app={selectedApp} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top">Open in {selectedApp.name}</TooltipContent>
+        </Tooltip>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="Choose app to open working directory"
+            onClick={event => event.stopPropagation()}
+            className="inline-flex h-full w-7 items-center justify-center border-l border-border/60 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          >
+            <ChevronDown className="h-3.5 w-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+      </span>
+      <StyledDropdownMenuContent side="top" align="end" sideOffset={8} className="min-w-[190px] rounded-[18px] p-2">
+        {apps.map(app => (
+          <StyledDropdownMenuItem
+            key={app.id}
+            onSelect={() => {
+              void openWithApp(app)
+            }}
+            className="flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-[15px]"
+          >
+            <DirectoryOpenAppIcon app={app} className="shrink-0" />
+            <span className="flex-1">{app.name}</span>
+          </StyledDropdownMenuItem>
+        ))}
+      </StyledDropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 /**
  * Format path for display, with home directory shortened
  */
@@ -2641,25 +2752,6 @@ export function WorkingDirectoryBadge({
   const [popoverOpen, setPopoverOpen] = React.useState(false)
   const inputRef = React.useRef<HTMLInputElement>(null)
   const closePopover = React.useCallback(() => setPopoverOpen(false), [])
-
-  const buildVsCodeFolderUrl = React.useCallback((path: string) => {
-    const normalized = path.replace(/\\/g, '/')
-    const withLeadingSlash = normalized.startsWith('/') ? normalized : `/${normalized}`
-    return `vscode://file${withLeadingSlash.split('/').map(encodeURIComponent).join('/')}`
-  }, [])
-
-  const handleOpenInVsCode = React.useCallback(async (event: React.MouseEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    if (!workingDirectory) return
-
-    try {
-      await window.electronAPI.openUrl(buildVsCodeFolderUrl(workingDirectory))
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not open VS Code'
-      toast.error('Could not open VS Code', { description: message })
-    }
-  }, [buildVsCodeFolderUrl, workingDirectory])
 
   const {
     homeDir,
@@ -2731,21 +2823,7 @@ export function WorkingDirectoryBadge({
             />
           </span>
         </PopoverTrigger>
-        {workingDirectory && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label="Open working directory in VS Code"
-                onClick={handleOpenInVsCode}
-                className="input-toolbar-btn inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground active:scale-95"
-              >
-                <Code2 className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">Open in VS Code</TooltipContent>
-          </Tooltip>
-        )}
+        {workingDirectory && <OpenDirectoryAppMenu workingDirectory={workingDirectory} />}
       </span>
       <PopoverContent side="top" align="start" sideOffset={8} className={MENU_CONTAINER_STYLE}>
         <CommandPrimitive shouldFilter={showFilter}>

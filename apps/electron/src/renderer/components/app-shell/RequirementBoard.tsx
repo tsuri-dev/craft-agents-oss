@@ -246,30 +246,9 @@ interface TapdHomeUiState {
 
 const TAPD_HOME_TAB_ID = 'tapd-home'
 const TAPD_HOME_STATUS = 'Backlog'
-const TAPD_DELETED_STATUS = '已删除'
 const TAPD_UI_STORAGE_VERSION = 1
 const TAPD_STATUS_ORDER = ['in progress', '开发中', '进行中', 'todo', 'backlog', 'in review', '待评审', '待测试', 'blocked', 'done', '已上线', 'deleted', '已删除']
 const TAPD_HOME_CACHE_TTL_MS = 30 * 60 * 1000
-const TAPD_SYNC_PAGE_LIMIT = 100
-const TAPD_SYNC_MAX_PAGES = 50
-const TAPD_SYNC_PAGE_TIMEOUT_MS = 25_000
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  return new Promise<T>((resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out after ${(timeoutMs / 1000).toFixed(0)}s`)), timeoutMs)
-    promise.then(
-      value => {
-        if (timer) clearTimeout(timer)
-        resolve(value)
-      },
-      error => {
-        if (timer) clearTimeout(timer)
-        reject(error)
-      },
-    )
-  })
-}
 
 function tapdUiStorageKey(workspaceId?: string | null) {
   return `craft.tapd-plugin.ui.${workspaceId ?? 'default'}.v${TAPD_UI_STORAGE_VERSION}`
@@ -625,31 +604,6 @@ function groupRequirementsByStatus(items: ExternalRequirementItem[], statuses: s
 function itemBelongsToTapdWorkspace(item: ExternalRequirementItem, tapdWorkspaceId: string) {
   const itemWorkspaceId = getTapdWorkspaceIdFromItem(item)
   return !itemWorkspaceId || itemWorkspaceId === tapdWorkspaceId
-}
-
-function sessionLinkedToRequirement(session: { workspaceId?: string; labels?: readonly string[] }, item: ExternalRequirementItem, workspaceId?: string | null) {
-  if (workspaceId && session.workspaceId !== workspaceId) return false
-  const labels = session.labels ?? []
-  if (labels.includes(formatLabelEntry('tapd', item.sourceItemId))) return true
-  return Boolean(item.binding?.groupName && labels.includes(formatLabelEntry('group', item.binding.groupName)))
-}
-
-function agentRunLinkedToRequirement(run: AgentRun, item: ExternalRequirementItem) {
-  if (run.target?.type === 'requirement') {
-    return run.target.pluginId === TAPD_PLUGIN_ID && run.target.sourceItemId === item.sourceItemId
-  }
-  const summary = run.triggerSummary.toLowerCase()
-  const id = item.sourceItemId.toLowerCase()
-  return summary.includes(id) || summary.includes(`tapd-${id}`)
-}
-
-function requirementHasLocalState(item: ExternalRequirementItem, labelsById: Record<string, string[]>, openTabs: TapdOpenRequirementTab[], workspaceId?: string | null) {
-  if (item.binding) return true
-  if ((labelsById[item.sourceItemId] ?? []).length > 0) return true
-  if (openTabs.some(tab => tab.sourceItemId === item.sourceItemId)) return true
-  if (readTapdRequirementWorkContext(workspaceId, item.sourceItemId).workingDirectory) return true
-  if (readTapdRequirementAgentSelection(workspaceId, item.sourceItemId).agentIds.length > 0) return true
-  return false
 }
 
 function RequirementTabStrip({
@@ -1603,30 +1557,36 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
     return { ...item, binding }
   }, [activeWorkspaceId])
 
+  const fetchRequirementItemDetail = React.useCallback(async (item: ExternalRequirementItem): Promise<ExternalRequirementItem> => {
+    if (!activeWorkspaceId) throw new Error('Workspace is not available.')
+    const detailWorkspaceId = getTapdWorkspaceIdFromItem(item) ?? tapdWorkspaceId
+    if (!detailWorkspaceId) {
+      throw new Error('Open or add a TAPD requirement first so the workspace_id can be detected.')
+    }
+
+    const result = await window.electronAPI.getRequirementItemDetail(activeWorkspaceId, TAPD_PLUGIN_ID, item.sourceItemId, toDetailFilters(detailWorkspaceId))
+    let nextItem: ExternalRequirementItem = {
+      ...item,
+      ...result.item,
+      binding: result.item.binding ?? item.binding,
+    }
+    if (nextItem.binding) {
+      nextItem = await persistRequirementBindingSnapshot(nextItem)
+    }
+    return nextItem
+  }, [activeWorkspaceId, persistRequirementBindingSnapshot, tapdWorkspaceId])
+
   const syncRequirementItem = React.useCallback(async (item: ExternalRequirementItem) => {
     if (!activeWorkspaceId || !tapdInstalled) return
     if (!connected) {
       toast.error(plugin?.connectionError || 'TAPD source is not connected.')
       return
     }
-    const detailWorkspaceId = getTapdWorkspaceIdFromItem(item) ?? tapdWorkspaceId
-    if (!detailWorkspaceId) {
-      toast.error('Open or add a TAPD requirement first so the workspace_id can be detected.')
-      return
-    }
     if (syncingRequirementIds.has(item.sourceItemId)) return
 
     setSyncingRequirementIds(current => new Set(current).add(item.sourceItemId))
     try {
-      const result = await window.electronAPI.getRequirementItemDetail(activeWorkspaceId, TAPD_PLUGIN_ID, item.sourceItemId, toDetailFilters(detailWorkspaceId))
-      let nextItem: ExternalRequirementItem = {
-        ...item,
-        ...result.item,
-        binding: result.item.binding ?? item.binding,
-      }
-      if (nextItem.binding) {
-        nextItem = await persistRequirementBindingSnapshot(nextItem)
-      }
+      const nextItem = await fetchRequirementItemDetail(item)
       const nextCache = upsertCachedItem(activeWorkspaceId, nextItem)
       setCache(nextCache)
       toast.success('TAPD requirement synced', { description: nextItem.title })
@@ -1639,7 +1599,7 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
         return next
       })
     }
-  }, [activeWorkspaceId, connected, persistRequirementBindingSnapshot, plugin?.connectionError, syncingRequirementIds, tapdInstalled, tapdWorkspaceId])
+  }, [activeWorkspaceId, connected, fetchRequirementItemDetail, plugin?.connectionError, syncingRequirementIds, tapdInstalled])
 
   const syncTapdHome = React.useCallback(async (options?: { manual?: boolean }) => {
     if (!activeWorkspaceId || !tapdInstalled) return
@@ -1655,143 +1615,70 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
 
     setSyncingHome(true)
     const startedAt = Date.now()
+    let updated = 0
+    let failed = 0
+    const failedMessages: string[] = []
     try {
       const current = readCache(activeWorkspaceId)
-      const itemsById = { ...current.itemsById }
       const locallyDeletedIds = new Set(current.locallyDeletedIds ?? [])
-      const syncedIds: string[] = []
-      const syncedIdSet = new Set<string>()
-      const seenLiveIds = new Set<string>()
-      let total: number | undefined
-      let page = 1
-      let pageCount = 0
-      let hasMore = true
-      let safeForMissingDeletion = true
-      let stoppedEarlyReason: string | null = null
-      let markedDeleted = 0
-      let autoDeleted = 0
+      const candidates = current.listOrder
+        .map(id => current.itemsById[id])
+        .filter((item): item is ExternalRequirementItem => Boolean(item))
+        .filter(item => !locallyDeletedIds.has(item.sourceItemId))
+        .filter(item => itemBelongsToTapdWorkspace(item, tapdWorkspaceId))
+        .filter(item => !isDeletedStatus(item.status))
+        .filter(item => !syncingRequirementIds.has(item.sourceItemId))
 
-      while (hasMore && page <= TAPD_SYNC_MAX_PAGES) {
-        const pageStartedAt = Date.now()
-        const result = await withTimeout(window.electronAPI.listRequirementItems(activeWorkspaceId, TAPD_PLUGIN_ID, {
-          workspaceId: tapdWorkspaceId,
-          page,
-          limit: TAPD_SYNC_PAGE_LIMIT,
-          skipCount: true,
-        }), TAPD_SYNC_PAGE_TIMEOUT_MS, `TAPD sync page ${page}`)
-        pageCount += 1
-        console.info('[TAPD] Home sync page finished', {
-          page,
-          items: result.items.length,
-          hasMore: result.hasMore,
-          total: result.total,
-          durationMs: Date.now() - pageStartedAt,
-        })
-        total = result.total ?? total
-        const pageIds = result.items.map(item => item.sourceItemId).filter(Boolean)
-        const repeatedPage = pageIds.length > 0 && pageIds.every(sourceItemId => seenLiveIds.has(sourceItemId))
-        if (repeatedPage) {
-          safeForMissingDeletion = false
-          stoppedEarlyReason = `page ${page} repeated previously synced items`
-          hasMore = false
-          break
-        }
-        if (result.items.length === 0) {
-          hasMore = false
-          break
-        }
-        for (const sourceItemId of pageIds) seenLiveIds.add(sourceItemId)
-        for (const liveItem of result.items) {
-          const existing = itemsById[liveItem.sourceItemId]
-          if (!existing && locallyDeletedIds.has(liveItem.sourceItemId)) continue
-          const launched = isLaunchedStatus(liveItem.status)
-          if (launched && !existing) continue
-
-          let nextItem: ExternalRequirementItem = {
-            ...existing,
-            ...liveItem,
-            binding: liveItem.binding ?? existing?.binding,
-          }
-          if (nextItem.binding) {
-            nextItem = await persistRequirementBindingSnapshot(nextItem)
-          }
-          itemsById[nextItem.sourceItemId] = nextItem
-          syncedIds.push(nextItem.sourceItemId)
-          syncedIdSet.add(nextItem.sourceItemId)
-        }
-        hasMore = result.hasMore === true && result.items.length >= TAPD_SYNC_PAGE_LIMIT
-        page += 1
-      }
-      if (hasMore && page > TAPD_SYNC_MAX_PAGES) {
-        safeForMissingDeletion = false
-        stoppedEarlyReason = `reached max page limit (${TAPD_SYNC_MAX_PAGES})`
+      if (candidates.length === 0 && options?.manual) {
+        toast.info('No TAPD requirements to sync')
       }
 
-      const syncComplete = !hasMore && safeForMissingDeletion
-      if (syncComplete) {
-        let allRuns: AgentRun[] | null = null
-        const getAllRuns = async () => {
-          if (allRuns) return allRuns
-          try {
-            allRuns = await window.electronAPI.listAgentRuns(activeWorkspaceId, {})
-          } catch {
-            allRuns = []
-          }
-          return allRuns
+      for (const item of candidates) {
+        setSyncingRequirementIds(current => new Set(current).add(item.sourceItemId))
+        try {
+          const nextItem = await fetchRequirementItemDetail(item)
+          const nextCache = upsertCachedItem(activeWorkspaceId, nextItem)
+          setCache(nextCache)
+          updated += 1
+        } catch (err) {
+          failed += 1
+          const message = err instanceof Error ? err.message : String(err)
+          failedMessages.push(`${item.title || item.sourceItemId}: ${message}`)
+          console.warn('[TAPD] Requirement detail sync failed during home sync', {
+            sourceItemId: item.sourceItemId,
+            title: item.title,
+            err,
+          })
+        } finally {
+          setSyncingRequirementIds(current => {
+            const next = new Set(current)
+            next.delete(item.sourceItemId)
+            return next
+          })
         }
-
-        for (const sourceItemId of current.listOrder) {
-          if (syncedIdSet.has(sourceItemId)) continue
-          const existing = itemsById[sourceItemId]
-          if (!existing || !itemBelongsToTapdWorkspace(existing, tapdWorkspaceId)) continue
-          const hasLocalState = requirementHasLocalState(existing, labelsById, openTabs, activeWorkspaceId)
-          const hasLinkedSession = Array.from(sessionMetaMap.values()).some(session => sessionLinkedToRequirement(session, existing, activeWorkspaceId))
-          const runs = hasLocalState || hasLinkedSession ? [] : await getAllRuns()
-          const hasAgentRun = runs.some(run => agentRunLinkedToRequirement(run, existing))
-
-          if (!hasLocalState && !hasLinkedSession && !hasAgentRun) {
-            delete itemsById[sourceItemId]
-            removeTapdRequirementLabels(activeWorkspaceId, sourceItemId)
-            autoDeleted += 1
-            continue
-          }
-
-          if (!isDeletedStatus(existing.status)) markedDeleted += 1
-          let deletedItem: ExternalRequirementItem = {
-            ...existing,
-            status: TAPD_DELETED_STATUS,
-            updatedAt: new Date().toISOString(),
-          }
-          if (deletedItem.binding) {
-            deletedItem = await persistRequirementBindingSnapshot(deletedItem)
-          }
-          itemsById[sourceItemId] = deletedItem
-        }
-      } else {
-        console.warn('[TAPD] Home sync stopped before exhausting all pages; skipping missing-item deletion pass.', { pageCount, maxPages: TAPD_SYNC_MAX_PAGES, reason: stoppedEarlyReason })
       }
 
-      const listOrder = [
-        ...syncedIds,
-        ...current.listOrder.filter(id => !syncedIdSet.has(id)),
-      ].filter((id, index, arr) => Boolean(itemsById[id]) && arr.indexOf(id) === index)
+      const latestCache = readCache(activeWorkspaceId)
       const now = Date.now()
       const next: TapdRequirementCache = {
-        ...current,
-        itemsById,
-        listOrder,
-        total,
+        ...latestCache,
         lastSyncedAt: now,
         homeSyncedAt: now,
       }
       writeCache(activeWorkspaceId, next)
       setCache(next)
       refreshRequirementLabels()
+
       const durationMs = Date.now() - startedAt
-      console.info('[TAPD] Home sync finished', { pageCount, updated: syncedIds.length, markedDeleted, autoDeleted, durationMs, stoppedEarlyReason })
+      console.info('[TAPD] Home sync finished via detail flow', { total: candidates.length, updated, failed, durationMs })
       if (options?.manual) {
-        const deletedSummary = markedDeleted || autoDeleted ? ` · ${markedDeleted} marked deleted · ${autoDeleted} auto-deleted` : ''
-        toast.success('TAPD requirements synced', { description: `${syncedIds.length} updated${deletedSummary} · ${(durationMs / 1000).toFixed(1)}s` })
+        if (failed > 0 && updated === 0) {
+          toast.error('Could not sync TAPD requirements', { description: failedMessages.slice(0, 2).join(' · ') })
+        } else if (failed > 0) {
+          toast.warning('TAPD requirements partially synced', { description: `${updated} updated · ${failed} failed · ${(durationMs / 1000).toFixed(1)}s` })
+        } else if (candidates.length > 0) {
+          toast.success('TAPD requirements synced', { description: `${updated} updated · ${(durationMs / 1000).toFixed(1)}s` })
+        }
       }
     } catch (err) {
       if (options?.manual) toast.error(err instanceof Error ? err.message : String(err))
@@ -1799,7 +1686,7 @@ export function RequirementBoard({ initialSourceItemId }: { initialSourceItemId?
     } finally {
       setSyncingHome(false)
     }
-  }, [activeWorkspaceId, connected, labelsById, openTabs, persistRequirementBindingSnapshot, plugin?.connectionError, refreshRequirementLabels, sessionMetaMap, syncingHome, tapdInstalled, tapdWorkspaceId])
+  }, [activeWorkspaceId, connected, fetchRequirementItemDetail, plugin?.connectionError, refreshRequirementLabels, syncingHome, syncingRequirementIds, tapdInstalled, tapdWorkspaceId])
 
   React.useEffect(() => {
     if (activeTabId !== TAPD_HOME_TAB_ID || !tapdWorkspaceId || syncingHome) return

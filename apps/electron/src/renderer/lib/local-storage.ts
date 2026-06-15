@@ -44,6 +44,7 @@ export const KEYS = {
 
   // Working directory
   recentWorkingDirs: 'recent-working-dirs',
+  openDirectoryApp: 'open-directory-app',
 
   // TurnCard expansion state (persisted across session switches)
   turnCardExpansion: 'turncard-expansion',

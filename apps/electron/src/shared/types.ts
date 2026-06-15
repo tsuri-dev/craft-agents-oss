@@ -241,6 +241,8 @@ import type {
   RequirementReplyToAgentInput,
   RequirementAgentRunResult,
   RequirementComment,
+  DirectoryOpenAppInfo,
+  OpenDirectoryWithAppInput,
   StoreGetPackageInput,
   StoreInstallPackageInput,
   StoreInstallPackageResult,
@@ -438,6 +440,8 @@ export interface ElectronAPI {
   openUrl(url: string): Promise<void>
   openFile(path: string): Promise<void>
   showInFolder(path: string): Promise<void>
+  listDirectoryOpenApps(): Promise<DirectoryOpenAppInfo[]>
+  openDirectoryWithApp(input: OpenDirectoryWithAppInput): Promise<void>
 
   // Menu event listeners
   onMenuNewChat(callback: () => void): () => void

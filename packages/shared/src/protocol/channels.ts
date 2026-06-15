@@ -154,6 +154,8 @@ export const RPC_CHANNELS = {
     OPEN_URL: 'shell:openUrl',
     OPEN_FILE: 'shell:openFile',
     SHOW_IN_FOLDER: 'shell:showInFolder',
+    LIST_DIRECTORY_OPEN_APPS: 'shell:listDirectoryOpenApps',
+    OPEN_DIRECTORY_WITH_APP: 'shell:openDirectoryWithApp',
   },
   menu: {
     NEW_CHAT: 'menu:newChat',
