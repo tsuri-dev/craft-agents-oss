@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { AGENT_TASK_LABEL_ID } from '@craft-agent/shared/agent-runs'
+import { getSessionFilePath, writeSessionJsonl, type StoredSession } from '@craft-agent/shared/sessions'
 import { SessionManager, createManagedSession } from './SessionManager.ts'
 
 function tempWorkspace(): string {
@@ -86,6 +87,61 @@ describe('@agent mention AgentRun manifests', () => {
     ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(id, managed)
     return managed
   }
+
+  function seedStoredManagedSession(id: string, labels: string[], enabledSourceSlugs: string[]) {
+    const filePath = getSessionFilePath(tmpRoot, id)
+    mkdirSync(dirname(filePath), { recursive: true })
+    const now = Date.now()
+    const stored: StoredSession = {
+      id,
+      workspaceRootPath: tmpRoot,
+      name: id,
+      createdAt: now,
+      lastUsedAt: now,
+      labels,
+      enabledSourceSlugs,
+      messages: [],
+      tokenUsage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        contextTokens: 0,
+        costUsd: 0,
+      },
+    }
+    writeSessionJsonl(filePath, stored)
+    const managed = createManagedSession(
+      { id, name: id, createdAt: now, labels, enabledSourceSlugs },
+      workspace() as never,
+      { messagesLoaded: true },
+    )
+    ;(sm as unknown as { sessions: Map<string, unknown> }).sessions.set(id, managed)
+    return managed
+  }
+
+  it('preserves TAPD sources for requirement-scoped agent task sessions', async () => {
+    const sourceEvents: Array<{ type?: string; sessionId?: string; enabledSourceSlugs?: string[] }> = []
+    ;(sm as unknown as { sendEvent: (event: { type?: string; sessionId?: string; enabledSourceSlugs?: string[] }) => void }).sendEvent = (event) => {
+      if (event.type === 'sources_changed') sourceEvents.push(event)
+    }
+    ;(sm as unknown as { getOrCreateAgent: () => Promise<never> }).getOrCreateAgent = async () => {
+      throw new Error('stop-after-source-filter')
+    }
+
+    const ordinary = seedStoredManagedSession('ordinary-tapd', ['tapd::101'], ['tapd-mcp-http'])
+    await expect(sm.sendMessage('ordinary-tapd', 'hello')).rejects.toThrow('stop-after-source-filter')
+    expect(ordinary.enabledSourceSlugs).toEqual([])
+    expect(sourceEvents).toContainEqual({
+      type: 'sources_changed',
+      sessionId: 'ordinary-tapd',
+      enabledSourceSlugs: [],
+    })
+
+    const agentTask = seedStoredManagedSession('agent-task-tapd', ['tapd::101', AGENT_TASK_LABEL_ID], ['tapd-mcp-http'])
+    await expect(sm.sendMessage('agent-task-tapd', 'hello')).rejects.toThrow('stop-after-source-filter')
+    expect(agentTask.enabledSourceSlugs).toEqual(['tapd-mcp-http'])
+    expect(sourceEvents.some(event => event.sessionId === 'agent-task-tapd')).toBe(false)
+  })
 
   it('persists a real AgentRun manifest and log without queueing the parent', async () => {
     writeProfile('orion')

@@ -221,7 +221,8 @@ function hasTapdRequirementLabel(labels?: string[]): boolean {
 
 function filterTapdSourceForLinkedRequirementSession(sourceSlugs: string[] | undefined, labels?: string[]): string[] {
   const slugs = sourceSlugs ?? []
-  return hasTapdRequirementLabel(labels) ? slugs.filter(slug => slug !== TAPD_SOURCE_SLUG) : slugs
+  if (!hasTapdRequirementLabel(labels) || hasAgentTaskLabel(labels)) return slugs
+  return slugs.filter(slug => slug !== TAPD_SOURCE_SLUG)
 }
 
 function collectLinkedTapdRequirementBindings(workspaceRootPath: string, labels?: string[]): RequirementBinding[] {
@@ -3029,6 +3030,7 @@ export class SessionManager implements ISessionManager {
       sessionStatus: options?.sessionStatus,
       labels: options?.labels,
       isFlagged: options?.isFlagged,
+      enabledSourceSlugs: defaultEnabledSourceSlugs,
     })
 
     // Branch: copy messages from source session up to and including the branch point
@@ -6887,7 +6889,7 @@ export class SessionManager implements ISessionManager {
 
     const workspaceRootPath = managed.workspace.rootPath
     const enabledSlugs = filterTapdSourceForLinkedRequirementSession(managed.enabledSourceSlugs, managed.labels)
-    if (hasTapdRequirementLabel(managed.labels) && (managed.enabledSourceSlugs ?? []).includes(TAPD_SOURCE_SLUG)) {
+    if (hasTapdRequirementLabel(managed.labels) && enabledSlugs.length !== (managed.enabledSourceSlugs ?? []).length) {
       managed.enabledSourceSlugs = enabledSlugs
       this.persistSession(managed)
       this.sendEvent({
