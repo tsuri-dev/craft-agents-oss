@@ -85,17 +85,24 @@ export class CraftAcpAdapter {
 
     let finished = false
     let stopReason: AcpPromptResponse['stopReason'] = 'end_turn'
+    let unsubscribe = () => {}
+    let timeout: ReturnType<typeof setTimeout> | undefined
+
+    const cleanup = () => {
+      if (timeout) clearTimeout(timeout)
+      unsubscribe()
+    }
 
     const result = new Promise<AcpPromptResponse>((resolvePrompt) => {
-      const timeout = setTimeout(() => {
+      timeout = setTimeout(() => {
         if (!finished) {
           finished = true
-          unsubscribe()
+          cleanup()
           resolvePrompt({ stopReason: 'refusal' })
         }
       }, this.options.sendTimeout)
 
-      const unsubscribe = client.on('session:event', (event: unknown) => {
+      unsubscribe = client.on('session:event', (event: unknown) => {
         const ev = event as CraftSessionEvent
         if (ev.sessionId !== record.craftSessionId) return
 
@@ -108,15 +115,20 @@ export class CraftAcpAdapter {
         if (terminal) {
           finished = true
           stopReason = terminal
-          clearTimeout(timeout)
-          unsubscribe()
+          cleanup()
           resolvePrompt({ stopReason })
         }
       })
     })
 
-    await client.invoke('sessions:sendMessage', record.craftSessionId, message)
-    return result
+    try {
+      await client.invoke('sessions:sendMessage', record.craftSessionId, message)
+      return await result
+    } catch (error) {
+      finished = true
+      cleanup()
+      throw error
+    }
   }
 
   async cancel(notification: AcpCancelNotification): Promise<void> {
@@ -193,6 +205,13 @@ export class CraftAcpAdapter {
       return this.options.workspace
     }
 
+    const existingWorkspaces = await this.listWorkspaces().catch(() => [])
+    const existing = existingWorkspaces.find(workspace => normalizePath(workspace.rootPath ?? workspace.path) === normalizePath(cwd))
+    if (existing?.id) {
+      await client.invoke('window:switchWorkspace', existing.id).catch(() => {})
+      return existing.id
+    }
+
     const name = basename(cwd) || 'zed-workspace'
     try {
       const workspace = await client.invoke('workspaces:create', cwd, name) as { id: string }
@@ -204,11 +223,17 @@ export class CraftAcpAdapter {
       this.callbacks.log?.(`workspace create failed, falling back to existing workspace: ${error instanceof Error ? error.message : String(error)}`)
     }
 
-    const workspaces = await client.invoke('workspaces:get') as Array<{ id: string }>
+    const workspaces = existingWorkspaces.length > 0 ? existingWorkspaces : await this.listWorkspaces()
     const workspaceId = workspaces?.[0]?.id
     if (!workspaceId) throw new Error('No Craft workspace available for ACP session')
     await client.invoke('window:switchWorkspace', workspaceId).catch(() => {})
     return workspaceId
+  }
+
+  private async listWorkspaces(): Promise<Array<{ id: string; rootPath?: string; path?: string }>> {
+    const client = await this.ensureClient()
+    const workspaces = await client.invoke('workspaces:get')
+    return Array.isArray(workspaces) ? workspaces as Array<{ id: string; rootPath?: string; path?: string }> : []
   }
 
   private getSession(sessionId: string): AcpSessionRecord {
@@ -299,6 +324,10 @@ function mimeTypeToFenceLanguage(mimeType: string | undefined, path: string): st
   if (mimeType?.includes('markdown')) return 'md'
   const ext = path.split('.').pop()
   return ext && ext.length <= 12 ? ext : ''
+}
+
+function normalizePath(path: string | undefined): string {
+  return path ? resolve(path) : ''
 }
 
 function normalizePermissionMode(mode: string): CraftPermissionMode | undefined {

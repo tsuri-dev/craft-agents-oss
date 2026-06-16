@@ -11,7 +11,7 @@ interface MockCraftServer {
   invokeArgs: Record<string, unknown[][]>
 }
 
-function createMockCraftServer(): MockCraftServer {
+function createMockCraftServer(opts?: { existingWorkspaceRoot?: string }): MockCraftServer {
   const invokeArgs: Record<string, unknown[][]> = {}
   const server = Bun.serve({
     port: 0,
@@ -40,6 +40,14 @@ function createMockCraftServer(): MockCraftServer {
         invokeArgs[channel].push(envelope.args ?? [])
 
         switch (channel) {
+          case 'workspaces:get':
+            ws.send(serializeEnvelope({
+              id: envelope.id,
+              type: 'response',
+              channel,
+              result: opts?.existingWorkspaceRoot ? [{ id: 'ws-existing', rootPath: opts.existingWorkspaceRoot }] : [],
+            }))
+            break
           case 'workspaces:create':
             ws.send(serializeEnvelope({ id: envelope.id, type: 'response', channel, result: { id: 'ws-1' } }))
             break
@@ -126,6 +134,8 @@ describe('Craft ACP adapter RPC bridge', () => {
     })
 
     expect(result.stopReason).toBe('end_turn')
+    expect(mockServer.invokeArgs['workspaces:get']).toHaveLength(1)
+    expect(mockServer.invokeArgs['workspaces:create']).toHaveLength(1)
     expect(mockServer.invokeArgs['sessions:sendMessage']?.[0]).toEqual(['craft-session-1', 'Hello'])
     expect(updates[0]).toEqual({
       sessionId: 'craft-session-1',
@@ -135,6 +145,34 @@ describe('Craft ACP adapter RPC bridge', () => {
         content: { type: 'text', text: 'Hello from Craft' },
       },
     })
+
+    await adapter.dispose()
+  })
+
+  it('reuses an existing workspace with the same cwd', async () => {
+    mockServer.close()
+    mockServer = createMockCraftServer({ existingWorkspaceRoot: tmpRoot })
+
+    const adapter = new CraftAcpAdapter({
+      url: mockServer.url,
+      token: '',
+      workspace: undefined,
+      timeout: 5_000,
+      sendTimeout: 5_000,
+      sources: [],
+      mode: 'allow-all',
+      serverEntry: undefined,
+      workspaceDir: undefined,
+      verbose: false,
+    }, {
+      notifySessionUpdate: () => {},
+    })
+
+    const session = await adapter.newSession({ cwd: tmpRoot, mcpServers: [] })
+    expect(session.sessionId).toBe('craft-session-1')
+    expect(mockServer.invokeArgs['workspaces:get']).toHaveLength(1)
+    expect(mockServer.invokeArgs['workspaces:create']).toBeUndefined()
+    expect(mockServer.invokeArgs['window:switchWorkspace']?.[0]).toEqual(['ws-existing'])
 
     await adapter.dispose()
   })
