@@ -286,6 +286,30 @@ function getOAuthDefines(): Record<string, string> {
   return defines;
 }
 
+const CRAFT_RUNTIME_ENV_VARS_TO_DROP = [
+  "CRAFT_AGENT_VERSION",
+  "CRAFT_APP_ROOT",
+  "CRAFT_BUN",
+  "CRAFT_CLI_DOC_PATH",
+  "CRAFT_CLI_ENTRY",
+  "CRAFT_COMMANDS_DOC_PATH",
+  "CRAFT_COMMANDS_ENTRY",
+  "CRAFT_IS_PACKAGED",
+  "CRAFT_RESOURCES_BASE",
+  "CRAFT_SCRIPTS",
+  "CRAFT_SESSION_DIR",
+  "CRAFT_UV",
+  "CRAFT_WORKSPACE_PATH",
+];
+
+function getSanitizedDevEnv(): Record<string, string> {
+  const env = { ...process.env } as Record<string, string>;
+  for (const key of CRAFT_RUNTIME_ENV_VARS_TO_DROP) {
+    delete env[key];
+  }
+  return env;
+}
+
 // Get environment variables for electron process
 function getElectronEnv(): Record<string, string> {
   const vitePort = process.env.CRAFT_VITE_PORT || "5173";
@@ -295,7 +319,7 @@ function getElectronEnv(): Record<string, string> {
   // You can override with CODEX_PATH env var if needed for debugging.
 
   return {
-    ...process.env as Record<string, string>,
+    ...getSanitizedDevEnv(),
     VITE_DEV_SERVER_URL: `http://localhost:${vitePort}`,
     CRAFT_CONFIG_DIR: process.env.CRAFT_CONFIG_DIR || "",
     CRAFT_APP_NAME: process.env.CRAFT_APP_NAME || "Craft Agents",
