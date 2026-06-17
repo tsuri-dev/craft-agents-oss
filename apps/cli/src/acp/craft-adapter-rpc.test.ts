@@ -21,6 +21,7 @@ interface MockSession {
   id: string
   name?: string
   labels?: string[]
+  workspaceId?: string
   workingDirectory?: string
   hidden?: boolean
   lastUsedAt?: number
@@ -238,6 +239,22 @@ describe('Craft ACP adapter RPC bridge', () => {
       },
     })
     expect(mockServer.invokeArgs['sessions:sendMessage']).toBeUndefined()
+
+    await adapter.dispose()
+  })
+
+  it('opens a loaded session in its persisted Craft workspace with /craft', async () => {
+    mockServer.close()
+    mockServer = createMockCraftServer({
+      workspaces: [{ id: 'ws-active', rootPath: '/repo' }],
+      sessions: [{ id: 's-old', workspaceId: 'ws-original', workingDirectory: tmpRoot, messages: [] }],
+    })
+    const adapter = createAdapter(mockServer, { workspace: 'ws-active', mode: 'ask' })
+
+    await adapter.resumeSession({ sessionId: 's-old', cwd: tmpRoot, mcpServers: [] })
+    await adapter.prompt({ sessionId: 's-old', prompt: [{ type: 'text', text: '/craft' }] })
+
+    expect(mockServer.invokeArgs['window:openSessionInNewWindow']?.[0]).toEqual(['ws-original', 's-old'])
 
     await adapter.dispose()
   })

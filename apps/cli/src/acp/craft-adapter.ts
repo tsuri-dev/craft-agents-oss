@@ -59,6 +59,7 @@ interface CraftSessionSummary {
   name?: string
   preview?: string
   labels?: string[]
+  workspaceId?: string
   workingDirectory?: string
   lastMessageAt?: number
   lastUsedAt?: number
@@ -522,7 +523,7 @@ export class CraftAcpAdapter {
     const record: AcpSessionRecord = {
       acpSessionId: session.id,
       craftSessionId: session.id,
-      workspaceId,
+      workspaceId: session.workspaceId ?? workspaceId,
       cwd,
       permissionMode,
       enabledSourceSlugs: [...(session.enabledSourceSlugs ?? [])],
