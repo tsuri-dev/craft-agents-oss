@@ -319,7 +319,7 @@ describe('Craft ACP adapter RPC bridge', () => {
     const adapter = createAdapter(mockServer, { workspace: 'ws-active', mode: 'ask' }, updates)
     const result = await adapter.loadSession({ sessionId: 's-1', cwd: tmpRoot, mcpServers: [] })
 
-    expect(result).toBeNull()
+    expect(result.modes?.currentModeId).toBe('ask')
     expect(updates).toEqual([
       { sessionId: 's-1', update: { sessionUpdate: 'user_message_chunk', messageId: 'u1', content: { type: 'text', text: 'Hi' } } },
       { sessionId: 's-1', update: { sessionUpdate: 'agent_message_chunk', messageId: 'a1', content: { type: 'text', text: 'Hello' } } },

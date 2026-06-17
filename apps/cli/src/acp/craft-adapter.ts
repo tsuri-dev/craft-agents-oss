@@ -12,6 +12,7 @@ import type {
   AcpListSessionsRequest,
   AcpListSessionsResponse,
   AcpLoadSessionRequest,
+  AcpLoadSessionResponse,
   AcpNewSessionRequest,
   AcpNewSessionResponse,
   AcpPromptRequest,
@@ -148,10 +149,10 @@ export class CraftAcpAdapter {
     }
   }
 
-  async loadSession(request: AcpLoadSessionRequest): Promise<null> {
+  async loadSession(request: AcpLoadSessionRequest): Promise<AcpLoadSessionResponse> {
     const { session, record } = await this.attachExistingSession(request)
     await this.replaySessionMessages(record.acpSessionId, session)
-    return null
+    return { modes: buildSessionModes(record.permissionMode) }
   }
 
   async resumeSession(request: AcpResumeSessionRequest): Promise<{ modes?: AcpSessionModeState }> {

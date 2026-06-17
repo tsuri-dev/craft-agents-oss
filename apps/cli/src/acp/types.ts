@@ -85,6 +85,12 @@ export interface AcpLoadSessionRequest {
   additionalDirectories?: string[]
 }
 
+export interface AcpLoadSessionResponse {
+  modes?: AcpSessionModeState | null
+  configOptions?: unknown[] | null
+  _meta?: Record<string, unknown> | null
+}
+
 export type AcpResumeSessionRequest = AcpLoadSessionRequest
 
 export interface AcpPromptRequest {

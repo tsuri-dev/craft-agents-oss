@@ -96,7 +96,7 @@ Notes:
 
 Zed can discover previous Craft sessions through `session/list`, then continue them with either:
 
-- `session/load` — replays the conversation history into Zed first
+- `session/load` — replays the conversation history into Zed first, then returns a `LoadSessionResponse` object
 - `session/resume` — reconnects without replaying history
 
 Zed's Thread History import flow calls `session/list`. The adapter returns all non-hidden sessions in the active Craft workspace, sorted by recent activity. Each imported entry includes a `cwd`: the session working directory when present, otherwise the Craft workspace root.
