@@ -30,6 +30,7 @@ const NOOP_LOGGER: MessagingLogger = {
 
 export class BindingStore {
   private bindings: ChannelBinding[] = []
+  private readonly bindingsBySession = new Map<string, ChannelBinding[]>()
   private readonly filePath: string
   private readonly dirPath: string
   private readonly log: MessagingLogger
@@ -76,7 +77,7 @@ export class BindingStore {
   }
 
   findBySession(sessionId: string): ChannelBinding[] {
-    return this.bindings.filter((b) => b.sessionId === sessionId && b.enabled)
+    return [...(this.bindingsBySession.get(sessionId) ?? [])]
   }
 
   getAll(): ChannelBinding[] {
@@ -117,6 +118,7 @@ export class BindingStore {
     }
 
     this.bindings.push(binding)
+    this.rebuildIndexes()
     this.save()
     this.log.info('binding created', {
       event: 'binding_created',
@@ -165,6 +167,7 @@ export class BindingStore {
       (b) => !(b.platform === platform && b.channelId === channelId && (b.threadId ?? undefined) === threadId),
     )
     if (this.bindings.length !== before) {
+      this.rebuildIndexes()
       this.save()
       this.log.info('binding removed by channel', {
         event: 'binding_removed',
@@ -181,6 +184,7 @@ export class BindingStore {
     const binding = this.bindings.find((b) => b.id === bindingId)
     if (!binding) return false
     this.bindings = this.bindings.filter((b) => b.id !== bindingId)
+    this.rebuildIndexes()
     this.save()
     this.log.info('binding removed by id', {
       event: 'binding_removed',
@@ -202,6 +206,7 @@ export class BindingStore {
     if (removedBindings.length === 0) return 0
 
     this.bindings = this.bindings.filter((b) => !removedBindings.includes(b))
+    this.rebuildIndexes()
     this.save()
     this.log.info('bindings removed by session', {
       event: 'binding_removed',
@@ -251,6 +256,7 @@ export class BindingStore {
           this.bindings = parsed.map(normalizeBinding)
         }
       }
+      this.rebuildIndexes()
     } catch (err) {
       this.log.error('failed to load bindings store; resetting to empty', {
         event: 'bindings_load_failed',
@@ -258,6 +264,20 @@ export class BindingStore {
         error: err,
       })
       this.bindings = []
+      this.rebuildIndexes()
+    }
+  }
+
+  private rebuildIndexes(): void {
+    this.bindingsBySession.clear()
+    for (const binding of this.bindings) {
+      if (!binding.enabled) continue
+      const list = this.bindingsBySession.get(binding.sessionId)
+      if (list) {
+        list.push(binding)
+      } else {
+        this.bindingsBySession.set(binding.sessionId, [binding])
+      }
     }
   }
 

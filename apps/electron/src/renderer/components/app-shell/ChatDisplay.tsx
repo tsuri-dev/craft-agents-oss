@@ -1646,8 +1646,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                 "mx-auto min-w-0",
                 compactMode ? "px-3 py-4 space-y-2" : [CHAT_LAYOUT.containerPadding, CHAT_LAYOUT.messageSpacing]
               )}>
-                {/* Session-level AnimatePresence: Prevents layout jump when switching sessions */}
-                <AnimatePresence mode={compactMode ? "sync" : "wait"} initial={false}>
+                {/* Session-level AnimatePresence: keep enter/exit in sync to avoid a blank gap on heavy session switches. */}
+                <AnimatePresence mode="sync" initial={false}>
                   <motion.div
                     key={compactMode ? 'compact-session' : session?.id}
                     initial={{ opacity: 0 }}

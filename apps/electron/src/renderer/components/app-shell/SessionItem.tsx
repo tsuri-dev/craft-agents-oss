@@ -17,12 +17,12 @@ import { useSessionListContext } from "@/context/SessionListContext"
 import { useAppShellContext } from "@/context/AppShellContext"
 import { navigate, routes } from "@/lib/navigate"
 import type { SessionMeta } from "@/atoms/sessions"
-import { messagingBindingsBySessionAtom } from "@/atoms/messaging"
+import { messagingBindingsForSessionAtomFamily } from "@/atoms/messaging"
 import { useAtomValue } from "jotai"
 import { extractLabelId } from "@craft-agent/shared/labels"
 import { getTapdRequirementId, isTapdPluginInstalled, TAPD_PLUGIN_ID } from "@/utils/session-requirement-link"
 
-const PLATFORM_PILL: Record<'telegram' | 'whatsapp', { label: string; colorClass: string }> = {
+const PLATFORM_PILL: Record<string, { label: string; colorClass: string }> = {
   telegram: {
     label: 'Telegram',
     colorClass: 'bg-sky-500/10 text-sky-600 dark:bg-sky-400/15 dark:text-sky-300',
@@ -30,6 +30,14 @@ const PLATFORM_PILL: Record<'telegram' | 'whatsapp', { label: string; colorClass
   whatsapp: {
     label: 'WhatsApp',
     colorClass: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-300',
+  },
+  wechat: {
+    label: 'WeChat',
+    colorClass: 'bg-green-500/10 text-green-600 dark:bg-green-400/15 dark:text-green-300',
+  },
+  lark: {
+    label: 'Lark',
+    colorClass: 'bg-blue-500/10 text-blue-600 dark:bg-blue-400/15 dark:text-blue-300',
   },
 }
 
@@ -73,8 +81,7 @@ export function SessionItem({
   }))
   const hasPendingPrompt = ctx.hasPendingPrompt?.(item.id) ?? false
   const previewText = isCompactMode ? getSessionPreviewText(item) : null
-  const messagingBindingsBySession = useAtomValue(messagingBindingsBySessionAtom)
-  const sessionBindings = messagingBindingsBySession.get(item.id) ?? []
+  const sessionBindings = useAtomValue(messagingBindingsForSessionAtomFamily(item.id))
   const hasMessagingBinding = sessionBindings.length > 0
   const tapdRequirementId = isTapdPluginInstalled(enabledSources) ? getTapdRequirementId(item.labels) : null
 
@@ -204,7 +211,7 @@ export function SessionItem({
         hasMessagingBinding ? (
           <div className="flex items-center gap-1">
             {sessionBindings.map((binding) => {
-              const pill = PLATFORM_PILL[binding.platform as 'telegram' | 'whatsapp']
+              const pill = PLATFORM_PILL[binding.platform]
               if (!pill) return null
               return (
                 <EntityListBadge

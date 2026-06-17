@@ -6,6 +6,7 @@
  */
 
 import { atom } from 'jotai'
+import { atomFamily } from 'jotai-family'
 
 export interface MessagingBinding {
   id: string
@@ -27,26 +28,25 @@ export interface MessagingBinding {
   allowedSenderIds?: string[]
 }
 
+const EMPTY_BINDINGS: MessagingBinding[] = []
+
 export const messagingBindingsAtom = atom<MessagingBinding[]>([])
 
-export const messagingBindingsBySessionAtom = atom((get) => {
-  const map = new Map<string, MessagingBinding[]>()
-  for (const binding of get(messagingBindingsAtom)) {
-    if (!binding.enabled) continue
-    const list = map.get(binding.sessionId)
-    if (list) {
-      list.push(binding)
-    } else {
-      map.set(binding.sessionId, [binding])
-    }
-  }
-  return map
-})
+const messagingBindingsBySessionStateAtom = atom<Map<string, MessagingBinding[]>>(new Map())
+
+export const messagingBindingsBySessionAtom = atom((get) => get(messagingBindingsBySessionStateAtom))
+
+export const messagingBindingsForSessionAtomFamily = atomFamily(
+  (sessionId: string) => atom((get) => get(messagingBindingsBySessionStateAtom).get(sessionId) ?? EMPTY_BINDINGS),
+  (a, b) => a === b,
+)
 
 export const setMessagingBindingsAtom = atom(
   null,
-  (_get, set, bindings: MessagingBinding[]) => {
-    set(messagingBindingsAtom, bindings.filter((binding) => binding.enabled))
+  (get, set, bindings: MessagingBinding[]) => {
+    const enabledBindings = bindings.filter((binding) => binding.enabled)
+    set(messagingBindingsAtom, enabledBindings)
+    set(messagingBindingsBySessionStateAtom, buildBindingsBySession(enabledBindings, get(messagingBindingsBySessionStateAtom)))
   },
 )
 
@@ -77,3 +77,55 @@ export type MessagingDialogState =
     }
 
 export const messagingDialogAtom = atom<MessagingDialogState>({ kind: 'closed' })
+
+function buildBindingsBySession(
+  bindings: MessagingBinding[],
+  previous: Map<string, MessagingBinding[]> = new Map(),
+): Map<string, MessagingBinding[]> {
+  const grouped = new Map<string, MessagingBinding[]>()
+  for (const binding of bindings) {
+    const list = grouped.get(binding.sessionId)
+    if (list) {
+      list.push(binding)
+    } else {
+      grouped.set(binding.sessionId, [binding])
+    }
+  }
+
+  const next = new Map<string, MessagingBinding[]>()
+  for (const [sessionId, list] of grouped) {
+    const previousList = previous.get(sessionId)
+    next.set(sessionId, previousList && bindingsShallowEqual(previousList, list) ? previousList : list)
+  }
+  return next
+}
+
+function bindingsShallowEqual(a: MessagingBinding[], b: MessagingBinding[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (!bindingShallowEqual(a[i]!, b[i]!)) return false
+  }
+  return true
+}
+
+function bindingShallowEqual(a: MessagingBinding, b: MessagingBinding): boolean {
+  return a.id === b.id
+    && a.workspaceId === b.workspaceId
+    && a.sessionId === b.sessionId
+    && a.platform === b.platform
+    && a.channelId === b.channelId
+    && a.threadId === b.threadId
+    && a.channelName === b.channelName
+    && a.enabled === b.enabled
+    && a.createdAt === b.createdAt
+    && a.accessMode === b.accessMode
+    && stringArrayShallowEqual(a.allowedSenderIds ?? [], b.allowedSenderIds ?? [])
+}
+
+function stringArrayShallowEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}

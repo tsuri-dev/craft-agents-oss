@@ -125,6 +125,18 @@ interface PendingCompactAccept {
 }
 
 const COMPACT_ACCEPT_TTL_MS = 10 * 60 * 1000
+const ADAPTER_NOT_CONNECTED_WARN_INTERVAL_MS = 30_000
+const WECHAT_IGNORED_TRANSIENT_EVENTS = new Set([
+  'text_delta',
+  'tool_start',
+  'tool_result',
+  'tool_delta',
+  'tool_complete',
+])
+
+function shouldSkipPlatformEvent(platform: PlatformType, eventType: string): boolean {
+  return platform === 'wechat' && WECHAT_IGNORED_TRANSIENT_EVENTS.has(eventType)
+}
 
 export class MessagingGateway {
   private readonly sessionManager: ISessionManager
@@ -140,6 +152,7 @@ export class MessagingGateway {
   private readonly permissionMessages = new Map<string, PermissionMessageRecord>()
   private readonly pendingCompactAccepts = new Map<string, PendingCompactAccept>()
   private readonly adapters = new Map<PlatformType, PlatformAdapter>()
+  private readonly adapterNotConnectedWarnings = new Map<string, number>()
   private readonly log: MessagingLogger
   private started = false
   /**
@@ -367,14 +380,11 @@ export class MessagingGateway {
     if (bindings.length === 0) return
 
     for (const binding of bindings) {
+      if (shouldSkipPlatformEvent(binding.platform, event.type)) continue
+
       const adapter = this.adapters.get(binding.platform)
       if (!adapter || !adapter.isConnected()) {
-        this.log.warn('dropping session event — adapter not connected', {
-          event: 'adapter_not_connected',
-          sessionId: event.sessionId,
-          platform: binding.platform,
-          eventType: event.type,
-        })
+        this.logAdapterNotConnected(event, binding.platform)
         continue
       }
       this.renderer.handle(event, binding, adapter).catch((err) => {
@@ -388,6 +398,20 @@ export class MessagingGateway {
         })
       })
     }
+  }
+
+  private logAdapterNotConnected(event: SessionEvent, platform: PlatformType): void {
+    const key = `${event.sessionId}:${platform}:${event.type}`
+    const now = Date.now()
+    const previous = this.adapterNotConnectedWarnings.get(key) ?? 0
+    if (now - previous < ADAPTER_NOT_CONNECTED_WARN_INTERVAL_MS) return
+    this.adapterNotConnectedWarnings.set(key, now)
+    this.log.warn('dropping session event — adapter not connected', {
+      event: 'adapter_not_connected',
+      sessionId: event.sessionId,
+      platform,
+      eventType: event.type,
+    })
   }
 
   /**
