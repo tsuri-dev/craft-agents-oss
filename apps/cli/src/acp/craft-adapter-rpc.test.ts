@@ -210,7 +210,18 @@ describe('Craft ACP adapter RPC bridge', () => {
     expect(mockServer.invokeArgs['workspaces:get']).toHaveLength(1)
     expect(mockServer.invokeArgs['workspaces:create']).toHaveLength(1)
     expect(mockServer.invokeArgs['sessions:sendMessage']?.[0]).toEqual(['craft-session-1', 'Hello'])
-    expect(updates[0]).toEqual({
+    expect(updates).toContainEqual({
+      sessionId: 'craft-session-1',
+      update: {
+        sessionUpdate: 'available_commands_update',
+        availableCommands: expect.arrayContaining([
+          expect.objectContaining({ name: 'craft' }),
+          expect.objectContaining({ name: 'sources' }),
+          expect.objectContaining({ name: 'skills' }),
+        ]),
+      },
+    })
+    expect(updates).toContainEqual({
       sessionId: 'craft-session-1',
       update: {
         sessionUpdate: 'agent_message_chunk',
@@ -445,6 +456,7 @@ describe('Craft ACP adapter RPC bridge', () => {
     expect(updates).toEqual([
       { sessionId: 's-1', update: { sessionUpdate: 'user_message_chunk', messageId: 'u1', content: { type: 'text', text: 'Hi' } } },
       { sessionId: 's-1', update: { sessionUpdate: 'agent_message_chunk', messageId: 'a1', content: { type: 'text', text: 'Hello' } } },
+      { sessionId: 's-1', update: { sessionUpdate: 'available_commands_update', availableCommands: expect.arrayContaining([expect.objectContaining({ name: 'craft' })]) } },
     ])
 
     const prompt = await adapter.prompt({ sessionId: 's-1', prompt: [{ type: 'text', text: 'Continue' }] })
@@ -472,7 +484,9 @@ describe('Craft ACP adapter RPC bridge', () => {
     const result = await adapter.resumeSession({ sessionId: 's-1', cwd: tmpRoot, mcpServers: [] })
 
     expect(result.modes?.currentModeId).toBe('ask')
-    expect(updates).toEqual([])
+    expect(updates).toEqual([
+      { sessionId: 's-1', update: { sessionUpdate: 'available_commands_update', availableCommands: expect.arrayContaining([expect.objectContaining({ name: 'craft' })]) } },
+    ])
 
     await adapter.dispose()
   })

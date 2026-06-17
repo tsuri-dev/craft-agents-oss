@@ -119,7 +119,7 @@ Zed's External Agent UI does not expose Craft's source/skill picker. Use the ada
 [skill:brainstorming] 帮我拆一下方案
 ```
 
-`/craft` opens the current ACP-backed Craft session in a focused Craft Agent window. `/sources` and `/skills` are handled locally by the ACP adapter and do not call the model. `/use-source` and `/use-skill` are rewritten to bracket mentions before sending the prompt to Craft.
+The adapter advertises these as ACP slash commands via `available_commands_update`, so Zed accepts them in the External Agent input box. `/craft` opens the current ACP-backed Craft session in a focused Craft Agent window. `/sources` and `/skills` are handled locally by the ACP adapter and do not call the model. `/use-source` and `/use-skill` are rewritten to bracket mentions before sending the prompt to Craft.
 
 Supported mention forms:
 

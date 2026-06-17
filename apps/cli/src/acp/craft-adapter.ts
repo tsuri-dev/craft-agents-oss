@@ -46,6 +46,13 @@ type CraftPermissionMode = 'safe' | 'ask' | 'allow-all'
 
 const ZED_LABEL_ID = 'zed'
 const SESSION_LIST_PAGE_SIZE = 50
+const ACP_AVAILABLE_COMMANDS = [
+  { name: 'craft', description: 'Open this session in a focused Craft Agent window.' },
+  { name: 'sources', description: 'List Craft sources available in the current workspace.' },
+  { name: 'skills', description: 'List Craft skills available in the current workspace/project.' },
+  { name: 'use-source', description: 'Use a Craft source for this prompt.', input: { hint: '<source-slug> prompt' } },
+  { name: 'use-skill', description: 'Use a Craft skill for this prompt.', input: { hint: '<skill-slug> prompt' } },
+]
 
 interface CraftWorkspaceInfo {
   id?: string
@@ -153,6 +160,7 @@ export class CraftAcpAdapter {
       enabledSourceSlugs: [...this.options.sources],
     }
     this.sessions.set(record.acpSessionId, record)
+    this.notifyAvailableCommands(record.acpSessionId)
 
     return {
       sessionId: record.acpSessionId,
@@ -183,11 +191,13 @@ export class CraftAcpAdapter {
   async loadSession(request: AcpLoadSessionRequest): Promise<AcpLoadSessionResponse> {
     const { session, record } = await this.attachExistingSession(request)
     await this.replaySessionMessages(record.acpSessionId, session)
+    this.notifyAvailableCommands(record.acpSessionId)
     return { modes: buildSessionModes(record.permissionMode) }
   }
 
   async resumeSession(request: AcpResumeSessionRequest): Promise<{ modes?: AcpSessionModeState }> {
     const { record } = await this.attachExistingSession(request)
+    this.notifyAvailableCommands(record.acpSessionId)
     return { modes: buildSessionModes(record.permissionMode) }
   }
 
@@ -316,6 +326,16 @@ export class CraftAcpAdapter {
         sessionUpdate: 'agent_message_chunk',
         messageId: `craft-acp-local-${crypto.randomUUID()}`,
         content: { type: 'text', text },
+      },
+    })
+  }
+
+  private notifyAvailableCommands(sessionId: string): void {
+    this.callbacks.notifySessionUpdate({
+      sessionId,
+      update: {
+        sessionUpdate: 'available_commands_update',
+        availableCommands: ACP_AVAILABLE_COMMANDS,
       },
     })
   }
