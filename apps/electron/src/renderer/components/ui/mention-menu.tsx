@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { FadingText } from '@/components/ui/fading-text'
@@ -288,11 +289,13 @@ export function InlineMentionMenu({
     ? window.innerHeight - Math.round(position.y) + 8
     : 0
 
-  return (
+  if (typeof document === 'undefined') return null
+
+  const menu = (
     <div
       ref={menuRef}
       data-inline-menu
-      className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
+      className={cn('fixed z-floating-menu', MENU_CONTAINER_STYLE, className)}
       style={{
         left: Math.round(position.x) - 10,
         bottom: bottomPosition,
@@ -383,6 +386,8 @@ export function InlineMentionMenu({
       </div>
     </div>
   )
+
+  return createPortal(menu, document.body)
 }
 
 // ============================================================================

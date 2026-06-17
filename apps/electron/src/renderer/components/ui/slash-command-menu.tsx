@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from "react-i18next"
 import { Command as CommandPrimitive } from 'cmdk'
 import { Check, Minimize2 } from 'lucide-react'
@@ -423,11 +424,13 @@ export function InlineSlashCommand({
   // Track current item index across all sections
   let currentItemIndex = 0
 
-  return (
+  if (typeof document === 'undefined') return null
+
+  const menu = (
     <div
       ref={menuRef}
       data-inline-menu
-      className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
+      className={cn('fixed z-floating-menu', MENU_CONTAINER_STYLE, className)}
       style={{ left: Math.round(position.x) - 10, bottom: bottomPosition, minWidth: 220, maxWidth: 260 }}
     >
       <div ref={listRef} className={MENU_LIST_STYLE}>
@@ -495,6 +498,8 @@ export function InlineSlashCommand({
       </div>
     </div>
   )
+
+  return createPortal(menu, document.body)
 }
 
 // ============================================================================

@@ -4,6 +4,7 @@
  */
 
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
 import type { LoadedSkill } from '../../../shared/types'
@@ -124,10 +125,13 @@ export function InlineSkillMention({
     ? window.innerHeight - Math.round(position.y) + 8
     : 0
 
-  return (
+  if (typeof document === 'undefined') return null
+
+  const menu = (
     <div
       ref={menuRef}
-      className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
+      data-inline-menu
+      className={cn('fixed z-floating-menu', MENU_CONTAINER_STYLE, className)}
       style={{ left: Math.round(position.x) - 10, bottom: bottomPosition }}
     >
       <div className={MENU_LIST_STYLE}>
@@ -163,6 +167,8 @@ export function InlineSkillMention({
       </div>
     </div>
   )
+
+  return createPortal(menu, document.body)
 }
 
 // ============================================================================

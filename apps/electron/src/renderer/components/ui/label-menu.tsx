@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import { Check, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LabelIcon } from './label-icon'
@@ -192,11 +193,13 @@ export function InlineLabelMenu({
   // Whether to show section headers (only when both states and labels are present)
   const showSectionHeaders = filteredStates_.length > 0 && filteredItems.length > 0
 
-  return (
+  if (typeof document === 'undefined') return null
+
+  const menu = (
     <div
       ref={menuRef}
       data-inline-menu
-      className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
+      className={cn('fixed z-floating-menu', MENU_CONTAINER_STYLE, className)}
       style={{ left: Math.round(position.x) - 10, bottom: bottomPosition, minWidth: 200, maxWidth: 260 }}
     >
       <div ref={listRef} className={MENU_LIST_STYLE}>
@@ -311,6 +314,8 @@ export function InlineLabelMenu({
       </div>
     </div>
   )
+
+  return createPortal(menu, document.body)
 }
 
 // ============================================================================
@@ -420,7 +425,7 @@ export function useInlineLabelMenu({
       setFilter('')
       setHashStart(-1)
     }
-  }, [inputRef, items])
+  }, [inputRef])
 
   // Handle label selection: remove #trigger text from input, call onSelect
   const handleSelect = React.useCallback((labelId: string): string => {
