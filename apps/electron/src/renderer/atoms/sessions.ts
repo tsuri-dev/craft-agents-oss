@@ -11,7 +11,9 @@
 import { atom } from 'jotai'
 import type { Getter, Setter } from 'jotai/vanilla'
 import { atomFamily } from 'jotai-family'
-import type { Session, Message } from '../../shared/types'
+import type { GetSessionMessagePageInput, Session, Message } from '../../shared/types'
+
+export const SESSION_MESSAGE_PAGE_USER_TURNS = 3
 
 /**
  * Session metadata for list display (lightweight, no messages)
@@ -142,8 +144,9 @@ export const sessionMetaMapAtom = atom<Map<string, SessionMeta>>(new Map())
 export const sessionIdsAtom = atom<string[]>([])
 
 /**
- * Track which sessions have had their messages loaded (for lazy loading)
- * Sessions are loaded with empty messages initially, messages are fetched on-demand
+ * Track which sessions have had their initial message page loaded (for lazy loading).
+ * Sessions are loaded with empty messages initially; the chat view fetches only
+ * the latest transcript page on demand, then prepends older pages as the user scrolls up.
  */
 export const loadedSessionsAtom = atom<Set<string>>(new Set<string>())
 
@@ -154,6 +157,7 @@ export const loadedSessionsAtom = atom<Set<string>>(new Set<string>())
  * Module-level map since it tracks in-flight promises, not React state.
  */
 const sessionLoadingPromises = new Map<string, Promise<Session | null>>()
+const sessionEarlierLoadingPromises = new Map<string, Promise<Session | null>>()
 
 /**
  * Currently active session ID - the session displayed in the main content area
@@ -542,17 +546,53 @@ export const syncSessionsToAtomsAtom = atom(
 
 // loadedSessionsAtom moved up before sessionsAtom (needed for self-syncing)
 
+async function requestSessionMessagePage(input: GetSessionMessagePageInput): Promise<Session | null> {
+  return window.electronAPI.getSessionMessagePage({
+    limitUserTurns: SESSION_MESSAGE_PAGE_USER_TURNS,
+    ...input,
+  })
+}
+
+function mergeInitialMessagePage(existingSession: Session | null, loadedSession: Session): {
+  session: Session
+  preservedStaleMessages: boolean
+} {
+  const preservedStaleMessages = !!existingSession
+    && existingSession.messages.length > 0
+    && (!loadedSession.messages || loadedSession.messages.length === 0)
+  const preserveActiveStreamingMessages = !!existingSession
+    && existingSession.isProcessing
+    && existingSession.messages.length > 0
+
+  if (!existingSession) {
+    return { session: loadedSession, preservedStaleMessages: false }
+  }
+
+  const shouldPreserveMessages = preservedStaleMessages || preserveActiveStreamingMessages
+  const messages = shouldPreserveMessages ? existingSession.messages : loadedSession.messages
+
+  return {
+    session: {
+      ...existingSession,
+      messages,
+      messagePageInfo: shouldPreserveMessages
+        ? existingSession.messagePageInfo ?? loadedSession.messagePageInfo
+        : loadedSession.messagePageInfo,
+      tokenUsage: loadedSession.tokenUsage ?? existingSession.tokenUsage,
+      sessionFolderPath: loadedSession.sessionFolderPath ?? existingSession.sessionFolderPath,
+    },
+    preservedStaleMessages,
+  }
+}
+
 /**
- * Action atom: Load session messages if not already loaded
+ * Action atom: Load the latest session message page if not already loaded.
  * Returns the loaded session or current session if already loaded.
  * Uses promise deduplication to prevent redundant IPC calls from concurrent requests.
  *
- * IMPORTANT: This only merges messages into the existing session atom.
- * UI state fields (hasUnread, isFlagged, sessionStatus, etc.) are preserved from
- * the in-memory atom, NOT overwritten with potentially stale disk data.
- * This prevents a race condition where optimistic updates (e.g., clearing the
- * NEW badge on session view) get clobbered by async message loading that reads
- * older state from disk.
+ * IMPORTANT: This only merges a bounded transcript window into the existing
+ * session atom. UI state fields (hasUnread, isFlagged, sessionStatus, etc.) are
+ * preserved from the in-memory atom, NOT overwritten with potentially stale disk data.
  */
 async function loadSessionMessages(
   get: Getter,
@@ -586,48 +626,19 @@ async function loadSessionMessages(
 
   // Create the loading promise with all the fetch and update logic
   const loadPromise = (async (): Promise<Session | null> => {
-    // Fetch messages from main process
-    const loadedSession = await window.electronAPI.getSessionMessages(sessionId)
+    // Fetch only the latest N user turns from main process.
+    const loadedSession = await requestSessionMessagePage({ sessionId })
     if (!loadedSession) {
       return get(sessionAtomFamily(sessionId))
     }
 
-    // Merge messages and disk-only fields into existing session, preserving in-memory UI state.
-    // The renderer's atom is authoritative for UI fields (hasUnread, isFlagged, etc.)
-    // because optimistic updates may have changed them since the disk write.
-    // tokenUsage and sessionFolderPath are only returned by getSession() (not getSessions()),
-    // so they must be explicitly merged here to be available after app restart.
     const existingSession = get(sessionAtomFamily(sessionId))
-    const preservedStaleMessages = !!existingSession
-      && existingSession.messages.length > 0
-      && (!loadedSession.messages || loadedSession.messages.length === 0)
-
-    const mergedSession = existingSession
-      ? {
-          ...existingSession,
-          // CRITICAL: Don't clobber messages if session is actively streaming
-          // AND already has messages in the atom. Streaming events update the atom
-          // directly and may contain messages the IPC response doesn't know about
-          // (race window between IPC request and response).
-          // The `messages.length > 0` guard ensures Cmd+R reload works: after reload,
-          // the atom starts with messages=[] from getSessions(), so IPC response
-          // (which has full history from main process memory) must be used.
-          // Also guard against sleep/wake edge case: the server may return
-          // empty messages if the session subprocess hasn't finished lazy-loading.
-          messages: preservedStaleMessages
-            ? existingSession.messages
-            : existingSession.isProcessing && existingSession.messages.length > 0
-              ? existingSession.messages
-              : loadedSession.messages,
-          tokenUsage: loadedSession.tokenUsage ?? existingSession.tokenUsage,
-          sessionFolderPath: loadedSession.sessionFolderPath ?? existingSession.sessionFolderPath,
-        }
-      : loadedSession
+    const { session: mergedSession, preservedStaleMessages } = mergeInitialMessagePage(existingSession, loadedSession)
     set(sessionAtomFamily(sessionId), mergedSession)
 
-    // Update only lastFinalMessageId in metadata (now computable from loaded messages).
-    // Don't replace the full meta entry — other fields are maintained through
-    // optimistic updates and IPC events, and may be ahead of disk state.
+    // Update only lastFinalMessageId in metadata when the loaded page contains a newer final response.
+    // Don't replace the full meta entry — other fields are maintained through optimistic updates
+    // and IPC events, and may be ahead of disk state.
     const lastFinalMessageId = findLastFinalMessageId(loadedSession.messages)
     if (lastFinalMessageId) {
       const metaMap = get(sessionMetaMapAtom)
@@ -641,7 +652,7 @@ async function loadSessionMessages(
 
     // Mark as loaded only when we received a fresh payload.
     // If we had to preserve stale in-memory messages because the backend returned
-    // an empty array during lazy-load recovery, keep the session reloadable.
+    // an empty page during lazy-load recovery, keep the session reloadable.
     if (!preservedStaleMessages) {
       const newLoadedSessions = new Set(get(loadedSessionsAtom))
       newLoadedSessions.add(sessionId)
@@ -677,6 +688,81 @@ export const forceSessionMessagesReloadAtom = atom(
   null,
   async (get, set, sessionId: string): Promise<Session | null> => {
     return loadSessionMessages(get, set, sessionId, { force: true })
+  }
+)
+
+export const loadEarlierSessionMessagesAtom = atom(
+  null,
+  async (get, set, sessionId: string): Promise<Session | null> => {
+    const alreadyLoaded = get(loadedSessionsAtom).has(sessionId)
+    const currentBeforeInitialLoad = get(sessionAtomFamily(sessionId))
+    const current = alreadyLoaded
+      ? currentBeforeInitialLoad
+      : await loadSessionMessages(get, set, sessionId)
+
+    if (!current || !current.messagePageInfo?.hasMoreBefore) {
+      return current
+    }
+
+    const cursor = current.messagePageInfo.oldestMessageId ?? current.messages[0]?.id
+    if (!cursor) return current
+
+    const existingPromise = sessionEarlierLoadingPromises.get(sessionId)
+    if (existingPromise) return existingPromise
+
+    const loadPromise = (async (): Promise<Session | null> => {
+      const pageSession = await requestSessionMessagePage({
+        sessionId,
+        beforeMessageId: cursor,
+      })
+      if (!pageSession) return get(sessionAtomFamily(sessionId))
+
+      const latestCurrent = get(sessionAtomFamily(sessionId)) ?? current
+      const existingIds = new Set(latestCurrent.messages.map((message) => message.id))
+      const pageMessages = pageSession.messages.filter((message) => !existingIds.has(message.id))
+      if (pageMessages.length === 0) {
+        const previousPageInfo = latestCurrent.messagePageInfo ?? pageSession.messagePageInfo
+        const nextSession: Session = {
+          ...latestCurrent,
+          messagePageInfo: {
+            hasMoreBefore: pageSession.messagePageInfo?.hasMoreBefore ?? false,
+            oldestMessageId: previousPageInfo?.oldestMessageId ?? latestCurrent.messages[0]?.id,
+            newestMessageId: previousPageInfo?.newestMessageId ?? latestCurrent.messages[latestCurrent.messages.length - 1]?.id,
+            loadedMessageCount: previousPageInfo?.loadedMessageCount ?? latestCurrent.messages.length,
+            totalMessageCount: previousPageInfo?.totalMessageCount ?? latestCurrent.messageCount,
+          },
+        }
+        set(sessionAtomFamily(sessionId), nextSession)
+        return nextSession
+      }
+
+      const mergedMessages = [...pageMessages, ...latestCurrent.messages]
+      const mergedSession: Session = {
+        ...latestCurrent,
+        messages: mergedMessages,
+        messagePageInfo: {
+          hasMoreBefore: pageSession.messagePageInfo?.hasMoreBefore ?? false,
+          oldestMessageId: mergedMessages[0]?.id,
+          newestMessageId: mergedMessages[mergedMessages.length - 1]?.id,
+          loadedMessageCount: mergedMessages.length,
+          totalMessageCount: latestCurrent.messagePageInfo?.totalMessageCount
+            ?? pageSession.messagePageInfo?.totalMessageCount
+            ?? latestCurrent.messageCount,
+        },
+        tokenUsage: pageSession.tokenUsage ?? latestCurrent.tokenUsage,
+        sessionFolderPath: pageSession.sessionFolderPath ?? latestCurrent.sessionFolderPath,
+      }
+
+      set(sessionAtomFamily(sessionId), mergedSession)
+      return mergedSession
+    })()
+
+    sessionEarlierLoadingPromises.set(sessionId, loadPromise)
+    try {
+      return await loadPromise
+    } finally {
+      sessionEarlierLoadingPromises.delete(sessionId)
+    }
   }
 )
 

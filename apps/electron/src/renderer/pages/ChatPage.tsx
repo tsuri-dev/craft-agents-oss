@@ -24,7 +24,7 @@ import { rendererPerf } from '@/lib/perf'
 import { routes } from '@/lib/navigate'
 import { coerceInputText } from '@/lib/input-text'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
-import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadedSessionsAtom, sessionMetaMapAtom } from '@/atoms/sessions'
+import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadEarlierSessionMessagesAtom, loadedSessionsAtom, sessionMetaMapAtom } from '@/atoms/sessions'
 import { agentProfilesAtom } from '@/atoms/agent-profiles'
 import { getSessionTitle } from '@/utils/session'
 import { addSessionProjectLabel, resolveUniqueSessionProjectName } from '@/utils/session-project-filter'
@@ -106,8 +106,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Fallback: ensure messages are loaded when session is viewed
   const ensureMessagesLoaded = useSetAtom(ensureSessionMessagesLoadedAtom)
   const forceMessagesReload = useSetAtom(forceSessionMessagesReloadAtom)
+  const loadEarlierMessages = useSetAtom(loadEarlierSessionMessagesAtom)
   const [messagesLoadError, setMessagesLoadError] = React.useState<string | null>(null)
   const [messagesRetrying, setMessagesRetrying] = React.useState(false)
+  const [messagesLoadingEarlier, setMessagesLoadingEarlier] = React.useState(false)
   const autoForcedReloadSessionRef = React.useRef<string | null>(null)
   const shouldForceInitialMessagesReload = React.useMemo(() => {
     const expectedMessageCount = session?.messageCount ?? sessionMeta?.messageCount ?? 0
@@ -170,6 +172,19 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       setMessagesRetrying(false)
     }
   }, [forceMessagesReload, sessionId])
+
+  const handleLoadEarlierMessages = React.useCallback(async () => {
+    if (messagesLoadingEarlier) return
+    setMessagesLoadingEarlier(true)
+    try {
+      await loadEarlierMessages(sessionId)
+    } catch (error) {
+      console.error('[ChatPage] Failed to load earlier messages:', error)
+      toast.error(formatSessionLoadFailure(error))
+    } finally {
+      setMessagesLoadingEarlier(false)
+    }
+  }, [loadEarlierMessages, messagesLoadingEarlier, sessionId])
 
   const messageLoadState = React.useMemo(() => deriveSessionMessagesLoadState({
     session,
@@ -766,6 +781,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 messagesLoadError={messageLoadState.error}
                 messagesRetrying={messagesRetrying}
                 onRetryMessagesLoad={handleRetryMessagesLoad}
+                hasMoreMessagesAbove={false}
+                isLoadingMoreMessages={messagesLoadingEarlier}
+                onLoadMoreMessages={handleLoadEarlierMessages}
                 searchQuery={sessionListSearchQuery}
                 isSearchModeActive={isSearchModeActive}
                 onMatchInfoChange={onChatMatchInfoChange}
@@ -858,6 +876,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             messagesLoadError={messageLoadState.error}
             messagesRetrying={messagesRetrying}
             onRetryMessagesLoad={handleRetryMessagesLoad}
+            hasMoreMessagesAbove={session.messagePageInfo?.hasMoreBefore ?? false}
+            isLoadingMoreMessages={messagesLoadingEarlier}
+            onLoadMoreMessages={handleLoadEarlierMessages}
             searchQuery={sessionListSearchQuery}
             isSearchModeActive={isSearchModeActive}
             onMatchInfoChange={onChatMatchInfoChange}

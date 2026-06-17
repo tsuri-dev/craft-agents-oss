@@ -91,6 +91,27 @@ export interface SessionRemoteTarget {
   keepAliveMinutes?: number
 }
 
+export interface SessionMessagePageInfo {
+  /** Whether older transcript messages exist before the first loaded message. */
+  hasMoreBefore: boolean
+  /** ID of the first message currently loaded in the renderer transcript window. */
+  oldestMessageId?: string
+  /** ID of the last message returned by this page. */
+  newestMessageId?: string
+  /** Number of messages currently loaded in the renderer transcript window. */
+  loadedMessageCount: number
+  /** Total number of persisted messages, from the session header when available. */
+  totalMessageCount?: number
+}
+
+export interface GetSessionMessagePageInput {
+  sessionId: string
+  /** Return messages before this message ID. Omit to get the latest page. */
+  beforeMessageId?: string
+  /** Number of recent user turns/rounds to include in one page. Defaults to 3. */
+  limitUserTurns?: number
+}
+
 export interface Session {
   id: string
   workspaceId: string
@@ -138,6 +159,8 @@ export interface Session {
   }
   createdAt?: number
   messageCount?: number
+  /** Present when messages is a paged transcript window rather than the full history. */
+  messagePageInfo?: SessionMessagePageInfo
   tokenUsage?: {
     inputTokens: number
     outputTokens: number

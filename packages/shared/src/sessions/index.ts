@@ -89,6 +89,12 @@ export {
   readSessionJsonl,
   writeSessionJsonl,
   createSessionHeader,
+  readSessionMessagePage,
+} from './jsonl.ts';
+
+export type {
+  SessionMessagePageReadOptions,
+  SessionMessagePageReadResult,
 } from './jsonl.ts';
 
 // Field utilities

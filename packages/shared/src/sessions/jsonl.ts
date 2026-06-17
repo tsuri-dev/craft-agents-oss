@@ -9,6 +9,21 @@ import { openSync, readSync, closeSync, readFileSync, writeFileSync, renameSync,
 import { open, readFile } from 'fs/promises';
 import { dirname } from 'path';
 import type { SessionHeader, StoredSession, StoredMessage, SessionTokenUsage } from './types.ts';
+
+export interface SessionMessagePageReadOptions {
+  /** Return messages before this message ID. Omit to return the latest page. */
+  beforeMessageId?: string;
+  /** Number of user turns / conversation rounds to include. */
+  limitUserTurns: number;
+}
+
+export interface SessionMessagePageReadResult {
+  messages: StoredMessage[];
+  hasMoreBefore: boolean;
+  oldestMessageId?: string;
+  newestMessageId?: string;
+  totalMessageCount: number;
+}
 import type { PermissionMode } from '../agent/mode-types.ts';
 import { parsePermissionMode } from '../agent/mode-types.ts';
 import { toPortablePath, expandPath, normalizePath } from '../utils/paths.ts';
@@ -278,6 +293,105 @@ export function readSessionMessages(sessionFile: string): StoredMessage[] {
     debug('[jsonl] Failed to read session messages:', sessionFile, error);
     return [];
   }
+}
+
+/**
+ * Read a bounded transcript page from a JSONL file.
+ *
+ * Pages are measured in user turns/conversation rounds, not raw message count:
+ * a page starts at the Nth user message before the cursor and includes all
+ * tool/status/assistant messages up to the cursor. This keeps the default chat
+ * view focused on the most recent user interactions while avoiding a full
+ * transcript parse/IPC payload for long sessions.
+ */
+export function readSessionMessagePage(
+  sessionFile: string,
+  options: SessionMessagePageReadOptions,
+): SessionMessagePageReadResult {
+  const limitUserTurns = Math.max(1, Math.floor(options.limitUserTurns || 1));
+
+  try {
+    const content = readFileSync(sessionFile, 'utf-8');
+    const lines = content.split('\n').filter(Boolean);
+    const messageLines = lines.slice(1);
+    const sessionDir = dirname(sessionFile);
+    const totalMessageCount = messageLines.length;
+
+    if (messageLines.length === 0) {
+      return { messages: [], hasMoreBefore: false, totalMessageCount };
+    }
+
+    const parseMessageLine = (index: number): StoredMessage | null => {
+      try {
+        return JSON.parse(expandSessionPath(messageLines[index]!, sessionDir)) as StoredMessage;
+      } catch {
+        debug('[jsonl] Skipping corrupted message line while paging:', messageLines[index]?.substring(0, 100));
+        return null;
+      }
+    };
+
+    let endExclusive = messageLines.length;
+    if (options.beforeMessageId) {
+      endExclusive = -1;
+      for (let i = messageLines.length - 1; i >= 0; i--) {
+        const message = parseMessageLine(i);
+        if (message?.id === options.beforeMessageId) {
+          endExclusive = i;
+          break;
+        }
+      }
+
+      if (endExclusive < 0) {
+        debug('[jsonl] Page cursor not found:', sessionFile, options.beforeMessageId);
+        return { messages: [], hasMoreBefore: false, totalMessageCount };
+      }
+    }
+
+    if (endExclusive <= 0) {
+      return { messages: [], hasMoreBefore: false, totalMessageCount };
+    }
+
+    let startInclusive = endExclusive;
+    let userTurnsSeen = 0;
+    for (let i = endExclusive - 1; i >= 0; i--) {
+      const message = parseMessageLine(i);
+      if (!message) continue;
+      startInclusive = i;
+      if (message.type === 'user') {
+        userTurnsSeen += 1;
+        if (userTurnsSeen >= limitUserTurns) break;
+      }
+    }
+
+    const pageMessages = parseMessagesResilient(
+      messageLines
+        .slice(startInclusive, endExclusive)
+        .map(line => expandSessionPath(line, sessionDir)),
+    );
+
+    return {
+      messages: pageMessages,
+      hasMoreBefore: hasParseableMessageBefore(messageLines, sessionDir, startInclusive),
+      oldestMessageId: pageMessages[0]?.id,
+      newestMessageId: pageMessages[pageMessages.length - 1]?.id,
+      totalMessageCount,
+    };
+  } catch (error) {
+    debug('[jsonl] Failed to read session message page:', sessionFile, error);
+    return { messages: [], hasMoreBefore: false, totalMessageCount: 0 };
+  }
+}
+
+function hasParseableMessageBefore(messageLines: string[], sessionDir: string, beforeIndex: number): boolean {
+  for (let i = beforeIndex - 1; i >= 0; i--) {
+    try {
+      JSON.parse(expandSessionPath(messageLines[i]!, sessionDir)) as StoredMessage;
+      return true;
+    } catch {
+      // Ignore corrupted lines when deciding whether a usable earlier page exists.
+    }
+  }
+  return false;
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   loadedSessionsAtom,
   ensureSessionMessagesLoadedAtom,
   forceSessionMessagesReloadAtom,
+  loadEarlierSessionMessagesAtom,
   refreshSessionsMetadataAtom,
   initializeSessionsAtom,
   replaceLoadedSessionAtom,
@@ -66,11 +67,18 @@ describe('session message loading atoms', () => {
 
     globalThis.window = {
       electronAPI: {
-        getSessionMessages: async (id: string) => {
+        getSessionMessagePage: async ({ sessionId: id }: { sessionId: string }) => {
           calls.push(id)
           return makeSession({
             id,
             messages: [msg('m1'), msg('m2', 'assistant')],
+            messagePageInfo: {
+              hasMoreBefore: false,
+              oldestMessageId: 'm1',
+              newestMessageId: 'm2',
+              loadedMessageCount: 2,
+              totalMessageCount: 2,
+            },
           })
         },
       },
@@ -97,7 +105,7 @@ describe('session message loading atoms', () => {
 
     globalThis.window = {
       electronAPI: {
-        getSessionMessages: async (id: string) => {
+        getSessionMessagePage: async ({ sessionId: id }: { sessionId: string }) => {
           calls.push(id)
           if (calls.length === 1) {
             return makeSession({ id, messages: [] })
@@ -105,6 +113,13 @@ describe('session message loading atoms', () => {
           return makeSession({
             id,
             messages: [msg('m1'), msg('m2', 'assistant')],
+            messagePageInfo: {
+              hasMoreBefore: false,
+              oldestMessageId: 'm1',
+              newestMessageId: 'm2',
+              loadedMessageCount: 2,
+              totalMessageCount: 2,
+            },
           })
         },
       },
@@ -123,6 +138,56 @@ describe('session message loading atoms', () => {
     expect(calls).toEqual([sessionId, sessionId])
     expect(secondResult?.messages.map((message) => message.id)).toEqual(['m1', 'm2'])
     expect(store.get(loadedSessionsAtom).has(sessionId)).toBe(true)
+  })
+
+  it('prepends earlier message pages without duplicating existing messages', async () => {
+    const store = createStore()
+    const sessionId = 'session-1'
+    const requests: Array<{ sessionId: string; beforeMessageId?: string }> = []
+
+    globalThis.window = {
+      electronAPI: {
+        getSessionMessagePage: async ({ sessionId: id, beforeMessageId }: { sessionId: string; beforeMessageId?: string }) => {
+          requests.push({ sessionId: id, beforeMessageId })
+          if (beforeMessageId) {
+            return makeSession({
+              id,
+              messages: [msg('u1'), msg('a1', 'assistant')],
+              messagePageInfo: {
+                hasMoreBefore: false,
+                oldestMessageId: 'u1',
+                newestMessageId: 'a1',
+                loadedMessageCount: 2,
+                totalMessageCount: 6,
+              },
+            })
+          }
+          return makeSession({
+            id,
+            messages: [msg('u2'), msg('a2', 'assistant'), msg('u3'), msg('a3', 'assistant')],
+            messagePageInfo: {
+              hasMoreBefore: true,
+              oldestMessageId: 'u2',
+              newestMessageId: 'a3',
+              loadedMessageCount: 4,
+              totalMessageCount: 6,
+            },
+          })
+        },
+      },
+    } as unknown as typeof window
+
+    const initial = await store.set(ensureSessionMessagesLoadedAtom, sessionId)
+    expect(initial?.messages.map((message) => message.id)).toEqual(['u2', 'a2', 'u3', 'a3'])
+
+    const withEarlier = await store.set(loadEarlierSessionMessagesAtom, sessionId)
+    expect(requests).toEqual([
+      { sessionId, beforeMessageId: undefined },
+      { sessionId, beforeMessageId: 'u2' },
+    ])
+    expect(withEarlier?.messages.map((message) => message.id)).toEqual(['u1', 'a1', 'u2', 'a2', 'u3', 'a3'])
+    expect(withEarlier?.messagePageInfo?.hasMoreBefore).toBe(false)
+    expect(withEarlier?.messagePageInfo?.loadedMessageCount).toBe(6)
   })
 })
 

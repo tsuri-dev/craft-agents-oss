@@ -27,6 +27,7 @@ import type {
   RequirementStartAgentRunInput,
   RequirementReplyToAgentInput,
   RequirementAgentRunResult,
+  GetSessionMessagePageInput,
 } from '@craft-agent/shared/protocol'
 import type { SessionBundle, DispatchMode } from '@craft-agent/shared/sessions'
 import type { EventSink } from '../transport'
@@ -48,6 +49,7 @@ export interface ISessionManager {
 
   getSessions(workspaceId?: string): Session[]
   getSession(sessionId: string): Promise<Session | null>
+  getSessionMessagePage?(input: GetSessionMessagePageInput): Promise<Session | null>
   createSession(workspaceId: string, options?: CreateSessionOptions): Promise<Session>
   deleteSession(sessionId: string): Promise<void>
 

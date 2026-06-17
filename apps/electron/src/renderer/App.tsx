@@ -47,6 +47,7 @@ import {
   sessionIdsAtom,
   loadedSessionsAtom,
   forceSessionMessagesReloadAtom,
+  SESSION_MESSAGE_PAGE_USER_TURNS,
   backgroundTasksAtomFamily,
   extractSessionMeta,
   windowWorkspaceIdAtom,
@@ -447,7 +448,10 @@ export default function App() {
 
   const refreshSessionFromServer = useCallback(async (sessionId: string): Promise<'refreshed' | 'preserved_stale_messages' | 'failed'> => {
     try {
-      const fresh = await window.electronAPI.getSessionMessages(sessionId)
+      const fresh = await window.electronAPI.getSessionMessagePage({
+        sessionId,
+        limitUserTurns: SESSION_MESSAGE_PAGE_USER_TURNS,
+      })
       if (!fresh) return 'failed'
 
       const prevSession = store.get(sessionAtomFamily(sessionId))
@@ -893,7 +897,10 @@ export default function App() {
 
       // Session lifecycle events are handled explicitly (not by the agent event processor).
       if (event.type === 'session_created') {
-        window.electronAPI.getSessionMessages(sessionId)
+        window.electronAPI.getSessionMessagePage({
+          sessionId,
+          limitUserTurns: SESSION_MESSAGE_PAGE_USER_TURNS,
+        })
           .then((createdSession: Session | null) => {
             if (createdSession) {
               const existingMeta = store.get(sessionMetaMapAtom).has(sessionId)

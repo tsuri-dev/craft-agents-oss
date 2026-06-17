@@ -241,6 +241,7 @@ import type {
   RequirementReplyToAgentInput,
   RequirementAgentRunResult,
   RequirementComment,
+  GetSessionMessagePageInput,
   DirectoryOpenAppInfo,
   OpenDirectoryWithAppInput,
   StoreGetPackageInput,
@@ -259,6 +260,7 @@ export interface ElectronAPI {
   getUnreadSummary(): Promise<UnreadSummary>
   markAllSessionsRead(workspaceId: string): Promise<void>
   getSessionMessages(sessionId: string): Promise<Session | null>
+  getSessionMessagePage(input: GetSessionMessagePageInput): Promise<Session | null>
   createSession(workspaceId: string, options?: CreateSessionOptions): Promise<Session>
   deleteSession(sessionId: string): Promise<void>
   sendMessage(sessionId: string, message: string, attachments?: FileAttachment[], storedAttachments?: StoredAttachmentType[], options?: SendMessageOptions): Promise<void>

@@ -232,6 +232,12 @@ interface ChatDisplayProps {
   messagesRetrying?: boolean
   /** Retry lazy-loading the session transcript */
   onRetryMessagesLoad?: () => void
+  /** Server-side pagination: whether older messages exist before the loaded transcript window */
+  hasMoreMessagesAbove?: boolean
+  /** Server-side pagination: older page request in flight */
+  isLoadingMoreMessages?: boolean
+  /** Server-side pagination: load older messages before the current first message */
+  onLoadMoreMessages?: () => Promise<void> | void
   // Tutorial
   /** Disable send action (for tutorial guidance) */
   disableSend?: boolean
@@ -504,6 +510,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   messagesLoadError,
   messagesRetrying = false,
   onRetryMessagesLoad,
+  hasMoreMessagesAbove = false,
+  isLoadingMoreMessages = false,
+  onLoadMoreMessages,
   // Tutorial
   disableSend = false,
   // Search highlighting
@@ -534,6 +543,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Reverse pagination: show last N turns initially, load more on scroll up
   const TURNS_PER_PAGE = 20
   const [visibleTurnCount, setVisibleTurnCount] = React.useState(TURNS_PER_PAGE)
+  const loadingMoreMessagesRef = React.useRef(false)
   // Sticky-bottom: When true, auto-scroll on content changes. Toggled by user scroll behavior.
   const isStickToBottomRef = React.useRef(true)
   // Mirror isFocusedPanel into a ref so the ResizeObserver closure reads the latest value
@@ -1207,6 +1217,22 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
     // Load more turns when scrolling near top (within 100px)
     if (scrollTop < 100) {
+      if (onLoadMoreMessages) {
+        if (!hasMoreMessagesAbove || isLoadingMoreMessages || loadingMoreMessagesRef.current) return
+
+        const prevScrollHeight = viewport.scrollHeight
+        loadingMoreMessagesRef.current = true
+        Promise.resolve(onLoadMoreMessages())
+          .finally(() => {
+            requestAnimationFrame(() => {
+              const newScrollHeight = viewport.scrollHeight
+              viewport.scrollTop = newScrollHeight - prevScrollHeight + scrollTop
+              loadingMoreMessagesRef.current = false
+            })
+          })
+        return
+      }
+
       setVisibleTurnCount(prev => {
         // Check if there are more turns to load
         const currentStartIndex = Math.max(0, totalTurnCountRef.current - prev)
@@ -1224,7 +1250,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         return prev + TURNS_PER_PAGE
       })
     }
-  }, [])
+  }, [hasMoreMessagesAbove, isLoadingMoreMessages, onLoadMoreMessages])
 
   // Set up scroll event listener
   React.useEffect(() => {
@@ -1529,10 +1555,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Keep ref in sync for scroll handler
   totalTurnCountRef.current = allTurns.length
 
-  // Reverse pagination: only render last N turns for fast initial render
-  const startIndex = Math.max(0, allTurns.length - visibleTurnCount)
-  const turns = allTurns.slice(startIndex)
-  const hasMoreAbove = startIndex > 0
+  // Reverse pagination: legacy local mode slices the full transcript. When server-side
+  // pagination is enabled, session.messages is already a bounded transcript window,
+  // so render all loaded turns and ask the backend for older pages on scroll-up.
+  const usesServerPagination = !!onLoadMoreMessages
+  const startIndex = usesServerPagination ? 0 : Math.max(0, allTurns.length - visibleTurnCount)
+  const turns = usesServerPagination ? allTurns : allTurns.slice(startIndex)
+  const hasMoreAbove = usesServerPagination ? hasMoreMessagesAbove : startIndex > 0
 
   const assistantTurnIndexByMessageId = useMemo(() => {
     const map = new Map<string, number>()
@@ -1623,6 +1652,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const hasUnrenderedLoadedMessages = !messagesLoading
     && turns.length === 0
     && ((session?.messages?.length ?? 0) > 0 || (session?.messageCount ?? 0) > 0)
+  const earlierMessageCount = usesServerPagination
+    ? Math.max(1, (session?.messagePageInfo?.totalMessageCount ?? session?.messageCount ?? 0) - (session?.messagePageInfo?.loadedMessageCount ?? session?.messages.length ?? 0))
+    : startIndex
 
   return (
     <div ref={zoneRef} className="flex h-full flex-col min-w-0" data-focus-zone="chat">
@@ -1738,7 +1770,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                   {/* Load more indicator - shown when there are older messages */}
                   {hasMoreAbove && (
                     <div className="text-center text-muted-foreground/60 text-xs py-3 select-none">
-                      ↑ {t('chat.scrollUpForEarlier', { count: startIndex })}
+                      {isLoadingMoreMessages ? (
+                        <Spinner className="mx-auto h-3.5 w-3.5 text-foreground/30" />
+                      ) : (
+                        <>↑ {t('chat.scrollUpForEarlier', { count: earlierMessageCount })}</>
+                      )}
                     </div>
                   )}
                   {turns.map((turn, index) => {

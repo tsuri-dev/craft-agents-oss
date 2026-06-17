@@ -57,6 +57,7 @@ import {
   getSessionPath as getSessionStoragePath,
   ensureSessionDir,
   getSessionFilePath,
+  readSessionMessagePage,
   generateSessionId,
   sessionPersistenceQueue,
   getHeaderMetadataSignature,
@@ -81,7 +82,7 @@ import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { collectDirectoryFiles, restoreFiles, type BundleFile } from '@craft-agent/shared/utils/bundle-files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SessionUsageEntry, type UsageStats, type UsageStatsRange, type UsageTotals, type RequirementBinding, type RequirementStartAgentRunInput, type RequirementReplyToAgentInput, type RequirementAgentRunResult, type RequirementComment, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
+import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SessionUsageEntry, type UsageStats, type UsageStatsRange, type UsageTotals, type RequirementBinding, type RequirementStartAgentRunInput, type RequirementReplyToAgentInput, type RequirementAgentRunResult, type RequirementComment, type GetSessionMessagePageInput, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { hasAgentTaskLabel, withAgentTaskLabel } from '@craft-agent/shared/agent-runs'
 import type { AgentRun, AgentRunStatus, AgentRunTriggerType } from '@craft-agent/shared/agent-runs'
 import type { AgentProfileDetail } from '@craft-agent/shared/agent-profiles'
@@ -1241,6 +1242,64 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
     supportsBranching: resolveSupportsBranching(m),
     ...overrides,
   } as Session
+}
+
+const DEFAULT_MESSAGE_PAGE_USER_TURNS = 3
+
+function normalizeMessagePageUserTurns(limitUserTurns: number | undefined): number {
+  return Math.max(1, Math.floor(limitUserTurns ?? DEFAULT_MESSAGE_PAGE_USER_TURNS))
+}
+
+function selectRuntimeMessagePage(
+  messages: Message[],
+  input: GetSessionMessagePageInput,
+  totalMessageCount = messages.length,
+): NonNullable<Session['messagePageInfo']> & { messages: Message[] } {
+  const limitUserTurns = normalizeMessagePageUserTurns(input.limitUserTurns)
+  let endExclusive = messages.length
+
+  if (input.beforeMessageId) {
+    endExclusive = messages.findIndex((message) => message.id === input.beforeMessageId)
+    if (endExclusive < 0) {
+      return {
+        messages: [],
+        hasMoreBefore: false,
+        loadedMessageCount: 0,
+        totalMessageCount,
+      }
+    }
+  }
+
+  if (endExclusive <= 0) {
+    return {
+      messages: [],
+      hasMoreBefore: false,
+      loadedMessageCount: 0,
+      totalMessageCount,
+    }
+  }
+
+  let startInclusive = endExclusive
+  let userTurnsSeen = 0
+  for (let i = endExclusive - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (!message) continue
+    startInclusive = i
+    if (message.role === 'user') {
+      userTurnsSeen += 1
+      if (userTurnsSeen >= limitUserTurns) break
+    }
+  }
+
+  const pageMessages = messages.slice(startInclusive, endExclusive)
+  return {
+    messages: pageMessages,
+    hasMoreBefore: startInclusive > 0,
+    oldestMessageId: pageMessages[0]?.id,
+    newestMessageId: pageMessages[pageMessages.length - 1]?.id,
+    loadedMessageCount: pageMessages.length,
+    totalMessageCount,
+  }
 }
 
 // Performance: Batch IPC delta events to reduce renderer load
@@ -2666,6 +2725,36 @@ export class SessionManager implements ISessionManager {
     await this.ensureMessagesLoaded(m)
 
     return managedToSession(m, { messages: m.messages })
+  }
+
+  async getSessionMessagePage(input: GetSessionMessagePageInput): Promise<Session | null> {
+    const m = this.sessions.get(input.sessionId)
+    if (!m) return null
+
+    if (m.messagesLoaded) {
+      const page = selectRuntimeMessagePage(m.messages, input, m.messageCount ?? m.messages.length)
+      const { messages, ...messagePageInfo } = page
+      return managedToSession(m, {
+        messages,
+        messagePageInfo,
+      })
+    }
+
+    const storedPage = readSessionMessagePage(getSessionFilePath(m.workspace.rootPath, m.id), {
+      beforeMessageId: input.beforeMessageId,
+      limitUserTurns: normalizeMessagePageUserTurns(input.limitUserTurns),
+    })
+
+    return managedToSession(m, {
+      messages: storedPage.messages.map(storedToMessage),
+      messagePageInfo: {
+        hasMoreBefore: storedPage.hasMoreBefore,
+        oldestMessageId: storedPage.oldestMessageId,
+        newestMessageId: storedPage.newestMessageId,
+        loadedMessageCount: storedPage.messages.length,
+        totalMessageCount: m.messageCount ?? storedPage.totalMessageCount,
+      },
+    })
   }
 
   /**

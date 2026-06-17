@@ -177,10 +177,21 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
     return sessionManager.markAllSessionsRead(workspaceId)
   })
 
-  // Get a single session with messages (for lazy loading)
+  // Get a single session with messages (legacy full-history load)
   server.handle(RPC_CHANNELS.sessions.GET_MESSAGES, async (_ctx, sessionId: string) => {
     const end = perf.start('rpc.getSessionMessages')
     const session = await sessionManager.getSession(sessionId)
+    end()
+    return session
+  })
+
+  // Get one bounded transcript page. Used by the chat UI so opening a long
+  // session does not parse and send the full history to the renderer.
+  server.handle(RPC_CHANNELS.sessions.GET_MESSAGE_PAGE, async (_ctx, input: import('@craft-agent/shared/protocol').GetSessionMessagePageInput) => {
+    const end = perf.start('rpc.getSessionMessagePage')
+    const session = sessionManager.getSessionMessagePage
+      ? await sessionManager.getSessionMessagePage(input)
+      : await sessionManager.getSession(input.sessionId)
     end()
     return session
   })
