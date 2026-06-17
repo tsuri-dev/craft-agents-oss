@@ -42,6 +42,12 @@ describe('ACP server dispatcher', () => {
     expect(response.result.protocolVersion).toBe(1)
     expect(response.result.agentInfo).toMatchObject({ name: 'craft-agent', title: 'Craft Agent' })
     expect(response.result.agentCapabilities.promptCapabilities.embeddedContext).toBe(true)
+    expect(response.result.agentCapabilities.loadSession).toBe(true)
+    expect(response.result.agentCapabilities.sessionCapabilities).toMatchObject({
+      close: {},
+      list: {},
+      resume: {},
+    })
   })
 
   it('returns method-not-found for unknown requests', async () => {

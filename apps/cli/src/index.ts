@@ -1919,6 +1919,7 @@ Commands:
                          --no-cleanup        Keep session after completion
                          --server-entry      Path to server/index.ts
   acp                    Run as an ACP stdio server for Zed/ACP clients
+                         --workspace <id>    Force Craft workspace (default: active workspace)
                          --workspace-dir <path>  Fallback workspace directory
                          --source <slug>     Enable Craft source for new ACP sessions
                          --mode <mode>       Permission mode (default: allow-all)

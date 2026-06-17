@@ -156,6 +156,7 @@ function createMockServer(opts?: MockServerOptions): MockServer {
 let mockWsServer: MockServer | null = null
 
 mock.module('./server-spawner.ts', () => ({
+  getRunningServer: (): SpawnedServer | null => null,
   spawnServer: async (): Promise<SpawnedServer> => {
     if (!mockWsServer) throw new Error('mockWsServer not initialized')
     return {

@@ -11,8 +11,11 @@ import type {
   AcpCloseSessionRequest,
   AcpInitializeRequest,
   AcpInitializeResponse,
+  AcpListSessionsRequest,
+  AcpLoadSessionRequest,
   AcpNewSessionRequest,
   AcpPromptRequest,
+  AcpResumeSessionRequest,
   AcpSetModeRequest,
   JsonRpcId,
   JsonRpcIncoming,
@@ -82,6 +85,12 @@ async function dispatch(method: string, params: unknown, adapter: CraftAcpAdapte
       return initialize(params)
     case 'session/new':
       return adapter.newSession(requireObject<AcpNewSessionRequest>(params, method))
+    case 'session/list':
+      return adapter.listSessions(optionalObject<AcpListSessionsRequest>(params, method))
+    case 'session/load':
+      return adapter.loadSession(requireObject<AcpLoadSessionRequest>(params, method))
+    case 'session/resume':
+      return adapter.resumeSession(requireObject<AcpResumeSessionRequest>(params, method))
     case 'session/prompt':
       return adapter.prompt(requireObject<AcpPromptRequest>(params, method))
     case 'session/cancel':
@@ -107,9 +116,11 @@ async function initialize(params: unknown): Promise<AcpInitializeResponse> {
         image: false,
         audio: false,
       },
-      loadSession: false,
+      loadSession: true,
       sessionCapabilities: {
         close: {},
+        list: {},
+        resume: {},
       },
     },
     agentInfo: {
@@ -126,6 +137,11 @@ function requireObject<T>(params: unknown, method: string): T {
     throw new AcpInvalidParamsError(`Invalid params for ${method}: expected object`)
   }
   return params as T
+}
+
+function optionalObject<T>(params: unknown, method: string): T {
+  if (params == null) return {} as T
+  return requireObject<T>(params, method)
 }
 
 function log(message: string): void {

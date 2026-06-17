@@ -59,6 +59,34 @@ export interface AcpNewSessionResponse {
   modes?: AcpSessionModeState
 }
 
+export interface AcpListSessionsRequest {
+  cwd?: string
+  cursor?: string
+}
+
+export interface AcpSessionInfo {
+  sessionId: string
+  cwd: string
+  additionalDirectories?: string[]
+  title?: string
+  updatedAt?: string
+  _meta?: Record<string, unknown>
+}
+
+export interface AcpListSessionsResponse {
+  sessions: AcpSessionInfo[]
+  nextCursor?: string
+}
+
+export interface AcpLoadSessionRequest {
+  sessionId: string
+  cwd: string
+  mcpServers?: unknown[]
+  additionalDirectories?: string[]
+}
+
+export type AcpResumeSessionRequest = AcpLoadSessionRequest
+
 export interface AcpPromptRequest {
   sessionId: string
   prompt: AcpContentBlock[]
