@@ -107,12 +107,18 @@ The loaded/resumed Craft session keeps using the Zed-provided `cwd` as its worki
 
 ## Craft sources and skills from Zed
 
-Zed's External Agent UI does not expose Craft's source/skill picker. Use Craft bracket mentions directly in the prompt:
+Zed's External Agent UI does not expose Craft's source/skill picker. Use the adapter's helper commands or Craft bracket mentions directly in the prompt:
 
 ```text
+/sources
+/skills
+/use-source tapd-openapi-docs 查一下 comment add API
+/use-skill brainstorming 帮我拆一下方案
 [source:tapd-openapi-docs] 查一下 comment add API
 [skill:brainstorming] 帮我拆一下方案
 ```
+
+`/sources` and `/skills` are handled locally by the ACP adapter and do not call the model. `/use-source` and `/use-skill` are rewritten to bracket mentions before sending the prompt to Craft.
 
 Supported mention forms:
 
@@ -122,7 +128,7 @@ Supported mention forms:
 - `[folder:<path>]`
 - `[agent:<id>]`
 
-Repeat `--source <slug>` in the Zed custom agent config to pre-enable sources for every new ACP session. Bracket mentions are still useful for explicit per-message context and for skills.
+Repeat `--source <slug>` in the Zed custom agent config to pre-enable sources for every new ACP session. Bracket mentions or `/use-source` are still useful for explicit per-message context. `/use-skill` passes the selected skill as `skillSlugs` and preserves the bracket mention so Craft can inject the skill instructions.
 
 ## Selection context
 

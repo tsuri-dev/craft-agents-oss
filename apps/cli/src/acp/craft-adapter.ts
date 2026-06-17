@@ -82,6 +82,35 @@ interface CraftSessionWithMessages extends CraftSessionSummary {
   }>
 }
 
+interface CraftSourceSummary {
+  slug?: string
+  name?: string
+  provider?: string
+  config?: {
+    slug?: string
+    name?: string
+    provider?: string
+    enabled?: boolean
+  }
+}
+
+interface CraftSkillSummary {
+  slug?: string
+  name?: string
+  description?: string
+  metadata?: {
+    name?: string
+    description?: string
+  }
+}
+
+type AcpPromptCommand =
+  | { kind: 'list-sources' }
+  | { kind: 'list-skills' }
+  | { kind: 'use-source'; slug: string; prompt: string }
+  | { kind: 'use-skill'; slug: string; prompt: string }
+  | undefined
+
 export class CraftAcpAdapter {
   private readonly options: CraftAcpAdapterOptions
   private readonly callbacks: CraftAcpAdapterCallbacks
@@ -163,7 +192,24 @@ export class CraftAcpAdapter {
   async prompt(request: AcpPromptRequest): Promise<AcpPromptResponse> {
     const client = await this.ensureClient()
     const record = this.getSession(request.sessionId)
-    const message = promptBlocksToCraftMessage(request.prompt)
+    const rawMessage = promptBlocksToCraftMessage(request.prompt)
+    const command = parsePromptCommand(rawMessage)
+
+    if (command?.kind === 'list-sources') {
+      this.notifyLocalAssistantMessage(record.acpSessionId, await this.formatSourcesList(record.workspaceId))
+      return { stopReason: 'end_turn' }
+    }
+
+    if (command?.kind === 'list-skills') {
+      this.notifyLocalAssistantMessage(record.acpSessionId, await this.formatSkillsList(record.workspaceId, record.cwd))
+      return { stopReason: 'end_turn' }
+    }
+
+    const message = command?.kind === 'use-source'
+      ? `[source:${command.slug}] ${command.prompt}`.trim()
+      : command?.kind === 'use-skill'
+        ? `[skill:${command.slug}] ${command.prompt || 'Run the skill'}`.trim()
+        : rawMessage
     const mentions = extractCraftMentions(message)
 
     let finished = false
@@ -250,9 +296,78 @@ export class CraftAcpAdapter {
     record.permissionMode = mode
     this.callbacks.notifySessionUpdate({
       sessionId: record.acpSessionId,
-      update: { sessionUpdate: 'current_mode_update', modeId: mode },
+      update: { sessionUpdate: 'current_mode_update', currentModeId: mode },
     })
     return {}
+  }
+
+  private notifyLocalAssistantMessage(sessionId: string, text: string): void {
+    this.callbacks.notifySessionUpdate({
+      sessionId,
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        messageId: `craft-acp-local-${crypto.randomUUID()}`,
+        content: { type: 'text', text },
+      },
+    })
+  }
+
+  private async formatSourcesList(workspaceId: string): Promise<string> {
+    const client = await this.ensureClient()
+    const rawSources = await client.invoke('sources:get', workspaceId).catch((error) => {
+      return { error: error instanceof Error ? error.message : String(error) }
+    })
+    if (!Array.isArray(rawSources)) {
+      return `Could not load Craft sources.\n\n${formatUnknownError(rawSources)}`
+    }
+
+    const sources = rawSources
+      .map(sourceSummary)
+      .filter((source): source is { slug: string; name?: string; provider?: string } => !!source.slug)
+      .sort((a, b) => a.slug.localeCompare(b.slug))
+
+    if (sources.length === 0) {
+      return 'No Craft sources are configured in the current workspace.'
+    }
+
+    return [
+      'Available Craft sources:',
+      '',
+      ...sources.map(source => `- \`[source:${source.slug}]\`${source.name && source.name !== source.slug ? ` — ${source.name}` : ''}${source.provider ? ` (${source.provider})` : ''}`),
+      '',
+      'Usage:',
+      '- `[source:<slug>] your prompt`',
+      '- `/use-source <slug> your prompt`',
+    ].join('\n')
+  }
+
+  private async formatSkillsList(workspaceId: string, cwd: string): Promise<string> {
+    const client = await this.ensureClient()
+    const rawSkills = await client.invoke('skills:get', workspaceId, cwd).catch((error) => {
+      return { error: error instanceof Error ? error.message : String(error) }
+    })
+    if (!Array.isArray(rawSkills)) {
+      return `Could not load Craft skills.\n\n${formatUnknownError(rawSkills)}`
+    }
+
+    const skills = rawSkills
+      .map(skillSummary)
+      .filter((skill): skill is { slug: string; name?: string; description?: string } => !!skill.slug)
+      .sort((a, b) => a.slug.localeCompare(b.slug))
+
+    if (skills.length === 0) {
+      return 'No Craft skills are available for the current workspace/project.'
+    }
+
+    return [
+      'Available Craft skills:',
+      '',
+      ...skills.map(skill => `- \`[skill:${skill.slug}]\`${skill.name && skill.name !== skill.slug ? ` — ${skill.name}` : ''}${skill.description ? `: ${skill.description}` : ''}`),
+      '',
+      'Usage:',
+      '- `[skill:<slug>] your prompt`',
+      '- `/use-skill <slug> your prompt`',
+    ].join('\n')
   }
 
   async dispose(): Promise<void> {
@@ -435,6 +550,57 @@ function readLocalActiveWorkspaceId(): string | undefined {
   } catch {
     return undefined
   }
+}
+
+function parsePromptCommand(message: string): AcpPromptCommand {
+  const trimmed = message.trim()
+  if (trimmed === '/sources') return { kind: 'list-sources' }
+  if (trimmed === '/skills') return { kind: 'list-skills' }
+
+  const sourceMatch = trimmed.match(/^\/use-source\s+([\w-]+)(?:\s+([\s\S]*))?$/)
+  if (sourceMatch) {
+    return {
+      kind: 'use-source',
+      slug: sourceMatch[1]!,
+      prompt: (sourceMatch[2] ?? '').trim() || 'Use this source for the next response.',
+    }
+  }
+
+  const skillMatch = trimmed.match(/^\/use-skill\s+([\w-]+)(?:\s+([\s\S]*))?$/)
+  if (skillMatch) {
+    return {
+      kind: 'use-skill',
+      slug: skillMatch[1]!,
+      prompt: (skillMatch[2] ?? '').trim(),
+    }
+  }
+
+  return undefined
+}
+
+function sourceSummary(value: unknown): { slug?: string; name?: string; provider?: string } {
+  const source = value as CraftSourceSummary | undefined
+  const slug = source?.config?.slug ?? source?.slug
+  return {
+    slug,
+    name: source?.config?.name ?? source?.name ?? slug,
+    provider: source?.config?.provider ?? source?.provider,
+  }
+}
+
+function skillSummary(value: unknown): { slug?: string; name?: string; description?: string } {
+  const skill = value as CraftSkillSummary | undefined
+  const slug = skill?.slug
+  return {
+    slug,
+    name: skill?.metadata?.name ?? skill?.name ?? slug,
+    description: skill?.metadata?.description ?? skill?.description,
+  }
+}
+
+function formatUnknownError(value: unknown): string {
+  if (value && typeof value === 'object' && 'error' in value) return String((value as { error: unknown }).error)
+  return typeof value === 'string' ? value : JSON.stringify(value)
 }
 
 function extractCraftMentions(message: string): { sources: string[]; skills: string[] } {

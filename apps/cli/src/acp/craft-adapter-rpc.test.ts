@@ -36,11 +36,15 @@ function createMockCraftServer(opts?: {
   workspaces?: MockWorkspace[]
   sessions?: MockSession[]
   labels?: unknown[]
+  sources?: unknown[]
+  skills?: unknown[]
 }): MockCraftServer {
   const invokeArgs: Record<string, unknown[][]> = {}
   const sessions = opts?.sessions ?? []
   const workspaces = opts?.workspaces ?? (opts?.existingWorkspaceRoot ? [{ id: 'ws-existing', rootPath: opts.existingWorkspaceRoot }] : [])
   const labels = opts?.labels ?? []
+  const sources = opts?.sources ?? []
+  const skills = opts?.skills ?? []
   const server = Bun.serve({
     port: 0,
     fetch(req, svr) {
@@ -85,6 +89,12 @@ function createMockCraftServer(opts?: {
             break
           case 'sessions:get':
             ws.send(serializeEnvelope({ id: envelope.id, type: 'response', channel, result: sessions }))
+            break
+          case 'sources:get':
+            ws.send(serializeEnvelope({ id: envelope.id, type: 'response', channel, result: sources }))
+            break
+          case 'skills:get':
+            ws.send(serializeEnvelope({ id: envelope.id, type: 'response', channel, result: skills }))
             break
           case 'sessions:getMessages': {
             const sessionId = envelope.args?.[0]
@@ -208,6 +218,25 @@ describe('Craft ACP adapter RPC bridge', () => {
     await adapter.dispose()
   })
 
+  it('notifies mode updates with currentModeId for Zed schema compatibility', async () => {
+    const updates: Array<{ sessionId: string; update: Record<string, unknown> }> = []
+    const adapter = createAdapter(mockServer, { mode: 'ask' }, updates)
+
+    const session = await adapter.newSession({ cwd: tmpRoot, mcpServers: [] })
+    await adapter.setMode({ sessionId: session.sessionId, modeId: 'allow-all' })
+
+    expect(mockServer.invokeArgs['sessions:command']?.[0]).toEqual([
+      'craft-session-1',
+      { type: 'setPermissionMode', mode: 'allow-all' },
+    ])
+    expect(updates.at(-1)).toEqual({
+      sessionId: 'craft-session-1',
+      update: { sessionUpdate: 'current_mode_update', currentModeId: 'allow-all' },
+    })
+
+    await adapter.dispose()
+  })
+
   it('bridges Craft source and skill bracket mentions from Zed prompts', async () => {
     const adapter = createAdapter(mockServer, {
       sources: ['existing-source'],
@@ -228,6 +257,58 @@ describe('Craft ACP adapter RPC bridge', () => {
     expect(mockServer.invokeArgs['sessions:sendMessage']?.[0]).toEqual([
       'craft-session-1',
       '[source:tapd-openapi-docs] [skill:brainstorming] Do it',
+      null,
+      null,
+      { skillSlugs: ['brainstorming'] },
+    ])
+
+    await adapter.dispose()
+  })
+
+  it('supports local /sources and /skills helper commands for Zed input', async () => {
+    const updates: Array<{ sessionId: string; update: Record<string, unknown> }> = []
+    mockServer.close()
+    mockServer = createMockCraftServer({
+      sources: [{ config: { slug: 'tapd-openapi-docs', name: 'TAPD OpenAPI Docs', provider: 'local' } }],
+      skills: [{ slug: 'brainstorming', metadata: { name: 'Brainstorming', description: 'Explore solution options' } }],
+    })
+
+    const adapter = createAdapter(mockServer, { mode: 'ask' }, updates)
+    const session = await adapter.newSession({ cwd: tmpRoot, mcpServers: [] })
+
+    await adapter.prompt({ sessionId: session.sessionId, prompt: [{ type: 'text', text: '/sources' }] })
+    await adapter.prompt({ sessionId: session.sessionId, prompt: [{ type: 'text', text: '/skills' }] })
+
+    const texts = updates.map(update => (update.update.content as { text?: string } | undefined)?.text ?? '').join('\n')
+    expect(texts).toContain('[source:tapd-openapi-docs]')
+    expect(texts).toContain('/use-source <slug> your prompt')
+    expect(texts).toContain('[skill:brainstorming]')
+    expect(texts).toContain('/use-skill <slug> your prompt')
+    expect(mockServer.invokeArgs['sources:get']?.[0]).toEqual(['ws-1'])
+    expect(mockServer.invokeArgs['skills:get']?.[0]).toEqual(['ws-1', tmpRoot])
+    expect(mockServer.invokeArgs['sessions:sendMessage']).toBeUndefined()
+
+    await adapter.dispose()
+  })
+
+  it('translates /use-source and /use-skill helper commands into Craft mentions', async () => {
+    const adapter = createAdapter(mockServer, { mode: 'ask' })
+    const session = await adapter.newSession({ cwd: tmpRoot, mcpServers: [] })
+
+    await adapter.prompt({ sessionId: session.sessionId, prompt: [{ type: 'text', text: '/use-source tapd-openapi-docs 查 comment API' }] })
+    await adapter.prompt({ sessionId: session.sessionId, prompt: [{ type: 'text', text: '/use-skill brainstorming 拆方案' }] })
+
+    expect(mockServer.invokeArgs['sessions:command']?.[0]).toEqual([
+      'craft-session-1',
+      { type: 'setSources', sourceSlugs: ['tapd-openapi-docs'] },
+    ])
+    expect(mockServer.invokeArgs['sessions:sendMessage']?.[0]).toEqual([
+      'craft-session-1',
+      '[source:tapd-openapi-docs] 查 comment API',
+    ])
+    expect(mockServer.invokeArgs['sessions:sendMessage']?.[1]).toEqual([
+      'craft-session-1',
+      '[skill:brainstorming] 拆方案',
       null,
       null,
       { skillSlugs: ['brainstorming'] },
