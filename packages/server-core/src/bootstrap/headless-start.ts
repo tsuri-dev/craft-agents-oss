@@ -120,10 +120,22 @@ export function generateServerToken(): string {
 // ---------------------------------------------------------------------------
 
 const LOCK_FILE = join(CONFIG_DIR, '.server.lock')
+const CONNECTION_INFO_FILE = join(CONFIG_DIR, '.server.json')
 
 interface LockPayload {
   pid: number
   startedAt: number
+}
+
+export interface ServerConnectionInfo {
+  pid: number
+  startedAt: number
+  url: string
+  token: string
+  protocol: 'ws' | 'wss'
+  host: string
+  port: number
+  serverId: string
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -166,6 +178,59 @@ function isLockFromPreviousBoot(startedAt: number): boolean {
   if (startedAt <= 0) return false // legacy lock without timestamp — can't tell
   const bootTime = Date.now() - osUptime() * 1000
   return startedAt < bootTime
+}
+
+function parseConnectionInfo(raw: string): ServerConnectionInfo | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<ServerConnectionInfo>
+    if (
+      typeof parsed.pid === 'number'
+      && typeof parsed.startedAt === 'number'
+      && typeof parsed.url === 'string'
+      && typeof parsed.token === 'string'
+      && (parsed.protocol === 'ws' || parsed.protocol === 'wss')
+      && typeof parsed.host === 'string'
+      && typeof parsed.port === 'number'
+      && typeof parsed.serverId === 'string'
+    ) {
+      return parsed as ServerConnectionInfo
+    }
+  } catch { /* invalid JSON */ }
+  return null
+}
+
+export function readServerConnectionInfo(): ServerConnectionInfo | null {
+  try {
+    if (!existsSync(CONNECTION_INFO_FILE)) return null
+    const info = parseConnectionInfo(readFileSync(CONNECTION_INFO_FILE, 'utf-8'))
+    if (!info) return null
+    if (!isProcessAlive(info.pid)) return null
+    if (isLockFromPreviousBoot(info.startedAt)) return null
+    return info
+  } catch {
+    return null
+  }
+}
+
+function writeServerConnectionInfo(info: ServerConnectionInfo): void {
+  writeFileSync(CONNECTION_INFO_FILE, JSON.stringify(info), 'utf-8')
+}
+
+export function releaseServerConnectionInfo(): void {
+  try {
+    if (!existsSync(CONNECTION_INFO_FILE)) return
+    const info = parseConnectionInfo(readFileSync(CONNECTION_INFO_FILE, 'utf-8'))
+    if (info && info.pid === process.pid) {
+      unlinkSync(CONNECTION_INFO_FILE)
+    }
+  } catch {
+    // Best-effort cleanup
+  }
+}
+
+function formatConnectHost(host: string): string {
+  const connectHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host
+  return connectHost.includes(':') && !connectHost.startsWith('[') ? `[${connectHost}]` : connectHost
 }
 
 function acquireServerLock(logger: PlatformServices['logger']): void {
@@ -218,6 +283,7 @@ function acquireServerLock(logger: PlatformServices['logger']): void {
  * directly without going through `instance.stop()`.
  */
 export function releaseServerLock(): void {
+  releaseServerConnectionInfo()
   try {
     if (existsSync(LOCK_FILE)) {
       const lock = parseLockContent(readFileSync(LOCK_FILE, 'utf-8'))
@@ -425,6 +491,18 @@ export async function bootstrapServer<TSessionManager, THandlerDeps>(
   await bootstrapStorePackages(platform)
 
   modelRefreshService.startAll()
+
+  const connectHost = formatConnectHost(rpcHost)
+  writeServerConnectionInfo({
+    pid: process.pid,
+    startedAt,
+    url: `${wsServer.protocol}://${connectHost}:${wsServer.port}`,
+    token: serverToken,
+    protocol: wsServer.protocol,
+    host: connectHost,
+    port: wsServer.port,
+    serverId: options.serverId ?? 'headless',
+  })
 
   platform.logger.info(`Craft Agent server listening on ${wsServer.protocol}://${rpcHost}:${wsServer.port}`)
 

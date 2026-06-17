@@ -7,6 +7,7 @@
 
 import { resolve, join } from 'node:path'
 import type { Subprocess } from 'bun'
+import { readServerConnectionInfo } from '@craft-agent/server-core/bootstrap'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,6 +47,22 @@ function findServerEntry(): string {
     'Could not auto-detect server entry. ' +
     'Pass --server-entry or ensure the monorepo layout includes packages/server/src/index.ts',
   )
+}
+
+// ---------------------------------------------------------------------------
+// Existing server discovery
+// ---------------------------------------------------------------------------
+
+export function getRunningServer(): SpawnedServer | null {
+  const info = readServerConnectionInfo()
+  if (!info) return null
+  return {
+    url: info.url,
+    token: info.token,
+    stop: async () => {
+      // Attached server: owned by another process, do not stop it.
+    },
+  }
 }
 
 // ---------------------------------------------------------------------------

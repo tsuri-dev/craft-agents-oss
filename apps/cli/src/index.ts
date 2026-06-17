@@ -1918,6 +1918,12 @@ Commands:
                          --output-format     text or stream-json (default: text)
                          --no-cleanup        Keep session after completion
                          --server-entry      Path to server/index.ts
+  acp                    Run as an ACP stdio server for Zed/ACP clients
+                         --workspace <id>    Force Craft workspace (default: active workspace)
+                         --workspace-dir <path>  Fallback workspace directory
+                         --source <slug>     Enable Craft source for new ACP sessions
+                         --mode <mode>       Permission mode (default: allow-all)
+                         --server-entry      Path to server/index.ts
   ping                   Verify connectivity (clientId + latency)
   health                 Check credential store health
   versions               Show server runtime versions
@@ -1940,6 +1946,7 @@ Examples:
   craft-cli run --source craft-kb "Summarize today's daily note"
   craft-cli run --workspace-dir .github/agents --source craft-public "Read the doc"
   craft-cli run --provider openai --model gpt-4o "Summarize this repo"
+  craft-cli acp
   OPENAI_API_KEY=sk-... craft-cli run --provider openai "Hello"
   GOOGLE_API_KEY=... craft-cli run --provider google --model gemini-2.0-flash "Hello"
   DEEPSEEK_API_KEY=sk-... craft-cli run --provider deepseek --model deepseek-v4-flash "Hello"
@@ -1980,6 +1987,13 @@ export async function main(argv: string[] = process.argv): Promise<void> {
   // run is self-contained — spawns its own server
   if (args.command === 'run') {
     await cmdRun(args)
+    return
+  }
+
+  // ACP is self-contained — Zed launches it as a long-running stdio server.
+  if (args.command === 'acp') {
+    const { runAcpServer } = await import('./acp/server.ts')
+    await runAcpServer(args)
     return
   }
 

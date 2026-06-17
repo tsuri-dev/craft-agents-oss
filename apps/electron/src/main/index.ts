@@ -213,6 +213,8 @@ let browserPaneManager: BrowserPaneManager | null = null
 let oauthFlowStore: OAuthFlowStore | null = null
 let moduleSink: EventSink | null = null
 let moduleClientResolver: ((webContentsId: number) => string | undefined) | null = null
+let bootstrapWsPort: number | null = null
+let bootstrapWsToken = ''
 
 // Messaging gateway: the bootstrap handle is created once sessionManager is
 // available (inside createHandlerDeps) and populated with the WS publisher
@@ -231,8 +233,9 @@ function createWindowForLastFocusedWorkspace(): void {
   if (workspaces.length === 0) return
 
   const savedState = loadWindowState()
-  const wsId = savedState?.lastFocusedWorkspaceId || workspaces[0].id
-  const workspaceId = workspaces.some(ws => ws.id === wsId) ? wsId : workspaces[0].id
+  const activeWorkspaceId = loadStoredConfig()?.activeWorkspaceId ?? undefined
+  const preferredWorkspaceId = savedState?.lastFocusedWorkspaceId || activeWorkspaceId || workspaces[0].id
+  const workspaceId = workspaces.some(ws => ws.id === preferredWorkspaceId) ? preferredWorkspaceId : workspaces[0].id
   windowManager.createWindow({ workspaceId })
 }
 
@@ -376,6 +379,7 @@ async function createInitialWindows(): Promise<void> {
   }
 
   const validWorkspaceIds = workspaces.map(ws => ws.id)
+  const activeWorkspaceId = loadStoredConfig()?.activeWorkspaceId ?? undefined
 
   if (savedState?.windows.length) {
     // Restore windows from saved state
@@ -403,9 +407,10 @@ async function createInitialWindows(): Promise<void> {
     }
   }
 
-  // Default: open window for first workspace
-  windowManager.createWindow({ workspaceId: workspaces[0].id })
-  mainLog.info(`Created window for first workspace: ${workspaces[0].name}`)
+  // Default: open the active workspace when available; otherwise fall back to the first workspace.
+  const startupWorkspace = workspaces.find(ws => ws.id === activeWorkspaceId) ?? workspaces[0]
+  windowManager.createWindow({ workspaceId: startupWorkspace.id })
+  mainLog.info(`Created window for startup workspace: ${startupWorkspace.name}`)
 }
 
 app.whenReady().then(async () => {
@@ -525,6 +530,18 @@ app.whenReady().then(async () => {
     })
     ipcMain.on('__get-workspace-id', (e) => {
       e.returnValue = windowManager?.getWorkspaceForWindow(e.sender.id) ?? ''
+    })
+    ipcMain.on('__get-ws-port', (e) => {
+      e.returnValue = bootstrapWsPort ?? 0
+    })
+    ipcMain.on('__get-ws-token', (e) => {
+      e.returnValue = bootstrapWsToken
+    })
+    ipcMain.on('__get-workspace-remote-config', (e) => {
+      const wsId = windowManager?.getWorkspaceForWindow(e.sender.id)
+      if (!wsId) { e.returnValue = null; return }
+      const ws = getWorkspaceByNameOrId(wsId)
+      e.returnValue = ws?.remoteServer ?? null
     })
 
     // Transport diagnostics bridge — preload reports remote WS connection state changes
@@ -756,6 +773,9 @@ app.whenReady().then(async () => {
         },
       })
 
+      bootstrapWsPort = instance.port
+      bootstrapWsToken = instance.token
+
       // Capture module-level references for before-quit cleanup and deep-link handlers
       sessionManager = instance.sessionManager
       oauthFlowStore = instance.oauthFlowStore
@@ -957,19 +977,6 @@ app.whenReady().then(async () => {
         })
         const { rebuildMenu } = await import('./menu')
         await rebuildMenu()
-      })
-
-      ipcMain.on('__get-ws-port', (e) => {
-        e.returnValue = instance.port
-      })
-      ipcMain.on('__get-ws-token', (e) => {
-        e.returnValue = instance.token
-      })
-      ipcMain.on('__get-workspace-remote-config', (e) => {
-        const wsId = windowManager?.getWorkspaceForWindow(e.sender.id)
-        if (!wsId) { e.returnValue = null; return }
-        const ws = getWorkspaceByNameOrId(wsId)
-        e.returnValue = ws?.remoteServer ?? null
       })
 
       // Server config RPC handlers (LOCAL_ONLY — Electron-specific)
