@@ -44,7 +44,7 @@ Priority order:
 4. Create a fallback workspace from the Zed `cwd` when needed
 5. First available workspace
 
-New ACP sessions are labelled `zed`. `session/list` returns `zed`-labelled sessions for the active workspace so Zed history stays focused on editor-created conversations.
+New ACP sessions are labelled `zed`. `session/list` returns all non-hidden sessions in the active Craft workspace so Zed can import existing Craft conversations, not only sessions originally created from Zed.
 
 ## Server attachment
 
@@ -94,12 +94,35 @@ Notes:
 
 ## History / continue previous sessions
 
-Zed can discover previous Craft ACP sessions through `session/list`, then continue them with either:
+Zed can discover previous Craft sessions through `session/list`, then continue them with either:
 
 - `session/load` — replays the conversation history into Zed first
 - `session/resume` — reconnects without replaying history
 
+Zed's Thread History import flow calls `session/list`. The adapter returns all non-hidden sessions in the active Craft workspace, sorted by recent activity. Each imported entry includes a `cwd`: the session working directory when present, otherwise the Craft workspace root.
+
+New sessions created from Zed are still labelled `zed`, but the label is not required for import.
+
 The loaded/resumed Craft session keeps using the Zed-provided `cwd` as its working directory.
+
+## Craft sources and skills from Zed
+
+Zed's External Agent UI does not expose Craft's source/skill picker. Use Craft bracket mentions directly in the prompt:
+
+```text
+[source:tapd-openapi-docs] 查一下 comment add API
+[skill:brainstorming] 帮我拆一下方案
+```
+
+Supported mention forms:
+
+- `[source:<slug>]`
+- `[skill:<slug>]`
+- `[file:<path>]`
+- `[folder:<path>]`
+- `[agent:<id>]`
+
+Repeat `--source <slug>` in the Zed custom agent config to pre-enable sources for every new ACP session. Bracket mentions are still useful for explicit per-message context and for skills.
 
 ## Selection context
 

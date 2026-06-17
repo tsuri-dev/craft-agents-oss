@@ -38,6 +38,7 @@ interface AcpSessionRecord {
   workspaceId: string
   cwd: string
   permissionMode: CraftPermissionMode
+  enabledSourceSlugs: string[]
 }
 
 type CraftPermissionMode = 'safe' | 'ask' | 'allow-all'
@@ -66,6 +67,7 @@ interface CraftSessionSummary {
   permissionMode?: string
   hidden?: boolean
   isArchived?: boolean
+  enabledSourceSlugs?: string[]
 }
 
 interface CraftSessionWithMessages extends CraftSessionSummary {
@@ -116,6 +118,7 @@ export class CraftAcpAdapter {
       workspaceId,
       cwd,
       permissionMode,
+      enabledSourceSlugs: [...this.options.sources],
     }
     this.sessions.set(record.acpSessionId, record)
 
@@ -129,15 +132,12 @@ export class CraftAcpAdapter {
     const client = await this.ensureClient()
     const workspaceId = await this.resolveWorkspace(request.cwd ? resolve(request.cwd) : undefined, { allowCreate: false })
     const workspace = await this.getWorkspace(workspaceId)
-    const cwdFilter = request.cwd ? normalizePath(request.cwd) : undefined
     const cursorOffset = decodeCursor(request.cursor)
 
     const rawSessions = await client.invoke('sessions:get')
     const sessions = Array.isArray(rawSessions) ? rawSessions as CraftSessionSummary[] : []
     const filtered = sessions
       .filter(session => !session.hidden)
-      .filter(session => session.labels?.includes(ZED_LABEL_ID))
-      .filter(session => !cwdFilter || normalizePath(session.workingDirectory) === cwdFilter)
       .sort(compareSessionsByRecentActivity)
 
     const page = filtered.slice(cursorOffset, cursorOffset + SESSION_LIST_PAGE_SIZE)
@@ -163,6 +163,7 @@ export class CraftAcpAdapter {
     const client = await this.ensureClient()
     const record = this.getSession(request.sessionId)
     const message = promptBlocksToCraftMessage(request.prompt)
+    const mentions = extractCraftMentions(message)
 
     let finished = false
     let stopReason: AcpPromptResponse['stopReason'] = 'end_turn'
@@ -203,7 +204,19 @@ export class CraftAcpAdapter {
     })
 
     try {
-      await client.invoke('sessions:sendMessage', record.craftSessionId, message)
+      if (mentions.sources.length > 0) {
+        const sourceSlugs = uniqueStrings([...record.enabledSourceSlugs, ...mentions.sources])
+        await client.invoke('sessions:command', record.craftSessionId, { type: 'setSources', sourceSlugs }).catch((error) => {
+          this.callbacks.log?.(`source mention setup skipped: ${error instanceof Error ? error.message : String(error)}`)
+        })
+        record.enabledSourceSlugs = sourceSlugs
+      }
+
+      if (mentions.skills.length > 0) {
+        await client.invoke('sessions:sendMessage', record.craftSessionId, message, undefined, undefined, { skillSlugs: mentions.skills })
+      } else {
+        await client.invoke('sessions:sendMessage', record.craftSessionId, message)
+      }
       return await result
     } catch (error) {
       finished = true
@@ -389,6 +402,7 @@ export class CraftAcpAdapter {
       workspaceId,
       cwd,
       permissionMode,
+      enabledSourceSlugs: [...(session.enabledSourceSlugs ?? [])],
     }
     this.sessions.set(record.acpSessionId, record)
     return { session, record }
@@ -420,6 +434,30 @@ function readLocalActiveWorkspaceId(): string | undefined {
   } catch {
     return undefined
   }
+}
+
+function extractCraftMentions(message: string): { sources: string[]; skills: string[] } {
+  const sources: string[] = []
+  const sourcePattern = /\[source:([\w-]+)\]/g
+  let match: RegExpExecArray | null
+  while ((match = sourcePattern.exec(message)) !== null) {
+    sources.push(match[1]!)
+  }
+
+  const skills: string[] = []
+  const skillPattern = /\[skill:(?:[\w .-]+:)?([\w-]+)\]/g
+  while ((match = skillPattern.exec(message)) !== null) {
+    skills.push(match[1]!)
+  }
+
+  return {
+    sources: uniqueStrings(sources),
+    skills: uniqueStrings(skills),
+  }
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))]
 }
 
 function labelTreeHasId(value: unknown, id: string): boolean {

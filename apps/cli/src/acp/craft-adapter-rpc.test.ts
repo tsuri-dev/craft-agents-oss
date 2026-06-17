@@ -22,6 +22,7 @@ interface MockSession {
   name?: string
   labels?: string[]
   workingDirectory?: string
+  hidden?: boolean
   lastUsedAt?: number
   lastMessageAt?: number
   createdAt?: number
@@ -207,6 +208,34 @@ describe('Craft ACP adapter RPC bridge', () => {
     await adapter.dispose()
   })
 
+  it('bridges Craft source and skill bracket mentions from Zed prompts', async () => {
+    const adapter = createAdapter(mockServer, {
+      sources: ['existing-source'],
+      mode: 'ask',
+    })
+
+    const session = await adapter.newSession({ cwd: tmpRoot, mcpServers: [] })
+    const result = await adapter.prompt({
+      sessionId: session.sessionId,
+      prompt: [{ type: 'text', text: '[source:tapd-openapi-docs] [skill:brainstorming] Do it' }],
+    })
+
+    expect(result.stopReason).toBe('end_turn')
+    expect(mockServer.invokeArgs['sessions:command']?.[0]).toEqual([
+      'craft-session-1',
+      { type: 'setSources', sourceSlugs: ['existing-source', 'tapd-openapi-docs'] },
+    ])
+    expect(mockServer.invokeArgs['sessions:sendMessage']?.[0]).toEqual([
+      'craft-session-1',
+      '[source:tapd-openapi-docs] [skill:brainstorming] Do it',
+      null,
+      null,
+      { skillSlugs: ['brainstorming'] },
+    ])
+
+    await adapter.dispose()
+  })
+
   it('prefers the locally active Craft workspace over Zed cwd workspace mapping', async () => {
     process.env.CRAFT_CONFIG_DIR = tmpConfigDir
     writeFileSync(join(tmpConfigDir, 'config.json'), JSON.stringify({ activeWorkspaceId: 'ws-active', workspaces: [] }), 'utf8')
@@ -246,23 +275,26 @@ describe('Craft ACP adapter RPC bridge', () => {
     await adapter.dispose()
   })
 
-  it('lists only zed-labelled sessions in the current workspace', async () => {
+  it('lists all non-hidden sessions in the current workspace for Zed import', async () => {
     const now = Date.now()
     mockServer.close()
     mockServer = createMockCraftServer({
       workspaces: [{ id: 'ws-active', rootPath: '/repo' }],
       sessions: [
         { id: 's-1', name: 'From Zed', labels: ['zed'], workingDirectory: tmpRoot, lastUsedAt: now, messageCount: 2 },
-        { id: 's-2', name: 'Other', labels: ['manual'], workingDirectory: tmpRoot, lastUsedAt: now + 1, messageCount: 1 },
+        { id: 's-2', name: 'Existing Craft Session', labels: ['manual'], workingDirectory: '/other/project', lastUsedAt: now + 1, messageCount: 1 },
+        { id: 's-hidden', name: 'Hidden', labels: ['zed'], workingDirectory: tmpRoot, hidden: true, lastUsedAt: now + 2 },
       ],
     })
 
     const adapter = createAdapter(mockServer, { workspace: 'ws-active' })
     const result = await adapter.listSessions({ cwd: tmpRoot })
 
-    expect(result.sessions.map(s => s.sessionId)).toEqual(['s-1'])
-    expect(result.sessions[0]?.title).toBe('From Zed')
-    expect(result.sessions[0]?._meta?.labels).toEqual(['zed'])
+    expect(result.sessions.map(s => s.sessionId)).toEqual(['s-2', 's-1'])
+    expect(result.sessions[0]?.title).toBe('Existing Craft Session')
+    expect(result.sessions[0]?.cwd).toBe('/other/project')
+    expect(result.sessions[0]?._meta?.labels).toEqual(['manual'])
+    expect(result.sessions[1]?._meta?.labels).toEqual(['zed'])
 
     await adapter.dispose()
   })
