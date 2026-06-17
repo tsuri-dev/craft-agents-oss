@@ -192,6 +192,8 @@ interface AppShellProps {
   menuNewChatTrigger?: number
   /** Focused mode - hides sidebars, shows only the chat content */
   isFocusedMode?: boolean
+  /** Focus the active chat input once after the initial focused window route is ready */
+  shouldFocusInputOnOpen?: boolean
 }
 
 /** Filter mode for tri-state filtering: include shows only matching, exclude hides matching */
@@ -555,6 +557,7 @@ function AppShellContent({
   defaultCollapsed = false,
   menuNewChatTrigger,
   isFocusedMode = false,
+  shouldFocusInputOnOpen = false,
 }: AppShellProps) {
   // Destructure commonly used values from context
   // Note: sessions is NOT destructured here - we use sessionMetaMapAtom instead
@@ -1260,6 +1263,13 @@ function AppShellContent({
     if (!targetSessionId) return
     dispatchFocusInputEvent({ sessionId: targetSessionId })
   }, [])
+
+  const didInitialFocusInputRef = React.useRef(false)
+  React.useEffect(() => {
+    if (!shouldFocusInputOnOpen || didInitialFocusInputRef.current || !effectiveSessionId) return
+    didInitialFocusInputRef.current = true
+    window.setTimeout(() => focusChatInputForSession(effectiveSessionId), 150)
+  }, [shouldFocusInputOnOpen, effectiveSessionId, focusChatInputForSession])
 
   useAction('chat.cyclePermissionMode', () => {
     if (effectiveSessionId) {

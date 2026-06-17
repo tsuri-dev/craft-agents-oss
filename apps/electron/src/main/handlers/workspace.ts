@@ -107,6 +107,7 @@ export function registerWorkspaceGuiHandlers(server: RpcServer, deps: HandlerDep
       workspaceId,
       focused: true,
       initialDeepLink: deepLink,
+      focusInput: true,
     })
   })
 

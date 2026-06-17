@@ -17,10 +17,14 @@ function buildInitialWindowQuery(
   workspaceId: string,
   focused: boolean,
   initialDeepLink?: string,
+  focusInput?: boolean,
 ): Record<string, string> {
   const query: Record<string, string> = { workspaceId }
   if (focused) {
     query.focused = 'true'
+  }
+  if (focusInput) {
+    query.focusInput = 'true'
   }
 
   if (initialDeepLink) {
@@ -78,6 +82,8 @@ export interface CreateWindowOptions {
   initialDeepLink?: string
   /** Full URL to restore from saved state (preserves route/query params) */
   restoreUrl?: string
+  /** Focus the chat input after the initial route is ready */
+  focusInput?: boolean
 }
 
 export class WindowManager {
@@ -220,7 +226,7 @@ export class WindowManager {
    * @param options - Window creation options
    */
   createWindow(options: CreateWindowOptions): BrowserWindow {
-    const { workspaceId, focused = false, initialDeepLink, restoreUrl } = options
+    const { workspaceId, focused = false, initialDeepLink, restoreUrl, focusInput = false } = options
 
     // Load platform-specific app icon
     // In packaged app, resources are at dist/resources/ (same level as __dirname)
@@ -364,7 +370,7 @@ export class WindowManager {
         } catch {
           // Fallback if URL parsing fails
           windowLog.warn('Failed to parse restoreUrl, using default:', restoreUrl)
-          const params = new URLSearchParams(buildInitialWindowQuery(workspaceId, focused, initialDeepLink)).toString()
+          const params = new URLSearchParams(buildInitialWindowQuery(workspaceId, focused, initialDeepLink, focusInput)).toString()
           window.loadURL(`${VITE_DEV_SERVER_URL}?${params}`)
         }
       } else {
@@ -377,12 +383,12 @@ export class WindowManager {
           savedUrl.searchParams.forEach((value, key) => { query[key] = value })
           window.loadFile(join(__dirname, 'renderer/index.html'), { query })
         } catch {
-          window.loadFile(join(__dirname, 'renderer/index.html'), { query: buildInitialWindowQuery(workspaceId, focused, initialDeepLink) })
+          window.loadFile(join(__dirname, 'renderer/index.html'), { query: buildInitialWindowQuery(workspaceId, focused, initialDeepLink, focusInput) })
         }
       }
     } else {
       // Build URL from options
-      const query = buildInitialWindowQuery(workspaceId, focused, initialDeepLink)
+      const query = buildInitialWindowQuery(workspaceId, focused, initialDeepLink, focusInput)
 
       if (VITE_DEV_SERVER_URL) {
         const params = new URLSearchParams(query).toString()
@@ -403,11 +409,11 @@ export class WindowManager {
         failLoadRetries++
         windowLog.info(`Retrying Vite dev server (attempt ${failLoadRetries}/5)...`)
         setTimeout(() => {
-          const params = new URLSearchParams(buildInitialWindowQuery(workspaceId, focused, initialDeepLink)).toString()
+          const params = new URLSearchParams(buildInitialWindowQuery(workspaceId, focused, initialDeepLink, focusInput)).toString()
           window.loadURL(`${VITE_DEV_SERVER_URL}?${params}`)
         }, 1000)
       } else {
-        window.loadFile(join(__dirname, 'renderer/index.html'), { query: buildInitialWindowQuery(workspaceId, focused, initialDeepLink) })
+        window.loadFile(join(__dirname, 'renderer/index.html'), { query: buildInitialWindowQuery(workspaceId, focused, initialDeepLink, focusInput) })
       }
     })
 

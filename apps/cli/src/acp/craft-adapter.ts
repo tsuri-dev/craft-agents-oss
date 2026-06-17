@@ -105,6 +105,7 @@ interface CraftSkillSummary {
 }
 
 type AcpPromptCommand =
+  | { kind: 'open-craft' }
   | { kind: 'list-sources' }
   | { kind: 'list-skills' }
   | { kind: 'use-source'; slug: string; prompt: string }
@@ -194,6 +195,12 @@ export class CraftAcpAdapter {
     const record = this.getSession(request.sessionId)
     const rawMessage = promptBlocksToCraftMessage(request.prompt)
     const command = parsePromptCommand(rawMessage)
+
+    if (command?.kind === 'open-craft') {
+      await client.invoke('window:openSessionInNewWindow', record.workspaceId, record.craftSessionId)
+      this.notifyLocalAssistantMessage(record.acpSessionId, 'Opened this session in a focused Craft Agent window.')
+      return { stopReason: 'end_turn' }
+    }
 
     if (command?.kind === 'list-sources') {
       this.notifyLocalAssistantMessage(record.acpSessionId, await this.formatSourcesList(record.workspaceId))
@@ -554,6 +561,7 @@ function readLocalActiveWorkspaceId(): string | undefined {
 
 function parsePromptCommand(message: string): AcpPromptCommand {
   const trimmed = message.trim()
+  if (trimmed === '/craft') return { kind: 'open-craft' }
   if (trimmed === '/sources') return { kind: 'list-sources' }
   if (trimmed === '/skills') return { kind: 'list-skills' }
 

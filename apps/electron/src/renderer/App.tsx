@@ -273,12 +273,13 @@ export default function App() {
     return workspace?.slug ?? windowWorkspaceId
   }, [windowWorkspaceId, workspaces])
 
-  // Get initial sessionId and focused mode from URL params (for "Open in New Window" feature)
-  const { initialSessionId, isFocusedMode } = useMemo(() => {
+  // Get initial sessionId, focused mode, and initial input focus from URL params (for "Open in New Window" feature)
+  const { initialSessionId, isFocusedMode, shouldFocusInputOnOpen } = useMemo(() => {
     const params = new URLSearchParams(window.location.search)
     return {
       initialSessionId: params.get('sessionId'),
       isFocusedMode: params.get('focused') === 'true',
+      shouldFocusInputOnOpen: params.get('focusInput') === 'true',
     }
   }, [])
 
@@ -2045,6 +2046,7 @@ export default function App() {
                   defaultLayout={[20, 32, 48]}
                   menuNewChatTrigger={menuNewChatTrigger}
                   isFocusedMode={isFocusedMode}
+                  shouldFocusInputOnOpen={shouldFocusInputOnOpen}
                 />
               )}
             </div>

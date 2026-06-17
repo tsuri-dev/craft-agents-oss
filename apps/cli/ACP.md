@@ -110,6 +110,7 @@ The loaded/resumed Craft session keeps using the Zed-provided `cwd` as its worki
 Zed's External Agent UI does not expose Craft's source/skill picker. Use the adapter's helper commands or Craft bracket mentions directly in the prompt:
 
 ```text
+/craft
 /sources
 /skills
 /use-source tapd-openapi-docs 查一下 comment add API
@@ -118,7 +119,7 @@ Zed's External Agent UI does not expose Craft's source/skill picker. Use the ada
 [skill:brainstorming] 帮我拆一下方案
 ```
 
-`/sources` and `/skills` are handled locally by the ACP adapter and do not call the model. `/use-source` and `/use-skill` are rewritten to bracket mentions before sending the prompt to Craft.
+`/craft` opens the current ACP-backed Craft session in a focused Craft Agent window. `/sources` and `/skills` are handled locally by the ACP adapter and do not call the model. `/use-source` and `/use-skill` are rewritten to bracket mentions before sending the prompt to Craft.
 
 Supported mention forms:
 

@@ -105,6 +105,9 @@ function createMockCraftServer(opts?: {
           case 'sessions:command':
             ws.send(serializeEnvelope({ id: envelope.id, type: 'response', channel, result: { ok: true } }))
             break
+          case 'window:openSessionInNewWindow':
+            ws.send(serializeEnvelope({ id: envelope.id, type: 'response', channel, result: { ok: true } }))
+            break
           case 'sessions:create':
             ws.send(serializeEnvelope({ id: envelope.id, type: 'response', channel, result: { id: 'craft-session-1' } }))
             break
@@ -214,6 +217,27 @@ describe('Craft ACP adapter RPC bridge', () => {
         content: { type: 'text', text: 'Hello from Craft' },
       },
     })
+
+    await adapter.dispose()
+  })
+
+  it('opens the current Craft session in a focused Craft window with /craft', async () => {
+    const updates: Array<{ sessionId: string; update: Record<string, unknown> }> = []
+    const adapter = createAdapter(mockServer, { workspace: 'ws-active', mode: 'ask' }, updates)
+
+    const session = await adapter.newSession({ cwd: tmpRoot, mcpServers: [] })
+    const result = await adapter.prompt({ sessionId: session.sessionId, prompt: [{ type: 'text', text: '/craft' }] })
+
+    expect(result.stopReason).toBe('end_turn')
+    expect(mockServer.invokeArgs['window:openSessionInNewWindow']?.[0]).toEqual(['ws-active', 'craft-session-1'])
+    expect(updates.at(-1)).toMatchObject({
+      sessionId: 'craft-session-1',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'Opened this session in a focused Craft Agent window.' },
+      },
+    })
+    expect(mockServer.invokeArgs['sessions:sendMessage']).toBeUndefined()
 
     await adapter.dispose()
   })
