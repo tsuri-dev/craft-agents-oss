@@ -790,15 +790,107 @@ function isBlobResource(resource: unknown): resource is { uri: string; blob: str
 }
 
 function formatTextResource(uri: string, text: string, mimeType?: string): string {
-  const path = fileUriToPath(uri) ?? uri
-  const language = mimeTypeToFenceLanguage(mimeType, path)
+  const metadata = parseResourceReference(uri)
+  const language = mimeTypeToFenceLanguage(mimeType, metadata.path)
   return [
-    `Context resource: ${path}`,
+    `Context resource: ${metadata.path}`,
+    metadata.lineRange ? `Range: ${metadata.lineRange}` : '',
+    metadata.symbol ? `Symbol: ${metadata.symbol}` : '',
+    metadata.column ? `Column: ${metadata.column}` : '',
     mimeType ? `MIME type: ${mimeType}` : '',
     `\`\`\`${language}`,
     text,
     '```',
   ].filter(Boolean).join('\n')
+}
+
+interface ResourceReferenceMetadata {
+  path: string
+  lineRange?: string
+  symbol?: string
+  column?: string
+}
+
+function parseResourceReference(uri: string): ResourceReferenceMetadata {
+  try {
+    const url = new URL(uri)
+    const lineRange = parseLineRange(url.hash) ?? parseLineRangeFromSearchParams(url.searchParams)
+    const path = resourceUrlToDisplayPath(url) ?? stripResourceRangeFragment(uri)
+    return {
+      path,
+      ...(lineRange ? { lineRange } : {}),
+      ...symbolParam(url.searchParams),
+      ...columnParam(url.searchParams),
+    }
+  } catch {
+    return { path: fileUriToPath(uri) ?? uri }
+  }
+}
+
+function resourceUrlToDisplayPath(url: URL): string | null {
+  const pathParam = url.searchParams.get('path')
+  if (pathParam) return pathParam
+
+  if (url.protocol === 'file:') {
+    return decodeURIComponent(url.pathname)
+  }
+
+  return null
+}
+
+function stripResourceRangeFragment(uri: string): string {
+  try {
+    const url = new URL(uri)
+    if (parseLineRange(url.hash)) {
+      url.hash = ''
+      return url.toString()
+    }
+  } catch {
+    // Fall through to the original URI.
+  }
+  return uri
+}
+
+function parseLineRange(hash: string | undefined): string | undefined {
+  if (!hash) return undefined
+  const fragment = decodeURIComponent(hash.replace(/^#/, '')).trim()
+  const match = /^L(\d+)(?:(?::|-L?)(\d+))?$/i.exec(fragment)
+  if (!match) return undefined
+
+  const start = Number.parseInt(match[1]!, 10)
+  const end = match[2] ? Number.parseInt(match[2], 10) : undefined
+  if (!Number.isFinite(start) || start <= 0) return undefined
+  if (end === undefined || end === start) return `L${start}`
+  if (!Number.isFinite(end) || end <= 0) return undefined
+  return `L${start}-L${end}`
+}
+
+function parseLineRangeFromSearchParams(params: URLSearchParams): string | undefined {
+  const start = firstPositiveIntegerParam(params, 'startLine', 'start_line', 'line')
+  const end = firstPositiveIntegerParam(params, 'endLine', 'end_line')
+  if (!start) return undefined
+  if (!end || end === start) return `L${start}`
+  return `L${start}-L${end}`
+}
+
+function firstPositiveIntegerParam(params: URLSearchParams, ...names: string[]): number | undefined {
+  for (const name of names) {
+    const raw = params.get(name)
+    if (!raw) continue
+    const value = Number.parseInt(raw, 10)
+    if (Number.isFinite(value) && value > 0) return value
+  }
+  return undefined
+}
+
+function symbolParam(params: URLSearchParams): Partial<Pick<ResourceReferenceMetadata, 'symbol'>> {
+  const value = params.get('symbol') ?? params.get('name')
+  return value ? { symbol: value } : {}
+}
+
+function columnParam(params: URLSearchParams): Partial<Pick<ResourceReferenceMetadata, 'column'>> {
+  const value = params.get('column')
+  return value ? { column: value } : {}
 }
 
 function fileUriToPath(uri: string): string | null {

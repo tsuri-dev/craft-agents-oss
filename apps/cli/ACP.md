@@ -139,15 +139,19 @@ Zed can add selected code to an External Agent thread via:
 - `cmd->` / `ctrl->`
 - the `+` menu in the Agent Panel message editor
 
-Zed sends selected text as ACP embedded resources. The adapter converts each text resource into Craft prompt context:
+Zed sends selected text as ACP embedded resources. The adapter converts each text resource into Craft prompt context and preserves Zed selection/symbol URI metadata when present:
 
 ````md
 Context resource: /path/to/file.ts
+Range: L42-L60
+Symbol: renderCard
 MIME type: text/typescript
 ```ts
 selected code...
 ```
 ````
+
+Recognized Zed URI forms include `file:///path/to/file.ts#L42:60`, `file:///path/to/file.ts?symbol=renderCard#L42-L60`, and `zed:///agent/selection?path=/path/to/file.ts#L42-L60`.
 
 ## Smoke test
 
