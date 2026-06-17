@@ -119,6 +119,15 @@ describe('PendingSendersStore', () => {
     expect(b.list()[0]!.displayName).toBe('Alex')
   })
 
+  it('persists WeChat pending senders across instances', () => {
+    const a = new PendingSendersStore(dir)
+    a.recordRejection({ platform: 'wechat', senderId: 'wx-user', senderName: 'Wei' })
+    const b = new PendingSendersStore(dir)
+    expect(b.list('wechat')).toHaveLength(1)
+    expect(b.list('wechat')[0]!.userId).toBe('wx-user')
+    expect(b.list('wechat')[0]!.displayName).toBe('Wei')
+  })
+
   it('writes valid JSON to disk', () => {
     const store = new PendingSendersStore(dir)
     store.recordRejection({ platform: 'telegram', senderId: '999' })
