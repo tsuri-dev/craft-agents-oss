@@ -154,7 +154,7 @@ fi
 # We copy it here because electron-builder only sees apps/electron/.
 #
 # Since SDK 0.2.113 the SDK split into a thin core + per-platform binary
-# package (see plans/sdk-uplift-plan.md). We bundle:
+# package. We bundle:
 #   1. The core (`claude-agent-sdk`) — universal sdk.mjs + types.
 #   2. The matching arch's binary package, copied to a stable alias path
 #      `claude-agent-sdk-binary/` so the electron-builder.yml entry stays
@@ -234,7 +234,7 @@ chmod +x "$ELECTRON_DIR/node_modules/@vscode/ripgrep/bin/rg"
 #    Bun's --preload, so the Claude code path no longer uses these. They're
 #    still needed for the **Pi** subprocess (runs on Bun, accepts --preload).
 #    Phase 2 will reintroduce equivalent functionality for Claude via SDK
-#    hooks or a local proxy. See plans/sdk-uplift-plan.md.
+#    hooks or a local proxy.
 INTERCEPTOR_SOURCE="$ROOT_DIR/packages/shared/src/unified-network-interceptor.ts"
 require_path "$INTERCEPTOR_SOURCE" "Interceptor" "Ensure packages/shared/src/unified-network-interceptor.ts exists."
 echo "Copying interceptor (for Pi subprocess)..."
