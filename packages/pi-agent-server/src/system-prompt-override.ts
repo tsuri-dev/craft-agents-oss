@@ -12,8 +12,8 @@ import type { AgentSession } from '@earendil-works/pi-coding-agent';
  * This stamps all three internals — `state.systemPrompt`, `_baseSystemPrompt`,
  * and `_rebuildSystemPrompt` — so our prompt survives every reset path.
  *
- * Pattern matches OpenClaw's `applySystemPromptOverrideToSession` (same SDK,
- * same constraint): https://github.com/openclaw/openclaw/blob/main/src/agents/pi-embedded-runner/system-prompt.ts
+ * This mirrors the SDK-internal override pattern required until Pi exposes
+ * a public per-turn system-prompt API.
  *
  * Remove once the SDK exposes a public per-turn system-prompt API.
  */

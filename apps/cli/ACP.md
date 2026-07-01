@@ -111,6 +111,8 @@ Zed's External Agent UI does not expose Craft's source/skill picker. Use the ada
 
 ```text
 /craft
+/bind
+/bind 1
 /sources
 /skills
 /use-source tapd-openapi-docs 查一下 comment add API
@@ -119,7 +121,7 @@ Zed's External Agent UI does not expose Craft's source/skill picker. Use the ada
 [skill:brainstorming] 帮我拆一下方案
 ```
 
-The adapter advertises these as ACP slash commands via `available_commands_update`, so Zed accepts them in the External Agent input box. `/craft` opens the current ACP-backed Craft session in a focused Craft Agent window. `/sources` and `/skills` are handled locally by the ACP adapter and do not call the model. `/use-source` and `/use-skill` are rewritten to bracket mentions before sending the prompt to Craft.
+The adapter advertises these as ACP slash commands via `available_commands_update`, so Zed accepts them in the External Agent input box. `/craft` opens the current ACP-backed Craft session in a focused Craft Agent window. `/bind` lists the 10 most recent non-hidden Craft sessions available to the adapter; `/bind <number>` binds the current Zed thread to one of those sessions so future messages continue that Craft conversation. `/sources` and `/skills` are handled locally by the ACP adapter and do not call the model. `/use-source` and `/use-skill` are rewritten to bracket mentions before sending the prompt to Craft.
 
 Supported mention forms:
 

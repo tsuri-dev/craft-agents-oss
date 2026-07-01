@@ -376,7 +376,6 @@ const SETTINGS_ICONS: Record<SettingsSubpage, string> = {
   usage: 'BarChart3',
   permissions: 'ShieldCheck',
   labels: 'Tag',
-  messaging: 'MessageSquare',
   server: 'Server',
   shortcuts: 'Keyboard',
   preferences: 'UserCircle',

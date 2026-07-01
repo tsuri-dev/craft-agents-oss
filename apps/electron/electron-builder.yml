@@ -114,9 +114,6 @@ mac:
     # ripgrep (used by packages/server-core/src/services/search.ts).
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
-    # WhatsApp worker subprocess (self-contained; Baileys bundled in).
-    - from: ../../packages/messaging-whatsapp-worker/dist/worker.cjs
-      to: messaging-whatsapp-worker/worker.cjs
   # Exclude binaries for other platforms
   files:
     - "!**/resources/bin/win32-*/**"
@@ -179,9 +176,6 @@ win:
       to: vendor/bun/bun.exe
     - from: resources/bin/win32-x64
       to: app/resources/bin/win32-x64
-    # WhatsApp worker subprocess (self-contained; Baileys bundled in).
-    - from: ../../packages/messaging-whatsapp-worker/dist/worker.cjs
-      to: messaging-whatsapp-worker/worker.cjs
 
 nsis:
   oneClick: true
@@ -206,9 +200,6 @@ linux:
       to: app/node_modules/@anthropic-ai/claude-agent-sdk-binary
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
-    # WhatsApp worker subprocess (self-contained; Baileys bundled in).
-    - from: ../../packages/messaging-whatsapp-worker/dist/worker.cjs
-      to: messaging-whatsapp-worker/worker.cjs
   # Exclude binaries for other platforms
   files:
     - "!**/resources/bin/darwin-*/**"

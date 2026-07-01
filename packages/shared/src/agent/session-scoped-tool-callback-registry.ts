@@ -75,10 +75,6 @@ export interface SessionScopedToolCallbacks {
     reason?: string;
     availability?: 'immediate' | 'next-turn';
   }>;
-  /** Get messaging bindings for a session. */
-  getMessagingBindingsFn?: (sessionId: string) => Array<{ platform: string; channelId: string; threadId?: number; channelName?: string; enabled: boolean }>;
-  /** Unbind messaging channels from a session. Returns count of removed bindings. */
-  unbindMessagingChannelFn?: (sessionId: string, platform?: string) => number;
 }
 
 // Registry of callbacks keyed by sessionId

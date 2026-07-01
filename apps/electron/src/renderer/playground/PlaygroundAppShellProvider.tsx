@@ -2,7 +2,7 @@
  * PlaygroundAppShellProvider
  *
  * Minimal stand-in for the real AppShellProvider so components that rely on
- * `useActiveWorkspace()` / `useAppShellContext()` (e.g. MessagingSettingsPage)
+ * `useActiveWorkspace()` / `useAppShellContext()`
  * can render inside the playground without the full app shell wiring.
  *
  * All callbacks are no-op logging stubs — interactions just go to the console.

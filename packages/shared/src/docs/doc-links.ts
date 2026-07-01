@@ -19,7 +19,6 @@ export type DocFeature =
   | 'app-settings'
   | 'preferences'
   | 'automations'
-  | 'messaging'
 
 export interface DocInfo {
   /** Path relative to DOC_BASE_URL */
@@ -108,12 +107,6 @@ export const DOCS: Record<DocFeature, DocInfo> = {
     title: 'Automations',
     summary:
       'Automate actions when events occur — run commands on schedules, react to label changes, or trigger prompts. Configured in automations.json.',
-  },
-  messaging: {
-    path: '/messaging/overview',
-    title: 'Messaging',
-    summary:
-      'Connect a session to a chat platform — Telegram, WhatsApp, or Lark / Feishu — and reach your agent from anywhere. Pair workspace supergroups, route automations to forum topics, and send rich replies natively.',
   },
 }
 

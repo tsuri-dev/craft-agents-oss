@@ -85,7 +85,7 @@ export interface ISessionManager {
   updateSessionModel(sessionId: string, workspaceId: string, model: string | null, connection?: string): Promise<void>
 
   // ---------------------------------------------------------------------------
-  // Messaging
+  // Session message handling
   // ---------------------------------------------------------------------------
 
   sendMessage(
@@ -141,8 +141,8 @@ export interface ISessionManager {
    * If the session is in Explore (safe) mode, also switches it to allow-all
    * so the plan can actually run without per-tool prompts.
    *
-   * Used by the messaging gateway so Telegram/WhatsApp accept buttons produce
-   * the same server-side effect as the desktop accept button.
+   * Used by non-desktop clients so plan approvals produce the same
+   * server-side effect as the desktop accept button.
    */
   acceptPlan(sessionId: string, planPath?: string): Promise<void>
 
@@ -244,17 +244,6 @@ export interface ISessionManager {
   completeAuthRequest(sessionId: string, result: AuthResult): Promise<void>
   executePromptAutomation(input: ExecutePromptAutomationInput): Promise<{ sessionId: string }>
 
-  /**
-   * Install a callback invoked from `executePromptAutomation` after a session
-   * is created when the matcher declared `telegramTopic`. Wired by the
-   * messaging-gateway bootstrap so the SessionManager doesn't need to import
-   * the messaging package (avoids a circular package-level import).
-   *
-   * The callback should be best-effort: failures must not block the session.
-   */
-  setAutomationBinder?(
-    fn: (input: { workspaceId: string; sessionId: string; topicName: string }) => Promise<void>,
-  ): void
 }
 
 /**
@@ -275,10 +264,4 @@ export interface ExecutePromptAutomationInput {
   /** Override the workspace default thinking level for the spawned session. */
   thinkingLevel?: ThinkingLevel
   automationName?: string
-  /**
-   * Optional Telegram forum-topic name. When set and the workspace has a
-   * paired supergroup, the new session is bound to a topic of this name
-   * (created on first use). Silently ignored when prerequisites aren't met.
-   */
-  telegramTopic?: string
 }

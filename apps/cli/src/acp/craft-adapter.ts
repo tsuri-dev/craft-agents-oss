@@ -42,12 +42,18 @@ interface AcpSessionRecord {
   enabledSourceSlugs: string[]
 }
 
+interface BindSessionCandidate extends CraftSessionSummary {
+  id: string
+}
+
 type CraftPermissionMode = 'safe' | 'ask' | 'allow-all'
 
 const ZED_LABEL_ID = 'zed'
 const SESSION_LIST_PAGE_SIZE = 50
+const BIND_SESSION_LIMIT = 10
 const ACP_AVAILABLE_COMMANDS = [
   { name: 'craft', description: 'Open this session in a focused Craft Agent window.' },
+  { name: 'bind', description: 'List recent Craft sessions or bind this Zed thread to one.', input: { hint: '[number|session-id]' } },
   { name: 'sources', description: 'List Craft sources available in the current workspace.' },
   { name: 'skills', description: 'List Craft skills available in the current workspace/project.' },
   { name: 'use-source', description: 'Use a Craft source for this prompt.', input: { hint: '<source-slug> prompt' } },
@@ -114,6 +120,7 @@ interface CraftSkillSummary {
 
 type AcpPromptCommand =
   | { kind: 'open-craft' }
+  | { kind: 'bind-session'; selector?: string }
   | { kind: 'list-sources' }
   | { kind: 'list-skills' }
   | { kind: 'use-source'; slug: string; prompt: string }
@@ -126,6 +133,7 @@ export class CraftAcpAdapter {
   private client: CliRpcClient | null = null
   private spawnedServer: SpawnedServer | null = null
   private readonly sessions = new Map<string, AcpSessionRecord>()
+  private readonly bindCandidates = new Map<string, BindSessionCandidate[]>()
 
   constructor(options: CraftAcpAdapterOptions, callbacks: CraftAcpAdapterCallbacks) {
     this.options = options
@@ -210,6 +218,11 @@ export class CraftAcpAdapter {
     if (command?.kind === 'open-craft') {
       await client.invoke('window:openSessionInNewWindow', record.workspaceId, record.craftSessionId)
       this.notifyLocalAssistantMessage(record.acpSessionId, 'Opened this session in a focused Craft Agent window.')
+      return { stopReason: 'end_turn' }
+    }
+
+    if (command?.kind === 'bind-session') {
+      this.notifyLocalAssistantMessage(record.acpSessionId, await this.handleBindCommand(record, command.selector))
       return { stopReason: 'end_turn' }
     }
 
@@ -302,6 +315,7 @@ export class CraftAcpAdapter {
   async closeSession(request: AcpCloseSessionRequest): Promise<Record<string, never>> {
     await this.cancel({ sessionId: request.sessionId })
     this.sessions.delete(request.sessionId)
+    this.bindCandidates.delete(request.sessionId)
     return {}
   }
 
@@ -396,6 +410,100 @@ export class CraftAcpAdapter {
       '- `[skill:<slug>] your prompt`',
       '- `/use-skill <slug> your prompt`',
     ].join('\n')
+  }
+
+  private async handleBindCommand(record: AcpSessionRecord, selector: string | undefined): Promise<string> {
+    try {
+      if (!selector) {
+        const candidates = await this.loadBindCandidates(record)
+        this.bindCandidates.set(record.acpSessionId, candidates)
+        return formatBindSessionList(candidates)
+      }
+
+      const target = await this.resolveBindTarget(record, selector)
+      if (!target) {
+        return [
+          `No recent Craft session matches \`${selector}\`.`,
+          '',
+          'Run `/bind` to refresh the recent session list, then choose with `/bind <number>`.',
+        ].join('\n')
+      }
+
+      const session = await this.bindToCraftSession(record, target.id)
+      const title = sessionDisplayTitle(session)
+      return [
+        'Bound this Zed thread to Craft session:',
+        '',
+        `- ${title} — \`${session.id}\``,
+        `- Working directory: \`${record.cwd}\``,
+        `- Mode: \`${record.permissionMode}\``,
+        '',
+        'Future messages in this Zed thread will continue that Craft session.',
+      ].join('\n')
+    } catch (error) {
+      return `Could not bind this Zed thread to a Craft session.\n\n${formatError(error)}`
+    }
+  }
+
+  private async loadBindCandidates(record: AcpSessionRecord): Promise<BindSessionCandidate[]> {
+    const client = await this.ensureClient()
+    const rawSessions = await client.invoke('sessions:get')
+    if (!Array.isArray(rawSessions)) throw new Error(formatUnknownError(rawSessions))
+
+    return rawSessions
+      .filter(isBindSessionCandidate)
+      .filter(session => !session.hidden && session.id !== record.craftSessionId)
+      .sort(compareSessionsByRecentActivity)
+      .slice(0, BIND_SESSION_LIMIT)
+  }
+
+  private async resolveBindTarget(record: AcpSessionRecord, selector: string): Promise<BindSessionCandidate | { id: string } | undefined> {
+    const normalized = selector.trim()
+    if (!normalized) return undefined
+
+    if (/^\d+$/.test(normalized)) {
+      const index = Number(normalized)
+      if (!Number.isSafeInteger(index) || index < 1) return undefined
+      let candidates = this.bindCandidates.get(record.acpSessionId)
+      if (!candidates) {
+        candidates = await this.loadBindCandidates(record)
+        this.bindCandidates.set(record.acpSessionId, candidates)
+      }
+      return candidates[index - 1]
+    }
+
+    return { id: normalized }
+  }
+
+  private async bindToCraftSession(record: AcpSessionRecord, sessionId: string): Promise<CraftSessionWithMessages & { id: string }> {
+    const client = await this.ensureClient()
+    const session = await client.invoke('sessions:getMessages', sessionId) as CraftSessionWithMessages | null
+    if (!session?.id) throw new Error(`Craft session not found: ${sessionId}`)
+
+    if (!session.workingDirectory || normalizePath(session.workingDirectory) !== normalizePath(record.cwd)) {
+      await client.invoke('sessions:command', session.id, { type: 'updateWorkingDirectory', dir: record.cwd }).catch((error) => {
+        this.callbacks.log?.(`working directory sync skipped: ${formatError(error)}`)
+      })
+      session.workingDirectory = record.cwd
+    }
+
+    const nextMode = normalizePermissionMode(session.permissionMode ?? record.permissionMode) ?? record.permissionMode
+    const previousMode = record.permissionMode
+    record.craftSessionId = session.id
+    record.workspaceId = session.workspaceId ?? record.workspaceId
+    record.permissionMode = nextMode
+    record.enabledSourceSlugs = [...(session.enabledSourceSlugs ?? [])]
+    this.sessions.set(record.acpSessionId, record)
+    this.bindCandidates.delete(record.acpSessionId)
+
+    if (previousMode !== nextMode) {
+      this.callbacks.notifySessionUpdate({
+        sessionId: record.acpSessionId,
+        update: { sessionUpdate: 'current_mode_update', currentModeId: nextMode },
+      })
+    }
+
+    return session as CraftSessionWithMessages & { id: string }
   }
 
   async dispose(): Promise<void> {
@@ -585,6 +693,13 @@ function parsePromptCommand(message: string): AcpPromptCommand {
   if (trimmed === '/craft') return { kind: 'open-craft' }
   if (trimmed === '/sources') return { kind: 'list-sources' }
   if (trimmed === '/skills') return { kind: 'list-skills' }
+  if (trimmed === '/bind' || trimmed === 'bind') return { kind: 'bind-session' }
+
+  const bindMatch = trimmed.match(/^\/bind\s+([^\s]+)$/)
+  if (bindMatch) return { kind: 'bind-session', selector: bindMatch[1] }
+
+  const bareBindNumberMatch = trimmed.match(/^bind\s+(\d+)$/)
+  if (bareBindNumberMatch) return { kind: 'bind-session', selector: bareBindNumberMatch[1] }
 
   const sourceMatch = trimmed.match(/^\/use-source\s+([\w-]+)(?:\s+([\s\S]*))?$/)
   if (sourceMatch) {
@@ -630,6 +745,68 @@ function skillSummary(value: unknown): { slug?: string; name?: string; descripti
 function formatUnknownError(value: unknown): string {
   if (value && typeof value === 'object' && 'error' in value) return String((value as { error: unknown }).error)
   return typeof value === 'string' ? value : JSON.stringify(value)
+}
+
+function formatError(value: unknown): string {
+  if (value instanceof Error) return value.message
+  return formatUnknownError(value)
+}
+
+function isBindSessionCandidate(value: unknown): value is BindSessionCandidate {
+  return !!value && typeof value === 'object' && typeof (value as { id?: unknown }).id === 'string'
+}
+
+function formatBindSessionList(candidates: BindSessionCandidate[]): string {
+  if (candidates.length === 0) {
+    return 'No recent Craft sessions are available to bind. Start or keep a Craft session first, then run `/bind` again.'
+  }
+
+  return [
+    'Recent Craft sessions:',
+    '',
+    ...candidates.flatMap((session, index) => formatBindSessionEntry(session, index + 1)),
+    '',
+    'Usage:',
+    '- `/bind <number>` to bind this Zed thread to one of the sessions above.',
+    '- `/bind <session-id>` to bind directly by id.',
+    '- If Zed intercepts slash commands, send ` /bind <number>` with a leading space.',
+  ].join('\n')
+}
+
+function formatBindSessionEntry(session: BindSessionCandidate, index: number): string[] {
+  const parts = [
+    `${index}. ${sessionDisplayTitle(session)} — \`${session.id}\``,
+    `   ${formatSessionTimestamp(sessionTimestamp(session))}${formatMessageCount(session.messageCount)}${formatWorkingDirectory(session.workingDirectory)}`,
+  ]
+  const preview = truncateOneLine(session.preview, 140)
+  if (preview && preview !== sessionDisplayTitle(session)) parts.push(`   ${preview}`)
+  return parts
+}
+
+function sessionDisplayTitle(session: Pick<CraftSessionSummary, 'id' | 'name' | 'preview'>): string {
+  return truncateOneLine(session.name || session.preview || session.id || 'Untitled session', 80) || 'Untitled session'
+}
+
+function formatSessionTimestamp(timestamp: number): string {
+  if (timestamp <= 0) return 'unknown time'
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return 'unknown time'
+  return date.toISOString().replace('T', ' ').slice(0, 16)
+}
+
+function formatMessageCount(messageCount: unknown): string {
+  return typeof messageCount === 'number' && Number.isFinite(messageCount) ? ` · ${Math.max(0, Math.trunc(messageCount))} messages` : ''
+}
+
+function formatWorkingDirectory(workingDirectory: unknown): string {
+  return typeof workingDirectory === 'string' && workingDirectory ? ` · ${workingDirectory}` : ''
+}
+
+function truncateOneLine(value: unknown, maxLength: number): string {
+  if (typeof value !== 'string') return ''
+  const oneLine = value.replace(/\s+/g, ' ').trim()
+  if (oneLine.length <= maxLength) return oneLine
+  return `${oneLine.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`
 }
 
 function extractCraftMentions(message: string): { sources: string[]; skills: string[] } {

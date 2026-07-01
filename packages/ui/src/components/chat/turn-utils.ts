@@ -337,7 +337,7 @@ export interface GroupTurnsOptions {
    * to response" branch fires and the chat doesn't sit on "Thinking…" forever
    * when a turn ends on a tool call with no non-intermediate `text_complete`.
    *
-   * Mirrors the messaging-gateway/renderer.ts lastAssistantText fallback.
+   * Mirrors the external-channel renderer lastAssistantText fallback.
    */
   isSessionProcessing?: boolean
 }
@@ -648,7 +648,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     }
   }
 
-  // Session-complete fallback (mirrors messaging-gateway/renderer.ts lastAssistantText fallback).
+  // Session-complete fallback (mirrors external-channel renderer lastAssistantText fallback).
   // When the session has stopped processing and the open turn has activities but never received
   // a non-intermediate assistant final, mark it complete so the existing "promote last
   // intermediate to response" branch in flushCurrentTurn fires. Without this the chat sits on

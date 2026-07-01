@@ -20,6 +20,7 @@ interface MockWorkspace {
 interface MockSession {
   id: string
   name?: string
+  preview?: string
   labels?: string[]
   workspaceId?: string
   workingDirectory?: string
@@ -29,6 +30,7 @@ interface MockSession {
   createdAt?: number
   messageCount?: number
   permissionMode?: string
+  enabledSourceSlugs?: string[]
   messages?: Array<{ id: string; role: string; content: string; timestamp: number }>
 }
 
@@ -339,6 +341,51 @@ describe('Craft ACP adapter RPC bridge', () => {
     expect(mockServer.invokeArgs['sources:get']?.[0]).toEqual(['ws-1'])
     expect(mockServer.invokeArgs['skills:get']?.[0]).toEqual(['ws-1', tmpRoot])
     expect(mockServer.invokeArgs['sessions:sendMessage']).toBeUndefined()
+
+    await adapter.dispose()
+  })
+
+  it('lists recent Craft sessions and binds the current Zed thread by number', async () => {
+    const updates: Array<{ sessionId: string; update: Record<string, unknown> }> = []
+    const now = Date.now()
+    mockServer.close()
+    mockServer = createMockCraftServer({
+      workspaces: [{ id: 'ws-active', rootPath: '/repo' }],
+      sessions: [
+        { id: 's-newer', name: 'Newer Craft Session', workingDirectory: '/old/project', lastUsedAt: now + 2, messageCount: 5, permissionMode: 'ask', enabledSourceSlugs: ['existing-source'], messages: [] },
+        { id: 's-older', name: 'Older Craft Session', preview: 'Older preview', workingDirectory: '/old/project', lastUsedAt: now + 1, messageCount: 3, permissionMode: 'safe', messages: [] },
+        { id: 's-hidden', name: 'Hidden Session', hidden: true, lastUsedAt: now + 3, messages: [] },
+      ],
+    })
+
+    const adapter = createAdapter(mockServer, { workspace: 'ws-active', mode: 'ask' }, updates)
+    const session = await adapter.newSession({ cwd: tmpRoot, mcpServers: [] })
+
+    await adapter.prompt({ sessionId: session.sessionId, prompt: [{ type: 'text', text: '/bind' }] })
+
+    const listText = updates.map(update => (update.update.content as { text?: string } | undefined)?.text ?? '').join('\n')
+    expect(listText).toContain('Recent Craft sessions:')
+    expect(listText).toContain('1. Newer Craft Session')
+    expect(listText).toContain('2. Older Craft Session')
+    expect(listText).not.toContain('Hidden Session')
+
+    await adapter.prompt({ sessionId: session.sessionId, prompt: [{ type: 'text', text: '/bind 2' }] })
+
+    expect(mockServer.invokeArgs['sessions:getMessages']?.[0]).toEqual(['s-older'])
+    expect(mockServer.invokeArgs['sessions:command']?.[0]).toEqual([
+      's-older',
+      { type: 'updateWorkingDirectory', dir: tmpRoot },
+    ])
+    expect(updates).toContainEqual({
+      sessionId: 'craft-session-1',
+      update: { sessionUpdate: 'current_mode_update', currentModeId: 'safe' },
+    })
+    expect(updates.map(update => (update.update.content as { text?: string } | undefined)?.text ?? '').join('\n'))
+      .toContain('Bound this Zed thread to Craft session:')
+
+    const prompt = await adapter.prompt({ sessionId: session.sessionId, prompt: [{ type: 'text', text: 'Continue here' }] })
+    expect(prompt.stopReason).toBe('end_turn')
+    expect(mockServer.invokeArgs['sessions:sendMessage']?.[0]).toEqual(['s-older', 'Continue here'])
 
     await adapter.dispose()
   })

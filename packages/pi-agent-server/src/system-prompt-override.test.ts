@@ -15,7 +15,7 @@ import { applySystemPromptOverride } from './system-prompt-override.ts';
  *   - `_baseSystemPrompt` — what the SDK falls back to when no extension override
  *   - `_rebuildSystemPrompt` — what the SDK calls on tool/resource rebuilds
  *
- * Pattern matches OpenClaw's `applySystemPromptOverrideToSession`.
+ * Matches the SDK-internal prompt override behavior used by the runtime.
  */
 
 type StampedSession = {

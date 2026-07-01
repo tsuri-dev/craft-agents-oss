@@ -315,7 +315,7 @@ describe('turn lifecycle scenarios', () => {
     })
   })
 
-  // Mirrors the messaging-gateway/renderer.ts lastAssistantText fallback (PR #779).
+  // Mirrors the external-channel renderer lastAssistantText fallback (PR #779).
   // When the Pi agent emits intermediate text + a tool call and then completes
   // without a non-intermediate text_complete, the chat must not sit on "Thinking…"
   // forever. The session.isProcessing=false signal triggers the existing

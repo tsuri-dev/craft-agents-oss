@@ -22,7 +22,6 @@ import WorkspaceSettingsPage from './WorkspaceSettingsPage'
 import UsageSettingsPage from './UsageSettingsPage'
 import PermissionsSettingsPage from './PermissionsSettingsPage'
 import LabelsSettingsPage from './LabelsSettingsPage'
-import MessagingSettingsPage from './MessagingSettingsPage'
 import ServerSettingsPage from './ServerSettingsPage'
 import ShortcutsPage from './ShortcutsPage'
 import PreferencesPage from './PreferencesPage'
@@ -40,7 +39,6 @@ export const SETTINGS_PAGE_COMPONENTS: Record<SettingsSubpage, ComponentType> = 
   usage: UsageSettingsPage,
   permissions: PermissionsSettingsPage,
   labels: LabelsSettingsPage,
-  messaging: MessagingSettingsPage,
   server: ServerSettingsPage,
   shortcuts: ShortcutsPage,
   preferences: PreferencesPage,

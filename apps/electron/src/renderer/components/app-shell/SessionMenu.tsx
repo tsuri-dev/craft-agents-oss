@@ -43,7 +43,6 @@ import { LabelMenuItems, ProjectMenuItems, StatusMenuItems, ShareMenuItems } fro
 import { getFileManagerName } from '@/lib/platform'
 import type { SessionMeta } from '@/atoms/sessions'
 import { getSessionStatus, hasUnreadMeta, hasMessagesMeta } from '@/utils/session'
-import { MessagingSessionMenuItem } from '@/components/messaging/MessagingSessionMenuItem'
 import { useSessionMenuActions } from '@/hooks/useSessionMenuActions'
 import { getSessionGroupValues } from '@/utils/session-group-filter'
 import type { SessionGroupFilterOption } from '@/utils/session-group-filter'
@@ -125,7 +124,6 @@ export function SessionMenu({
 }: SessionMenuProps) {
   const { t } = useTranslation()
 
-  const sessionId = item.id
   const isFlagged = item.isFlagged ?? false
   const isArchived = item.isArchived ?? false
   const sharedUrl = item.sharedUrl
@@ -194,9 +192,6 @@ export function SessionMenu({
           <span className="flex-1">{t("sessionMenu.sendToWorkspace")}</span>
         </MenuItem>
       )}
-
-      {/* Connect to Messaging — pairing code flow */}
-      <MessagingSessionMenuItem sessionId={sessionId} />
 
       <Separator />
 
