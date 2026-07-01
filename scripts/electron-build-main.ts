@@ -317,3 +317,88 @@ async function buildPiAgentServer(): Promise<void> {
 }
 
 
+
+async function main(): Promise<void> {
+  loadEnvFile();
+
+  // Ensure dist directory exists
+  if (!existsSync(DIST_DIR)) {
+    mkdirSync(DIST_DIR, { recursive: true });
+  }
+
+  // Verify session tools core exists (shared utilities for session-scoped tools)
+  verifySessionToolsCore();
+
+  // Build session server (provides session-scoped tools like SubmitPlan)
+  // Depends on session-tools-core being built first
+  await buildSessionServer();
+
+  // Build Pi agent server (subprocess for Pi SDK sessions)
+  await buildPiAgentServer();
+
+  // Build unified network interceptor (CJS bundle for Node.js --require)
+  await buildInterceptor();
+
+  const buildDefines = getBuildDefines();
+
+  console.log("🔨 Building main process...");
+
+  const proc = spawn({
+    cmd: [
+      "bun", "run", "esbuild",
+      "apps/electron/src/main/index.ts",
+      "--bundle",
+      "--platform=node",
+      "--format=cjs",
+      "--outfile=apps/electron/dist/main.cjs",
+      "--external:electron",
+      // Claude Agent SDK is pure ESM (sdk.mjs) and calls `createRequire(import.meta.url)`
+      // at module init. esbuild's CJS bundling leaves the synthesized `import_meta.url`
+      // undefined for inner ESM modules, which throws ERR_INVALID_ARG_VALUE on load.
+      // Externalize so Node loads the SDK natively as ESM (with a real import.meta.url).
+      // Electron 39 ships Node 22.x which supports require() of ESM without TLA, so the
+      // bundled main.cjs's `require('@anthropic-ai/claude-agent-sdk')` works.
+      "--external:@anthropic-ai/claude-agent-sdk",
+      // Bundled ESM deps can call `createRequire(import.meta.url)`. esbuild lowers
+      // `import.meta` to an empty `{}` for CJS output, so `import.meta.url` becomes
+      // `undefined`. Define it to the bundle's own file URL so createRequire and
+      // fileURLToPath get a valid absolute path at runtime.
+      "--define:import.meta.url=CRAFT_IMPORT_META_URL",
+      "--banner:js=const CRAFT_IMPORT_META_URL=require('url').pathToFileURL(__filename).href;",
+      ...buildDefines,
+    ],
+    cwd: ROOT_DIR,
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+
+  const exitCode = await proc.exited;
+
+  if (exitCode !== 0) {
+    console.error("❌ esbuild failed with exit code", exitCode);
+    process.exit(exitCode);
+  }
+
+  // Wait for file to stabilize
+  console.log("⏳ Waiting for file to stabilize...");
+  const stable = await waitForFileStable(OUTPUT_FILE);
+
+  if (!stable) {
+    console.error("❌ Output file did not stabilize");
+    process.exit(1);
+  }
+
+  // Verify the output
+  console.log("🔍 Verifying build output...");
+  const verification = await verifyJsFile(OUTPUT_FILE);
+
+  if (!verification.valid) {
+    console.error("❌ Build verification failed:", verification.error);
+    process.exit(1);
+  }
+
+  console.log("✅ Build complete and verified");
+  process.exit(0);
+}
+
+main();
