@@ -13,8 +13,10 @@ import type {
   TypedErrorEvent,
   SourcesChangedEvent,
   LabelsChangedEvent,
+  ProjectIdChangedEvent,
   SessionStatusChangedEvent,
   SessionBoardPositionChangedEvent,
+  SessionMetadataChangedEvent,
   SessionFlaggedEvent,
   SessionUnflaggedEvent,
   SessionArchivedEvent,
@@ -664,6 +666,27 @@ export function handleLabelsChanged(
 }
 
 /**
+ * Handle project_id_changed - update session's projectId binding
+ */
+export function handleProjectIdChanged(
+  state: SessionState,
+  event: ProjectIdChangedEvent
+): ProcessResult {
+  const { session, streaming } = state
+
+  return {
+    state: {
+      session: {
+        ...session,
+        projectId: event.projectId ?? undefined,
+      },
+      streaming,
+    },
+    effects: [],
+  }
+}
+
+/**
  * Handle session_status_changed - update session's sessionStatus (external metadata change or agent tool)
  */
 export function handleSessionStatusChanged(
@@ -691,6 +714,25 @@ export function handleSessionBoardPositionChanged(
   return {
     state: {
       session: { ...session, boardPosition: event.boardPosition },
+      streaming,
+    },
+    effects: [],
+  }
+}
+
+/**
+ * Handle session_metadata_changed - merge programmatic metadata changes (taskNodeCount,
+ * kanbanColumn, and the taskDraft→taskSlug promotion on orchestrator adoption) that don't
+ * propagate via the header-signature file watch.
+ */
+export function handleSessionMetadataChanged(
+  state: SessionState,
+  event: SessionMetadataChangedEvent
+): ProcessResult {
+  const { session, streaming } = state
+  return {
+    state: {
+      session: { ...session, ...event.changes },
       streaming,
     },
     effects: [],

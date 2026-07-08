@@ -40,6 +40,8 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import { useSession } from '@/hooks/useSession'
+import { useLabels } from '@/hooks/useLabels'
+import { matchesLabelFilter } from '@craft-agent/shared/labels'
 import {
   parseRoute,
   parseRouteToNavigationState,
@@ -71,6 +73,7 @@ import {
   isAutomationsNavigation,
   isAgentsNavigation,
   isPluginsNavigation,
+  isProjectsNavigation,
   DEFAULT_NAVIGATION_STATE,
 } from '../../shared/types'
 import { sessionMetaMapAtom, updateSessionMetaAtom, type SessionMeta } from '@/atoms/sessions'
@@ -93,7 +96,7 @@ export type { Route }
 
 // Re-export navigation state types for consumers
 export type { NavigationState, SessionFilter }
-export { isSessionsNavigation, isSourcesNavigation, isSettingsNavigation, isSkillsNavigation, isAutomationsNavigation, isAgentsNavigation, isPluginsNavigation }
+export { isSessionsNavigation, isSourcesNavigation, isSettingsNavigation, isSkillsNavigation, isAutomationsNavigation, isAgentsNavigation, isPluginsNavigation, isProjectsNavigation }
 
 // =============================================================================
 // Context
@@ -170,6 +173,8 @@ export function NavigationProvider({
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   const sessionMetas = useMemo(() => Array.from(sessionMetaMap.values()), [sessionMetaMap])
   const updateSessionMeta = useSetAtom(updateSessionMetaAtom)
+  // Label tree for filter matching (auto-select must agree with the visible list).
+  const { labels: labelConfigs } = useLabels(workspaceId)
 
   const pushPanel = useSetAtom(pushPanelAtom)
 
@@ -556,9 +561,9 @@ export function NavigationProvider({
             return session.sessionStatus === filter.stateId && session.isArchived !== true
           case 'label': {
             if (session.isArchived === true) return false
-            if (!session.labels?.length) return false
-            if (filter.labelId === '__all__') return true
-            return session.labels.some(l => l === filter.labelId || l.startsWith(`${filter.labelId}::`))
+            // Shared predicate — descendant-aware and project-scoped, matching
+            // exactly what the session list renders (auto-select must agree).
+            return matchesLabelFilter(session, filter, labelConfigs)
           }
           case 'view':
             if (session.isArchived === true) return false
@@ -568,7 +573,7 @@ export function NavigationProvider({
         }
       })
     },
-    [sessionMetas, workspaceId]
+    [sessionMetas, workspaceId, labelConfigs]
   )
 
   const getFirstSessionId = useCallback(
@@ -638,8 +643,14 @@ export function NavigationProvider({
       }
 
       // Sessions: auto-select last/first session. Inbox intentionally stays empty
-      // until the user selects a notification, matching notification-inbox UX.
-      if (isSessionsNavigation(nextState) && nextState.filter.kind !== 'inbox' && !nextState.details && !options?.skipAutoSelect) {
+      // until the user selects a notification; board has no per-session detail.
+      if (
+        isSessionsNavigation(nextState) &&
+        nextState.viewMode !== 'board' &&
+        nextState.filter.kind !== 'inbox' &&
+        !nextState.details &&
+        !options?.skipAutoSelect
+      ) {
         const lastSelectedSessionId = getLastSelectedSessionId(nextState.filter)
         const fallbackSessionId = lastSelectedSessionId ?? getFirstSessionId(nextState.filter)
         if (fallbackSessionId) {
@@ -700,6 +711,15 @@ export function NavigationProvider({
           }
           if (parsed.params.systemPrompt) {
             createOptions.systemPromptPreset = parsed.params.systemPrompt as 'default' | 'mini' | string
+          }
+          if (parsed.params.status) {
+            createOptions.sessionStatus = parsed.params.status
+          }
+          if (parsed.params.label) {
+            createOptions.labels = [parsed.params.label]
+          }
+          if (parsed.params.project) {
+            createOptions.projectId = parsed.params.project
           }
           const session = await onCreateSession(workspaceId, createOptions)
 
@@ -1233,19 +1253,19 @@ export function NavigationProvider({
     if (!isReady || !workspaceId) return
     // Don't auto-select when panel stack is empty (user closed all panels)
     if (store.get(panelStackAtom).length === 0) return
+    // Scoped to sessions with no explicit detail. Inbox remains empty until a
+    // notification/session is selected; board skip lives in resolveAutoSelection.
     if (!isSessionsNavigation(navigationState) || navigationState.details || navigationState.filter.kind === 'inbox') return
 
-    const lastSelectedSessionId = getLastSelectedSessionId(navigationState.filter)
-    const fallbackSessionId = lastSelectedSessionId ?? getFirstSessionId(navigationState.filter)
-    if (!fallbackSessionId) return
-
-    navigateToSession(fallbackSessionId)
+    const resolved = resolveAutoSelection(navigationState)
+    if (isSessionsNavigation(resolved) && resolved.details) {
+      navigateToSession(resolved.details.sessionId)
+    }
   }, [
     isReady,
     workspaceId,
     navigationState,
-    getLastSelectedSessionId,
-    getFirstSessionId,
+    resolveAutoSelection,
     navigateToSession,
   ])
 

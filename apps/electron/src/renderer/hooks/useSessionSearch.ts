@@ -2,7 +2,8 @@ import { useState, useCallback, useEffect, useRef, useMemo } from "react"
 import { isToday, isYesterday, format, startOfDay } from "date-fns"
 
 import { searchLog } from "@/lib/logger"
-import { parseLabelEntry } from "@craft-agent/shared/labels"
+import { parseLabelEntry, matchesLabelFilter } from "@craft-agent/shared/labels"
+import type { LabelConfig } from "@craft-agent/shared/labels"
 import { fuzzyScore } from "@craft-agent/shared/search"
 import { getSessionTitle, getSessionStatus } from "@/utils/session"
 import { getSessionGroupValues } from "@/utils/session-group-filter"
@@ -52,6 +53,8 @@ export interface UseSessionSearchOptions {
   evaluateViews?: (meta: SessionMeta) => ViewConfig[]
   statusFilter?: Map<string, FilterMode>
   labelFilterMap?: Map<string, FilterMode>
+  /** Workspace label tree — label filters match descendants through it (shared matchesLabelFilter). */
+  labelConfigs?: LabelConfig[]
   /** Collapsed group keys — collapsed items are excluded from pagination and flatItems */
   collapsedGroups?: Set<string>
   /** Grouping mode — needed to compute group keys for collapse-aware pagination */
@@ -212,6 +215,7 @@ interface FilterMatchOptions {
   evaluateViews?: (meta: SessionMeta) => ViewConfig[]
   statusFilter?: Map<string, 'include' | 'exclude'>
   labelFilterMap?: Map<string, 'include' | 'exclude'>
+  labelConfigs?: LabelConfig[]
 }
 
 export function sessionMatchesCurrentFilter(
@@ -219,7 +223,7 @@ export function sessionMatchesCurrentFilter(
   currentFilter: SessionFilter | undefined,
   options: FilterMatchOptions = {}
 ): boolean {
-  const { evaluateViews, statusFilter, labelFilterMap } = options
+  const { evaluateViews, statusFilter, labelFilterMap, labelConfigs } = options
 
   const passesStatusFilter = (): boolean => {
     if (!statusFilter || statusFilter.size === 0) return true
@@ -274,11 +278,10 @@ export function sessionMatchesCurrentFilter(
       return (session.sessionStatus || 'todo') === currentFilter.stateId && session.isArchived !== true
 
     case 'label': {
-      if (!session.labels?.length) return false
       if (session.isArchived === true) return false
-      if (currentFilter.labelId === '__all__') return true
-      const labelIds = session.labels.map(l => parseLabelEntry(l).id)
-      return labelIds.includes(currentFilter.labelId)
+      // Shared predicate (descendant-aware + optional project scope) — keep in
+      // sync with AppShell's filtered set by construction, not by copy.
+      return matchesLabelFilter(session, currentFilter, labelConfigs ?? [])
     }
 
     case 'view':
@@ -307,6 +310,7 @@ export function useSessionSearch({
   evaluateViews,
   statusFilter,
   labelFilterMap,
+  labelConfigs,
   collapsedGroups,
   groupingMode,
   scrollViewportRef,
@@ -412,7 +416,7 @@ export function useSessionSearch({
   const searchFilteredItems = useMemo(() => {
     if (!isSearchMode) {
       return sortedItems.filter(item =>
-        sessionMatchesCurrentFilter(item, currentFilter, { evaluateViews, statusFilter, labelFilterMap })
+        sessionMatchesCurrentFilter(item, currentFilter, { evaluateViews, statusFilter, labelFilterMap, labelConfigs })
       )
     }
 
@@ -430,7 +434,7 @@ export function useSessionSearch({
         const countB = contentSearchResults.get(b.id)?.matchCount || 0
         return countB - countA
       })
-  }, [sortedItems, isSearchMode, searchQuery, contentSearchResults, currentFilter, evaluateViews, statusFilter, labelFilterMap])
+  }, [sortedItems, isSearchMode, searchQuery, contentSearchResults, currentFilter, evaluateViews, statusFilter, labelFilterMap, labelConfigs])
 
   // Split search results: matching current filter vs others
   const { matchingFilterItems, otherResultItems, exceededSearchLimit } = useMemo(() => {
@@ -465,7 +469,7 @@ export function useSessionSearch({
     for (const item of searchFilteredItems) {
       if (matching.length + others.length >= MAX_SEARCH_RESULTS) break
 
-      const matches = sessionMatchesCurrentFilter(item, currentFilter, { evaluateViews, statusFilter, labelFilterMap })
+      const matches = sessionMatchesCurrentFilter(item, currentFilter, { evaluateViews, statusFilter, labelFilterMap, labelConfigs })
       if (matches) {
         matching.push(item)
       } else {
@@ -482,7 +486,7 @@ export function useSessionSearch({
     }
 
     return { matchingFilterItems: matching, otherResultItems: others, exceededSearchLimit: exceeded }
-  }, [searchFilteredItems, currentFilter, evaluateViews, isSearchMode, statusFilter, labelFilterMap, searchQuery])
+  }, [searchFilteredItems, currentFilter, evaluateViews, isSearchMode, statusFilter, labelFilterMap, labelConfigs, searchQuery])
 
   // --- Pagination ---
 

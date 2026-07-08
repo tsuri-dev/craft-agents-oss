@@ -50,7 +50,16 @@ export interface ISessionManager {
   getSessions(workspaceId?: string): Session[]
   getSession(sessionId: string): Promise<Session | null>
   getSessionMessagePage?(input: GetSessionMessagePageInput): Promise<Session | null>
-  createSession(workspaceId: string, options?: CreateSessionOptions): Promise<Session>
+  /** Creates a session and (unless `internal.emitCreatedEvent === false`) announces it to the
+   *  renderer so it hydrates full metadata instead of fabricating a "New Chat" placeholder. */
+  createSession(
+    workspaceId: string,
+    options?: CreateSessionOptions,
+    internal?: { emitCreatedEvent?: boolean },
+  ): Promise<Session>
+  /** Resolved working directory of a live session (Tasks Conductor uses it so children inherit
+   *  the orchestrator's cwd). */
+  getSessionWorkingDirectory(sessionId: string): string | undefined
   deleteSession(sessionId: string): Promise<void>
 
   // ---------------------------------------------------------------------------
@@ -81,6 +90,26 @@ export interface ISessionManager {
   updateSessionRemoteTarget?(sessionId: string, target: import('@craft-agent/shared/protocol').SessionRemoteTarget): Promise<void>
   setSessionSources(sessionId: string, sourceSlugs: string[]): Promise<void>
   setSessionLabels(sessionId: string, labels: string[]): void
+  /** Apply the reserved Task labeling (mint / inherit the per-task item label under the Task
+   *  root). Returns the resolved ITEM label id, or undefined if the session is unknown.
+   *  See SessionManager.applyTaskLabel. */
+  applyTaskLabel(
+    sessionId: string,
+    opts?: { parentSessionId?: string },
+  ): Promise<{ labelId: string } | undefined>
+  setSessionProjectId(sessionId: string, projectId: string | null): Promise<void>
+  setKanbanColumn(sessionId: string, column: string | null): Promise<void>
+  setTaskNodeCount(sessionId: string, count: number): Promise<void>
+  adoptGeneratedTaskOrchestrator(
+    sessionId: string,
+    taskSlug: string,
+    reconcile?: { name?: string; projectId?: string; workingDirectory?: string; model?: string; llmConnection?: string; permissionMode?: PermissionMode },
+  ): Promise<boolean>
+  bindExistingSessionToTask(
+    sessionId: string,
+    taskSlug: string,
+    reconcile?: { name?: string; projectId?: string; workingDirectory?: string; model?: string; llmConnection?: string; permissionMode?: PermissionMode },
+  ): Promise<boolean>
   setSessionConnection(sessionId: string, connectionSlug: string): Promise<void>
   updateSessionModel(sessionId: string, workspaceId: string, model: string | null, connection?: string): Promise<void>
 
@@ -102,6 +131,18 @@ export interface ISessionManager {
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
   getTaskOutput(taskId: string): Promise<string | null>
+
+  // --- Tasks Conductor seams (in-process; not renderer events, not agent-facing) ---
+  /**
+   * Subscribe to the in-process session-completion signal. Fires once per turn
+   * when the session's message queue drains (true completion), carrying the stop
+   * reason. Returns an unsubscribe function.
+   */
+  onSessionComplete(
+    listener: (evt: import('../sessions/SessionManager').SessionCompletionEvent) => void,
+  ): () => void
+  /** Read a session's final assistant message text (Conductor output reader). */
+  getSessionFinalText(sessionId: string): string | undefined
   addMessageAnnotation(sessionId: string, messageId: string, annotation: AnnotationV1): void
   removeMessageAnnotation(sessionId: string, messageId: string, annotationId: string): void
   updateMessageAnnotation(
@@ -264,4 +305,12 @@ export interface ExecutePromptAutomationInput {
   /** Override the workspace default thinking level for the spawned session. */
   thinkingLevel?: ThinkingLevel
   automationName?: string
+  /**
+   * When `false`, `executePromptAutomation` returns as soon as the session is
+   * created and the prompt is dispatched, instead of awaiting the whole turn.
+   * Used by the automation **Test** action so a long run (tools / >30s output)
+   * doesn't trip the RPC client timeout (craft-agents-oss#943). The session
+   * still streams live and run errors are logged. Defaults to awaiting completion.
+   */
+  waitForCompletion?: boolean
 }
