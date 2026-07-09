@@ -752,7 +752,7 @@ function PlannerBoard() {
       title,
       notes: '',
       state: 'todo',
-      due: 'Inbox',
+      due: 'Backlog',
     }
 
     setTasksState(prev => [task, ...prev])

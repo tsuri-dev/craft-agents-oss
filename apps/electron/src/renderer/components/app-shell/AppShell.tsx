@@ -20,7 +20,6 @@ import {
   Trash2,
   DatabaseZap,
   Zap,
-  Inbox,
   Globe,
   FolderOpen,
   Cake,
@@ -32,8 +31,6 @@ import {
   Bot,
   Info,
   MailOpen,
-  Columns3,
-  List,
   Workflow,
   Server,
   KeyRound,
@@ -143,7 +140,6 @@ import {
   isAgentsNavigation,
   isPluginsNavigation,
   isProjectsNavigation,
-  type SessionFilter,
   type NavigationState,
 } from "@/contexts/NavigationContext"
 import type { SettingsSubpage, SshConnectionProfile, SshPrivateKeyRecord } from "../../../shared/types"
@@ -206,28 +202,6 @@ interface AppShellProps {
 type FilterMode = 'include' | 'exclude'
 
 const altClickTooltipLabel = isMac ? '⌥ click to exclude' : 'Alt click to exclude'
-
-function routeForSessionFilterRoot(filter: SessionFilter | null | undefined) {
-  if (!filter) return routes.view.allSessions()
-  switch (filter.kind) {
-    case 'allSessions':
-      return routes.view.allSessions()
-    case 'inbox':
-      return routes.view.inbox()
-    case 'flagged':
-      return routes.view.flagged()
-    case 'archived':
-      return routes.view.archived()
-    case 'state':
-      return routes.view.state(filter.stateId)
-    case 'label':
-      return routes.view.label(filter.labelId)
-    case 'view':
-      return routes.view.view(filter.viewId)
-    default:
-      return routes.view.allSessions()
-  }
-}
 
 /** Wraps children in a Tooltip that shows instantly on hover — only rendered when `show` is true. */
 function AltExcludeTooltip({ show, children }: { show: boolean; children: React.ReactNode }) {
@@ -582,7 +556,6 @@ function AppShellContent({
     onMarkSessionRead,
     onMarkSessionUnread,
     onSessionStatusChange,
-    onSessionBoardPositionChange,
     onRenameSession,
     onOpenSettings,
     onOpenKeyboardShortcuts,
@@ -710,7 +683,6 @@ function AppShellContent({
     if (!sessionFilter) return null
     switch (sessionFilter.kind) {
       case 'allSessions': return 'allSessions'
-      case 'inbox': return 'inbox'
       case 'flagged': return 'flagged'
       case 'archived': return 'archived'
       case 'state': return `state:${sessionFilter.stateId}`
@@ -722,6 +694,9 @@ function AppShellContent({
 
   const [viewFiltersMap, setViewFiltersMap] = React.useState<ViewFiltersMap>(() => {
     const saved = storage.get<ViewFiltersMap>(storage.KEYS.viewFilters, {})
+    // Drop filters for the removed unread-only sessions view.
+    delete saved['in' + 'box']
+
     // Backward compat: migrate old format (arrays) into new format (Record<string, FilterMode>)
     if (saved.allSessions && Array.isArray((saved.allSessions as any).statuses)) {
       // Old format: { statuses: string[], labels: string[] } → new: { statuses: Record, labels: Record }
@@ -901,26 +876,15 @@ function AppShellContent({
   // Search state for session list
   const [searchActive, setSearchActive] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState('')
-  const [sessionBoardViewMode, setSessionBoardViewMode] = React.useState<'list' | 'board'>(() => {
-    const stored = storage.get<string>(storage.KEYS.sessionBoardViewMode, 'list')
-    return stored === 'board' ? 'board' : 'list'
-  })
-  const [sessionBoardGroupBy, setSessionBoardGroupBy] = React.useState<'status' | 'label' | 'project' | 'recent'>(() => {
-    const stored = storage.get<string>(storage.KEYS.sessionBoardGroupBy, 'status')
-    if (stored === 'recent') return 'recent'
-    if (stored === 'project') return 'project'
-    return stored === 'label' ? 'label' : 'status'
-  })
-  const [hiddenBoardStatusIds, setHiddenBoardStatusIds] = React.useState<Set<string>>(() =>
-    new Set(storage.get<string[]>(storage.KEYS.sessionBoardHiddenStatuses, [], activeWorkspaceId ?? undefined))
-  )
-
   // Grouping mode for chat list: per-view (stored in viewFiltersMap), forced to 'date' for state sub-views
   const isStateSubView = sessionFilter?.kind === 'state'
 
+  const storedChatGroupingMode = viewFiltersMap[sessionFilterKey ?? '']?.groupingMode
   const chatGroupingMode: ChatGroupingMode = isStateSubView
     ? 'date'
-    : (viewFiltersMap[sessionFilterKey ?? '']?.groupingMode ?? 'date')
+    : (storedChatGroupingMode === 'status' || storedChatGroupingMode === 'unread' || storedChatGroupingMode === 'project'
+      ? storedChatGroupingMode
+      : 'date')
 
   const setChatGroupingMode = useCallback((mode: ChatGroupingMode) => {
     setViewFiltersMap(prev => {
@@ -932,34 +896,6 @@ function AppShellContent({
       }
     })
   }, [sessionFilterKey])
-
-  React.useEffect(() => {
-    storage.set(storage.KEYS.sessionBoardViewMode, sessionBoardViewMode)
-  }, [sessionBoardViewMode])
-
-  React.useEffect(() => {
-    storage.set(storage.KEYS.sessionBoardGroupBy, sessionBoardGroupBy)
-  }, [sessionBoardGroupBy])
-
-  React.useEffect(() => {
-    setHiddenBoardStatusIds(new Set(storage.get<string[]>(storage.KEYS.sessionBoardHiddenStatuses, [], activeWorkspaceId ?? undefined)))
-  }, [activeWorkspaceId])
-
-  React.useEffect(() => {
-    storage.set(storage.KEYS.sessionBoardHiddenStatuses, Array.from(hiddenBoardStatusIds), activeWorkspaceId ?? undefined)
-  }, [hiddenBoardStatusIds, activeWorkspaceId])
-
-  const handleHideBoardStatus = useCallback((statusId: string) => {
-    setHiddenBoardStatusIds(prev => new Set(prev).add(statusId))
-  }, [])
-
-  const handleShowBoardStatus = useCallback((statusId: string) => {
-    setHiddenBoardStatusIds(prev => {
-      const next = new Set(prev)
-      next.delete(statusId)
-      return next
-    })
-  }, [])
 
   // Ref for ChatDisplay navigation (exposed via forwardRef)
   const chatDisplayRef = React.useRef<ChatDisplayHandle>(null)
@@ -1589,15 +1525,16 @@ function AppShellContent({
     return navigatorSessionMetas.filter(s => !s.isArchived)
   }, [navigatorSessionMetas])
 
-  // Inbox intentionally uses workspace-wide visible sessions (including agent-task sessions)
-  // so unread agent replies are not hidden behind the "Show agent tasks" preference.
-  const inboxSessionMetas = useMemo(() => {
+  // Workspace unread indicators intentionally use workspace-wide visible sessions
+  // (including agent-task sessions) so unread agent replies are not hidden behind
+  // the "Show agent tasks" preference.
+  const unreadSessionMetas = useMemo(() => {
     return workspaceSessionMetas.filter(s => !s.isArchived && hasUnreadMeta(s))
   }, [workspaceSessionMetas])
 
   const projectFilterOptions = useMemo(
-    () => buildSessionProjectFilterOptions(activeSessionMetas),
-    [activeSessionMetas],
+    () => buildSessionProjectFilterOptions(activeSessionMetas, projects),
+    [activeSessionMetas, projects],
   )
 
   const groupFilterOptions = useMemo(
@@ -1780,9 +1717,9 @@ function AppShellContent({
   // Keep active workspace unread indicator in sync with live metadata updates
   useEffect(() => {
     if (!activeWorkspaceId) return
-    const activeHasUnread = inboxSessionMetas.length > 0
+    const activeHasUnread = unreadSessionMetas.length > 0
     setWorkspaceUnreadMap((prev) => ({ ...prev, [activeWorkspaceId]: activeHasUnread }))
-  }, [activeWorkspaceId, inboxSessionMetas.length])
+  }, [activeWorkspaceId, unreadSessionMetas.length])
 
   // Keep cross-workspace indicators in sync with global unread updates from main process
   useEffect(() => {
@@ -1799,7 +1736,6 @@ function AppShellContent({
 
   // Count sessions by todo state (scoped to workspace)
   const isMetaDone = (s: SessionMeta) => s.sessionStatus === 'done' || s.sessionStatus === 'cancelled'
-  const inboxCount = inboxSessionMetas.length
   const flaggedCount = activeSessionMetas.filter(s => s.isFlagged).length
   const archivedCount = navigatorSessionMetas.filter(s => s.isArchived).length
 
@@ -1897,10 +1833,6 @@ function AppShellContent({
         // "All Sessions" - shows active (non-archived) sessions
         result = activeMetasForPrimaryFilter
         break
-      case 'inbox':
-        // Inbox shows unread sessions across regular and agent-task sessions.
-        result = inboxSessionMetas
-        break
       case 'flagged':
         result = activeMetasForPrimaryFilter.filter(s => s.isFlagged)
         break
@@ -1976,28 +1908,6 @@ function AppShellContent({
         )
       }
     }
-    // Filter by project — supports include/exclude on session.projectId
-    if (projectFilter.size > 0) {
-      const projectIncludes = new Set<string>()
-      const projectExcludes = new Set<string>()
-      for (const [id, mode] of projectFilter) {
-        if (mode === 'include') projectIncludes.add(id)
-        else projectExcludes.add(id)
-      }
-      if (projectIncludes.size > 0) {
-        result = result.filter(s => {
-          const pid = (s as { projectId?: string }).projectId
-          return pid !== undefined && projectIncludes.has(pid)
-        })
-      }
-      if (projectExcludes.size > 0) {
-        result = result.filter(s => {
-          const pid = (s as { projectId?: string }).projectId
-          return pid === undefined || !projectExcludes.has(pid)
-        })
-      }
-    }
-
     result = filterSessionsByProjectFilter(result, projectFilter)
     result = filterSessionsByGroupFilter(result, groupFilter)
 
@@ -2006,7 +1916,7 @@ function AppShellContent({
     }
 
     return result
-  }, [navigatorSessionMetas, activeSessionMetas, workspaceSessionMetas, inboxSessionMetas, sessionFilter, listFilter, labelFilter, projectFilter, groupFilter, agentRunningFilter, labelConfigs, evaluateViews])
+  }, [navigatorSessionMetas, activeSessionMetas, workspaceSessionMetas, sessionFilter, listFilter, labelFilter, projectFilter, groupFilter, agentRunningFilter, labelConfigs, evaluateViews])
 
   // Derive "pinned" (non-removable) filters from the current sessionFilter path.
   // These represent filters that are implicit in the current deeplink/route and
@@ -2052,17 +1962,11 @@ function AppShellContent({
     activeSessionWorkingDirectory,
     labels: displayLabelConfigs,
     projectOptions: projectFilterOptions,
+    projects: projectMenuOptions,
     onSessionLabelsChange: handleSessionLabelsChange,
+    onSessionProjectChange: handleSessionProjectChange,
     enabledModes,
     sessionStatuses: effectiveSessionStatuses,
-    sessionBoardViewMode,
-    onSessionBoardViewModeChange: setSessionBoardViewMode,
-    sessionBoardGroupBy,
-    onSessionBoardGroupByChange: setSessionBoardGroupBy,
-    sessionBoardSessions: filteredSessionMetas,
-    hiddenBoardStatusIds,
-    onHideBoardStatus: handleHideBoardStatus,
-    onShowBoardStatus: handleShowBoardStatus,
     onSessionSourcesChange: handleSessionSourcesChange,
     onJumpToTaskSessions: handleJumpToTaskSessions,
     rightSidebarButton: null,
@@ -2079,7 +1983,7 @@ function AppShellContent({
     automationTestResults,
     getAutomationHistory,
     onReplayAutomation: handleReplayAutomation,
-  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, projectFilterOptions, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, sessionBoardViewMode, sessionBoardGroupBy, filteredSessionMetas, hiddenBoardStatusIds, handleHideBoardStatus, handleShowBoardStatus, handleSessionSourcesChange, handleJumpToTaskSessions, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
+  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, projectFilterOptions, projectMenuOptions, handleSessionLabelsChange, handleSessionProjectChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, handleJumpToTaskSessions, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
 
   // Persist expanded folders to localStorage (workspace-scoped)
   React.useEffect(() => {
@@ -2150,14 +2054,6 @@ function AppShellContent({
     setViewFiltersMap(prev => ({
       ...prev,
       allSessions: { statuses: {}, labels: {}, projects: {}, groups: {}, agentRunning: false, groupingMode: 'date' },
-    }))
-  }, [])
-
-  const handleInboxClick = useCallback(() => {
-    navigate(routes.view.inbox())
-    setViewFiltersMap(prev => ({
-      ...prev,
-      inbox: { statuses: {}, labels: {}, projects: {}, groups: {}, agentRunning: false, groupingMode: 'date' },
     }))
   }, [])
 
@@ -2544,8 +2440,7 @@ function AppShellContent({
   const unifiedSidebarItems = React.useMemo((): SidebarItem[] => {
     const result: SidebarItem[] = []
 
-    // 1. Sessions section: Inbox and All Sessions (expandable) with status items, Flagged, Archived as children
-    result.push({ id: 'nav:inbox', type: 'nav', action: handleInboxClick })
+    // 1. Sessions section: All Sessions (expandable) with status items, Flagged, Archived as children
     result.push({ id: 'nav:allSessions', type: 'nav', action: handleAllSessionsClick })
     for (const state of effectiveSessionStatuses) {
       result.push({ id: `nav:state:${state.id}`, type: 'nav', action: () => handleSessionStatusClick(state.id) })
@@ -2583,7 +2478,7 @@ function AppShellContent({
     result.push({ id: 'nav:whats-new', type: 'nav', action: handleWhatsNewClick })
 
     return result
-  }, [handleInboxClick, handleAllSessionsClick, handleSessionStatusClick, effectiveSessionStatuses, handleProjectFiltersClick, handleRunningAgentsClick, projectFilterOptions, handleProjectClick, handleLabelClick, labelTree, handleFlaggedClick, handleArchivedClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleAgentsClick, handlePluginsClick, tapdPluginInstalled, handleSettingsClick, handleWhatsNewClick])
+  }, [handleAllSessionsClick, handleSessionStatusClick, effectiveSessionStatuses, handleProjectFiltersClick, handleRunningAgentsClick, projectFilterOptions, handleProjectClick, handleLabelClick, labelTree, handleFlaggedClick, handleArchivedClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleAgentsClick, handlePluginsClick, tapdPluginInstalled, handleSettingsClick, handleWhatsNewClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -2745,8 +2640,6 @@ function AppShellContent({
     if (!sessionFilter) return t("sidebar.allSessions")
 
     switch (sessionFilter.kind) {
-      case 'inbox':
-        return 'Inbox'
       case 'flagged':
         return t("sidebar.flagged")
       case 'state': {
@@ -2766,114 +2659,6 @@ function AppShellContent({
         return t("sidebar.allSessions")
     }
   }, [navState, t, sessionFilter, automationFilter, labelConfigs, viewConfigs, effectiveSessionStatuses, activeStandaloneProject, projectFilter, listFilter, labelFilter, groupFilter, agentRunningFilter])
-
-  const handleSessionBoardModeChange = useCallback((mode: 'list' | 'board') => {
-    setSessionBoardViewMode(mode)
-    if (mode === 'board' && isSessionsNavigation(navState)) {
-      navigate(routeForSessionFilterRoot(sessionFilter), { skipAutoSelect: true })
-    }
-  }, [navState, sessionFilter])
-
-  const isBoardEligibleView = isSessionsNavigation(navState) && sessionFilter?.kind !== 'archived' && sessionFilter?.kind !== 'inbox'
-  const sessionBoardToggle = isBoardEligibleView ? (
-    <>
-      <HeaderIconButton
-        icon={<List className="h-4 w-4" />}
-        tooltip="List view"
-        onClick={() => handleSessionBoardModeChange('list')}
-        aria-pressed={sessionBoardViewMode === 'list'}
-        className={cn(
-          sessionBoardViewMode === 'list'
-            ? "bg-foreground/5 text-foreground shadow-minimal"
-            : undefined,
-        )}
-      />
-      <HeaderIconButton
-        icon={<Columns3 className="h-4 w-4" />}
-        tooltip="Board view"
-        onClick={() => handleSessionBoardModeChange('board')}
-        aria-pressed={sessionBoardViewMode === 'board'}
-        className={cn(
-          sessionBoardViewMode === 'board'
-            ? "bg-foreground/5 text-foreground shadow-minimal"
-            : undefined,
-        )}
-      />
-      {sessionBoardViewMode === 'list' && !isStateSubView && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <HeaderIconButton
-              icon={<Layers className="h-4 w-4" />}
-              tooltip="List grouping"
-              className="rounded-[8px]"
-            />
-          </DropdownMenuTrigger>
-          <StyledDropdownMenuContent align="end" light minWidth="min-w-[170px]">
-            <StyledDropdownMenuItem onClick={() => setChatGroupingMode('project')}>
-              <FolderOpen className="h-3.5 w-3.5" />
-              <span className="flex-1">Project</span>
-              {chatGroupingMode === 'project' && <Check className="h-3 w-3 text-muted-foreground" />}
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => setChatGroupingMode('date')}>
-              <Calendar className="h-3.5 w-3.5" />
-              <span className="flex-1">Date</span>
-              {chatGroupingMode === 'date' && <Check className="h-3 w-3 text-muted-foreground" />}
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => setChatGroupingMode('status')}>
-              <Inbox className="h-3.5 w-3.5" />
-              <span className="flex-1">Status</span>
-              {chatGroupingMode === 'status' && <Check className="h-3 w-3 text-muted-foreground" />}
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => setChatGroupingMode('unread')}>
-              <MailOpen className="h-3.5 w-3.5" />
-              <span className="flex-1">Unread</span>
-              {chatGroupingMode === 'unread' && <Check className="h-3 w-3 text-muted-foreground" />}
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => setChatGroupingMode('group')}>
-              <Layers className="h-3.5 w-3.5" />
-              <span className="flex-1">Group</span>
-              {chatGroupingMode === 'group' && <Check className="h-3 w-3 text-muted-foreground" />}
-            </StyledDropdownMenuItem>
-          </StyledDropdownMenuContent>
-        </DropdownMenu>
-      )}
-      {sessionBoardViewMode === 'board' && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <HeaderIconButton
-              icon={<Layers className="h-4 w-4" />}
-              tooltip="Board grouping"
-              className="rounded-[8px]"
-            />
-          </DropdownMenuTrigger>
-          <StyledDropdownMenuContent align="end" light minWidth="min-w-[150px]">
-            <StyledDropdownMenuItem onClick={() => setSessionBoardGroupBy('project')}>
-              <FolderOpen className="h-3.5 w-3.5" />
-              <span className="flex-1">Project</span>
-              {sessionBoardGroupBy === 'project' && <Check className="h-3 w-3 text-muted-foreground" />}
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => setSessionBoardGroupBy('status')}>
-              <Inbox className="h-3.5 w-3.5" />
-              <span className="flex-1">Status</span>
-              {sessionBoardGroupBy === 'status' && <Check className="h-3 w-3 text-muted-foreground" />}
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => setSessionBoardGroupBy('label')}>
-              <Tag className="h-3.5 w-3.5" />
-              <span className="flex-1">Label</span>
-              {sessionBoardGroupBy === 'label' && <Check className="h-3 w-3 text-muted-foreground" />}
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuSeparator />
-            <StyledDropdownMenuItem onClick={() => setSessionBoardGroupBy('recent')}>
-              <Clock className="h-3.5 w-3.5" />
-              <span className="flex-1">Recent 7 Days</span>
-              {sessionBoardGroupBy === 'recent' && <Check className="h-3 w-3 text-muted-foreground" />}
-            </StyledDropdownMenuItem>
-          </StyledDropdownMenuContent>
-        </DropdownMenu>
-      )}
-    </>
-  ) : null
-
 
   // Build recursive sidebar items from the shared display-sorted label tree.
   // Each node renders with condensed height (compact: true) since many labels expected.
@@ -3024,7 +2809,7 @@ function AppShellContent({
                     <TooltipContent side="right">{newChatHotkey}</TooltipContent>
                   </Tooltip>
                 </div>
-                {/* Primary Nav: Inbox, All Sessions (▸ Statuses, Flagged, Archived), Labels | Sources, Skills | Settings */}
+                {/* Primary Nav: All Sessions (▸ Statuses, Flagged, Archived), Labels | Sources, Skills | Settings */}
                 {/* pb-4 provides clearance so the last item scrolls above the mask-fade-bottom gradient */}
                 <div className="flex-1 overflow-y-auto min-h-0 mask-fade-bottom pb-4">
                 <LeftSidebar
@@ -3033,21 +2818,12 @@ function AppShellContent({
                   focusedItemId={focusedSidebarItemId}
                   links={[
                     // --- Sessions Section ---
-                    // Inbox: unread messages from normal and agent sessions.
-                    {
-                      id: "nav:inbox",
-                      title: "Inbox",
-                      label: inboxCount > 0 ? String(inboxCount) : undefined,
-                      icon: MailOpen,
-                      variant: sessionFilter?.kind === 'inbox' && !hasSessionSecondaryFilters ? "default" : "ghost",
-                      onClick: handleInboxClick,
-                    },
                     // All Sessions: expandable with status children (sortable) + Flagged & Archived as trailing items
                     {
                       id: "nav:allSessions",
                       title: t("sidebar.allSessions"),
                       label: String(navigatorSessionMetas.length),
-                      icon: Inbox,
+                      icon: ListTodo,
                       variant: sessionFilter?.kind === 'allSessions' && !hasSessionSecondaryFilters ? "default" : "ghost",
                       onClick: handleAllSessionsClick,
                       expandable: true,
@@ -3828,7 +3604,7 @@ function AppShellContent({
                               </>
                             )}
 
-                            {/* Projects submenu - derived from valued labels like project::Craft Agents */}
+                            {/* Projects submenu - official workspace Projects */}
                             <DropdownMenuSub>
                               <StyledDropdownMenuSubTrigger>
                                 <FolderOpen className="h-3.5 w-3.5" />
@@ -3903,7 +3679,7 @@ function AppShellContent({
                             {/* Statuses submenu - hierarchical with toggle selection */}
                             <DropdownMenuSub>
                               <StyledDropdownMenuSubTrigger>
-                                <Inbox className="h-3.5 w-3.5" />
+                                <ListTodo className="h-3.5 w-3.5" />
                                 <span className="flex-1">{t("sidebar.statuses")}</span>
                               </StyledDropdownMenuSubTrigger>
                               <StyledDropdownMenuSubContent minWidth="min-w-[180px]">
@@ -4097,8 +3873,8 @@ function AppShellContent({
                               </StyledDropdownMenuSubContent>
                             </DropdownMenuSub>
 
-                            {/* List group-by submenu. Board mode has its own board grouping control. */}
-                            {!isStateSubView && sessionBoardViewMode !== 'board' && (
+                            {/* Group by submenu - hidden in state sub-views (always date there) */}
+                            {!isStateSubView && (
                               <>
                                 <StyledDropdownMenuSeparator />
                                 <DropdownMenuSub>
@@ -4107,18 +3883,13 @@ function AppShellContent({
                                     <span className="flex-1">{t("sidebar.group")}</span>
                                   </StyledDropdownMenuSubTrigger>
                                   <StyledDropdownMenuSubContent minWidth="min-w-[140px]">
-                                    <StyledDropdownMenuItem onClick={() => setChatGroupingMode('project')}>
-                                      <FolderOpen className="h-3.5 w-3.5" />
-                                      <span className="flex-1">Group by Project</span>
-                                      {chatGroupingMode === 'project' && <Check className="h-3 w-3 text-muted-foreground" />}
-                                    </StyledDropdownMenuItem>
                                     <StyledDropdownMenuItem onClick={() => setChatGroupingMode('date')}>
                                       <Calendar className="h-3.5 w-3.5" />
                                       <span className="flex-1">{t("sidebar.groupByDate")}</span>
                                       {chatGroupingMode === 'date' && <Check className="h-3 w-3 text-muted-foreground" />}
                                     </StyledDropdownMenuItem>
                                     <StyledDropdownMenuItem onClick={() => setChatGroupingMode('status')}>
-                                      <Inbox className="h-3.5 w-3.5" />
+                                      <ListTodo className="h-3.5 w-3.5" />
                                       <span className="flex-1">{t("sidebar.groupByStatus")}</span>
                                       {chatGroupingMode === 'status' && <Check className="h-3 w-3 text-muted-foreground" />}
                                     </StyledDropdownMenuItem>
@@ -4127,11 +3898,13 @@ function AppShellContent({
                                       <span className="flex-1">{t("sidebar.groupByUnread")}</span>
                                       {chatGroupingMode === 'unread' && <Check className="h-3 w-3 text-muted-foreground" />}
                                     </StyledDropdownMenuItem>
-                                    <StyledDropdownMenuItem onClick={() => setChatGroupingMode('group')}>
-                                      <Layers className="h-3.5 w-3.5" />
-                                      <span className="flex-1">Group by Group</span>
-                                      {chatGroupingMode === 'group' && <Check className="h-3 w-3 text-muted-foreground" />}
-                                    </StyledDropdownMenuItem>
+                                    {projectMenuOptions.length > 0 && (
+                                      <StyledDropdownMenuItem onClick={() => setChatGroupingMode('project')}>
+                                        <FolderKanban className="h-3.5 w-3.5" />
+                                        <span className="flex-1">{t("sidebar.groupByProject")}</span>
+                                        {chatGroupingMode === 'project' && <Check className="h-3 w-3 text-muted-foreground" />}
+                                      </StyledDropdownMenuItem>
+                                    )}
                                   </StyledDropdownMenuSubContent>
                                 </DropdownMenuSub>
                               </>
@@ -4159,7 +3932,7 @@ function AppShellContent({
                               </div>
                             ) : (
                               <div ref={filterDropdownListRef} className="max-h-[240px] overflow-y-auto py-1">
-                                {/* Matched projects — flat list by project label value */}
+                                {/* Matched projects — flat list by official Project name */}
                                 {filterDropdownResults.projects.length > 0 && (
                                   <>
                                     <div className="px-3 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wider">
@@ -4461,7 +4234,6 @@ function AppShellContent({
                     </DropdownMenu>
                     )
                   )}
-                  {sessionBoardToggle}
                   {/* Add Source button (only for sources mode) - uses filter-aware edit config */}
                   {isSourcesNavigation(navState) && activeWorkspace && (
                     <EditPopover
@@ -4609,7 +4381,7 @@ function AppShellContent({
                 {/* Key on sidebarMode forces full remount when switching views, skipping animations */}
                 <SessionList
                   key={sessionFilter?.kind}
-                  items={searchActive ? (sessionFilter?.kind === 'inbox' ? workspaceSessionMetas : navigatorSessionMetas) : filteredSessionMetas}
+                  items={searchActive ? navigatorSessionMetas : filteredSessionMetas}
                   onDelete={handleDeleteSession}
                   onFlag={onFlagSession}
                   onUnflag={onUnflagSession}

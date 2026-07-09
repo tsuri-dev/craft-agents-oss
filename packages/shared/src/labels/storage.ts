@@ -25,7 +25,7 @@ const LABEL_CONFIG_FILE = 'labels/config.json';
  * Provides a starter set of labels organized into two complementary color families:
  * - Development (blue family): Code, Bug, Automation
  * - Content (purple family): Writing, Research, Design
- * Plus flat valued labels: Priority (number), Project (string)
+ * Plus flat valued labels: Priority (number)
  *
  * Children use hue-shifted shades of their parent color to show visual hierarchy.
  */
@@ -82,12 +82,6 @@ export function getDefaultLabelConfig(): WorkspaceLabelConfig {
         name: 'Priority',
         color: { light: '#F59E0B', dark: '#FBBF24' },
         valueType: 'number',
-      },
-      {
-        id: 'project',
-        name: 'Project',
-        color: 'foreground/50',
-        valueType: 'string',
       },
     ],
   };

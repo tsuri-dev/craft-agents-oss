@@ -1088,7 +1088,7 @@ export function validateStatusesContent(jsonString: string): ValidationResult {
     errors.push({
       file,
       path: 'statuses',
-      message: 'No status with category "open" - sessions will not appear in inbox',
+      message: 'No status with category "open" - active workflow states will be unavailable',
       severity: 'error',
     });
   }

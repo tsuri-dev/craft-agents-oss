@@ -799,7 +799,6 @@ export type RightSidebarPanel =
  */
 export type SessionFilter =
   | { kind: 'allSessions' }
-  | { kind: 'inbox' }
   | { kind: 'flagged' }
   | { kind: 'state'; stateId: string }
   | { kind: 'label'; labelId: string }
@@ -1108,7 +1107,6 @@ export const parseNavigationStateKey = (key: string): NavigationState | null => 
   const parseSessionsKey = (filterKey: string, sessionId?: string): NavigationState | null => {
     let filter: SessionFilter
     if (filterKey === 'allSessions') filter = { kind: 'allSessions' }
-    else if (filterKey === 'inbox') filter = { kind: 'inbox' }
     else if (filterKey === 'flagged') filter = { kind: 'flagged' }
     else if (filterKey === 'archived') filter = { kind: 'archived' }
     else if (filterKey.startsWith('state:')) {

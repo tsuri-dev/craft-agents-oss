@@ -1,70 +1,75 @@
 import { describe, expect, it } from 'bun:test'
 import type { SessionMeta } from '../../atoms/sessions'
+import type { LoadedProject } from '@craft-agent/shared/projects/types'
 import {
   NO_PROJECT_FILTER_ID,
-  addSessionProjectLabel,
   buildSessionProjectFilterOptions,
   filterSessionProjectOptions,
   filterSessionsByProjectFilter,
-  getSessionProjectValue,
-  resolveUniqueSessionProjectName,
+  getSessionProjectFilterId,
 } from '../session-project-filter'
 
-function session(id: string, labels?: string[]): SessionMeta {
+function session(id: string, projectId?: string): SessionMeta {
   return {
     id,
     workspaceId: 'workspace-1',
-    labels,
+    projectId,
   }
 }
 
-describe('getSessionProjectValue', () => {
-  it('reads project from the valued project label, not workingDirectory', () => {
-    const meta = session('one', ['bug', 'project::Craft Agents OSS'])
-    meta.workingDirectory = '/Users/me/projects/wrong-directory'
+function project(id: string, name: string): LoadedProject {
+  return {
+    config: {
+      id,
+      slug: name.toLowerCase().replace(/\s+/g, '-'),
+      name,
+      createdAt: 1,
+      updatedAt: 1,
+    },
+    folderPath: `/workspace/projects/${id}`,
+    assetsPath: `/workspace/projects/${id}/assets`,
+    workspaceRootPath: '/workspace',
+    workspaceId: 'workspace-1',
+  }
+}
 
-    expect(getSessionProjectValue(meta)).toBe('Craft Agents OSS')
-  })
-})
-
-describe('addSessionProjectLabel', () => {
-  it('replaces any existing project label with the new project value', () => {
-    expect(addSessionProjectLabel(['bug', 'project::Old'], 'New')).toEqual(['bug', 'project::New'])
-  })
-})
-
-describe('resolveUniqueSessionProjectName', () => {
-  it('appends a numeric suffix when a project already exists', () => {
-    expect(resolveUniqueSessionProjectName('Craft', ['Craft', 'Craft 2'])).toBe('Craft 3')
+describe('getSessionProjectFilterId', () => {
+  it('uses official session.projectId and falls back to no-project', () => {
+    expect(getSessionProjectFilterId(session('one', 'proj_craft'))).toBe('proj_craft')
+    expect(getSessionProjectFilterId(session('none'))).toBe(NO_PROJECT_FILTER_ID)
   })
 })
 
 describe('buildSessionProjectFilterOptions', () => {
-  it('groups sessions by project label custom value', () => {
+  it('builds filter options from official Projects and session.projectId counts', () => {
     const options = buildSessionProjectFilterOptions([
-      session('one', ['project::Craft Agents OSS']),
-      session('two', ['project::Craft Agents OSS']),
-      session('three', ['project::Pi']),
-      session('four', ['bug']),
-    ])
+      session('one', 'proj_craft'),
+      session('two', 'proj_craft'),
+      session('three', 'proj_pi'),
+      session('four'),
+    ], [project('proj_craft', 'Craft Agents OSS'), project('proj_pi', 'Pi')])
 
     expect(options).toEqual([
       {
-        id: 'Craft Agents OSS',
+        id: 'proj_craft',
         label: 'Craft Agents OSS',
-        value: 'Craft Agents OSS',
+        projectId: 'proj_craft',
+        slug: 'craft-agents-oss',
+        color: undefined,
         count: 2,
       },
       {
-        id: 'Pi',
+        id: 'proj_pi',
         label: 'Pi',
-        value: 'Pi',
+        projectId: 'proj_pi',
+        slug: 'pi',
+        color: undefined,
         count: 1,
       },
       {
         id: NO_PROJECT_FILTER_ID,
-        label: 'No Project',
-        value: null,
+        label: 'No project',
+        projectId: null,
         count: 1,
       },
     ])
@@ -72,16 +77,16 @@ describe('buildSessionProjectFilterOptions', () => {
 })
 
 describe('filterSessionsByProjectFilter', () => {
-  it('applies include and exclude project filters using project label values', () => {
+  it('applies include and exclude filters using official session.projectId', () => {
     const sessions = [
-      session('craft', ['project::Craft Agents OSS']),
-      session('pi', ['project::Pi']),
-      session('none', ['bug']),
+      session('craft', 'proj_craft'),
+      session('pi', 'proj_pi'),
+      session('none'),
     ]
 
     expect(filterSessionsByProjectFilter(
       sessions,
-      new Map<string, 'include' | 'exclude'>([['Craft Agents OSS', 'include']]),
+      new Map<string, 'include' | 'exclude'>([['proj_craft', 'include']]),
     ).map(s => s.id)).toEqual(['craft'])
 
     expect(filterSessionsByProjectFilter(
@@ -92,13 +97,13 @@ describe('filterSessionsByProjectFilter', () => {
 })
 
 describe('filterSessionProjectOptions', () => {
-  it('matches projects by custom value', () => {
+  it('matches official projects by display name', () => {
     const options = buildSessionProjectFilterOptions([
-      session('craft', ['project::Craft Agents OSS']),
-      session('pi', ['project::Pi']),
-    ])
+      session('craft', 'proj_craft'),
+      session('pi', 'proj_pi'),
+    ], [project('proj_craft', 'Craft Agents OSS'), project('proj_pi', 'Pi')])
 
-    expect(filterSessionProjectOptions(options, 'craft').map(o => o.id)).toEqual(['Craft Agents OSS'])
-    expect(filterSessionProjectOptions(options, 'pi').map(o => o.id)).toEqual(['Pi'])
+    expect(filterSessionProjectOptions(options, 'craft').map(o => o.id)).toEqual(['proj_craft'])
+    expect(filterSessionProjectOptions(options, 'pi').map(o => o.id)).toEqual(['proj_pi'])
   })
 })

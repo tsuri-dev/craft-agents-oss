@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { isToday, isYesterday, format, startOfDay } from "date-fns"
 import { getDateLocale } from "@craft-agent/shared/i18n"
 import { useAction } from "@/actions"
-import { Bot, Inbox, Archive } from "lucide-react"
+import { Bot, ListTodo, Archive } from "lucide-react"
 
 import { getSessionStatus } from "@/utils/session"
 import * as storage from "@/lib/local-storage"
@@ -38,17 +38,14 @@ import { buildCollapsedGroupsScopeSuffix } from "@/utils/session-list-collapse"
 import {
   addSessionGroupLabel,
   buildSessionGroupFilterOptions,
-  getSessionGroupValues,
   removeSessionGroupLabel,
   resolveUniqueSessionGroupName,
   sessionHasGroup,
   type SessionGroupFilterOption,
 } from "@/utils/session-group-filter"
 import {
-  addSessionProjectLabel,
   buildSessionProjectFilterOptions,
-  getSessionProjectValue,
-  resolveUniqueSessionProjectName,
+  NO_PROJECT_FILTER_ID,
   type SessionProjectFilterOption,
 } from "@/utils/session-project-filter"
 
@@ -57,7 +54,7 @@ export interface SessionListRow {
 }
 
 /** Grouping mode for chat list */
-export type ChatGroupingMode = 'date' | 'status' | 'unread' | 'group' | 'project'
+export type ChatGroupingMode = 'date' | 'status' | 'unread' | 'project'
 
 interface SessionListProps {
   items: SessionMeta[]
@@ -95,15 +92,15 @@ interface SessionListProps {
   labels?: LabelConfig[]
   /** Callback when session labels are toggled (for labels submenu in SessionMenu) */
   onLabelsChange?: (sessionId: string, labels: string[]) => void
-  /** Existing workspace projects for the Project label shortcut */
+  /** Official workspace Project filter options */
   projectOptions?: SessionProjectFilterOption[]
   /** Existing workspace groups for the Groups submenu */
   groupOptions?: SessionGroupFilterOption[]
   /** Workspace projects (for the Projects submenu in SessionMenu) */
   projects?: Array<{ id: string; slug: string; name: string; color?: string }>
   /** Callback to bind/unbind a session to a project (null = unbind) */
-  onSetProjectId?: (sessionId: string, projectId: string | null) => void
-  /** How to group sessions: 'date' (default), 'status', 'unread', 'project', or 'group' */
+  onSetProjectId?: (sessionId: string, projectId: string | null) => void | Promise<void>
+  /** How to group sessions: 'date' (default), 'status', 'unread', or 'project' */
   groupingMode?: ChatGroupingMode
   /** Workspace ID for content search (optional - if not provided, content search is disabled) */
   workspaceId?: string
@@ -385,54 +382,6 @@ export function SessionList({
       }
     }
 
-    if (groupingMode === 'group') {
-      const groupsByKey = new Map<string, { rows: SessionListRow[], label: string, sortLabel: string }>()
-      const upsertGroup = (key: string, label: string, sortLabel: string) => {
-        if (!groupsByKey.has(key)) groupsByKey.set(key, { rows: [], label, sortLabel })
-        return groupsByKey.get(key)!
-      }
-
-      for (const row of rows) {
-        const [firstGroup] = getSessionGroupValues(row.item)
-        const label = firstGroup || 'Ungrouped'
-        const key = firstGroup ? `group-${encodeURIComponent(firstGroup)}` : 'group-__ungrouped__'
-        upsertGroup(key, label, firstGroup || '\uffff').rows.push(row)
-      }
-
-      for (const meta of collapsedGroupsMeta) {
-        if (!groupsByKey.has(meta.key)) {
-          const rawName = meta.key === 'group-__ungrouped__'
-            ? ''
-            : decodeURIComponent(meta.key.replace('group-', ''))
-          upsertGroup(meta.key, rawName || 'Ungrouped', rawName || '\uffff')
-        }
-      }
-
-      const orderedGroups: EntityListGroup<SessionListRow>[] = Array.from(groupsByKey.entries())
-        .sort(([, a], [, b]) => a.sortLabel.localeCompare(b.sortLabel, undefined, { sensitivity: 'base' }))
-        .map(([key, group]) => {
-          group.rows.sort((a, b) => (b.item.lastMessageAt || 0) - (a.item.lastMessageAt || 0))
-          const collapsedMeta = collapsedGroupsMeta.find(m => m.key === key)
-          return {
-            key,
-            label: group.label,
-            items: group.rows,
-            collapsible: true,
-            labelStyle: 'plain',
-            ...(collapsedMeta ? { collapsedCount: collapsedMeta.count } : {}),
-          }
-        })
-
-      if (orderedGroups.length === 1) {
-        orderedGroups[0].collapsible = false
-      }
-
-      return {
-        rows: orderedGroups.flatMap(g => g.items),
-        groups: orderedGroups,
-      }
-    }
-
     if (groupingMode === 'project') {
       const projectOrder = new Map<string, number>()
       ;(projects ?? []).forEach((project, index) => projectOrder.set(project.id, index))
@@ -454,21 +403,13 @@ export function SessionList({
           continue
         }
 
-        // Backward-compatible local project:: label grouping for sessions that
-        // predate first-class Projects or deliberately use only valued labels.
-        const project = getSessionProjectValue(row.item)
-        const label = project || t('sidebar.noProject', { defaultValue: 'No project' })
-        const key = project ? `project-label-${encodeURIComponent(project)}` : 'project-__none__'
-        upsertProject(key, label, project ? 10_000 : 20_000, project || '\uffff').rows.push(row)
+        upsertProject(`project-${NO_PROJECT_FILTER_ID}`, t('sidebar.noProject', { defaultValue: 'No project' }), 20_000, '\uffff').rows.push(row)
       }
 
       for (const meta of collapsedGroupsMeta) {
         if (!groupsByKey.has(meta.key)) {
-          if (meta.key === 'project-__none__') {
+          if (meta.key === `project-${NO_PROJECT_FILTER_ID}`) {
             upsertProject(meta.key, t('sidebar.noProject', { defaultValue: 'No project' }), 20_000, '\uffff')
-          } else if (meta.key.startsWith('project-label-')) {
-            const rawName = decodeURIComponent(meta.key.replace('project-label-', ''))
-            upsertProject(meta.key, rawName, 10_000, rawName)
           } else {
             const id = meta.key.replace('project-', '')
             const label = projectNameById.get(id) ?? t('sidebar.unknownProject', { defaultValue: 'Unknown project' })
@@ -617,17 +558,11 @@ export function SessionList({
     } else if (groupingMode === 'unread') {
       const allKeys = new Set(items.map(item => item.hasUnread ? 'unread-yes' : 'unread-no'))
       setCollapsedGroups(allKeys)
-    } else if (groupingMode === 'group') {
-      const allKeys = new Set(items.map(item => {
-        const [firstGroup] = getSessionGroupValues(item)
-        return firstGroup ? `group-${encodeURIComponent(firstGroup)}` : 'group-__ungrouped__'
-      }))
-      setCollapsedGroups(allKeys)
     } else if (groupingMode === 'project') {
       const knownProjectIds = new Set((projects ?? []).map(p => p.id))
       const allKeys = new Set(items.map(item => {
         const pid = (item as { projectId?: string }).projectId
-        return pid && knownProjectIds.has(pid) ? `project-${pid}` : 'project-__none__'
+        return pid && knownProjectIds.has(pid) ? `project-${pid}` : `project-${NO_PROJECT_FILTER_ID}`
       }))
       setCollapsedGroups(allKeys)
     } else {
@@ -785,21 +720,22 @@ export function SessionList({
     requestAnimationFrame(() => setProjectDialogOpen(true))
   }, [])
 
-  const handleConfirmCreateProjectForSession = useCallback(() => {
-    if (!projectDialogSession || !onLabelsChange) return
+  const handleConfirmCreateProjectForSession = useCallback(async () => {
+    if (!projectDialogSession || !workspaceId || !onSetProjectId) return
     const trimmed = newProjectName.trim()
     if (!trimmed) return
-    const projectName = resolveUniqueSessionProjectName(
-      trimmed,
-      resolvedProjectOptions.map(option => option.value).filter((value): value is string => Boolean(value)),
-    )
-    const nextLabels = addSessionProjectLabel(projectDialogSession.labels, projectName)
-    onLabelsChange(projectDialogSession.id, nextLabels)
-    setProjectDialogOpen(false)
-    setProjectDialogSession(null)
-    setNewProjectName('')
-    toast.success(`Moved “${projectDialogSession.name || 'Session'}” to “${projectName}”`)
-  }, [newProjectName, onLabelsChange, projectDialogSession, resolvedProjectOptions])
+    try {
+      const project = await window.electronAPI.createProject(workspaceId, { name: trimmed })
+      await onSetProjectId(projectDialogSession.id, project.id)
+      setProjectDialogOpen(false)
+      setProjectDialogSession(null)
+      setNewProjectName('')
+      toast.success(`Moved “${projectDialogSession.name || 'Session'}” to “${project.name}”`)
+    } catch (error) {
+      console.error('[SessionList] Failed to create project:', error)
+      toast.error('Failed to create project')
+    }
+  }, [newProjectName, onSetProjectId, projectDialogSession, workspaceId])
 
   const handleCreateGroupForSession = useCallback((item: SessionMeta) => {
     setGroupDialogSession(item)
@@ -860,7 +796,7 @@ export function SessionList({
     onDelete: handleDeleteWithToast,
     onLabelsChange,
     projectOptions: resolvedProjectOptions,
-    onCreateProjectForSession: onLabelsChange ? handleCreateProjectForSession : undefined,
+    onCreateProjectForSession: workspaceId && onSetProjectId ? handleCreateProjectForSession : undefined,
     groupOptions: resolvedGroupOptions,
     onCreateGroupForSession: onLabelsChange ? handleCreateGroupForSession : undefined,
     onToggleGroupForSession: onLabelsChange ? handleToggleGroupForSession : undefined,
@@ -946,7 +882,7 @@ export function SessionList({
 
     return (
       <EntityListEmptyScreen
-        icon={<Inbox />}
+        icon={<ListTodo />}
         title={t("session.noSessionsYet")}
         description={t("session.noSessionsYetDesc")}
         className="h-full"

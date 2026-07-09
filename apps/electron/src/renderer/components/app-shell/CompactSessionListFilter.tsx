@@ -26,7 +26,7 @@ import {
   Calendar,
   Check,
   Flag,
-  Inbox,
+  ListTodo,
   Layers,
   ListFilter,
   MailOpen,
@@ -345,7 +345,7 @@ export function CompactSessionListFilter({
                 onTap={() => setChatGroupingMode('date')}
               />
               <FilterRow
-                icon={<Inbox className="h-4 w-4" />}
+                icon={<ListTodo className="h-4 w-4" />}
                 label={t('sidebar.groupByStatus')}
                 radioSelected={chatGroupingMode === 'status'}
                 onTap={() => setChatGroupingMode('status')}

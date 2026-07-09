@@ -28,7 +28,6 @@ import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadEa
 import { agentProfilesAtom } from '@/atoms/agent-profiles'
 import { kanbanEditorTargetAtom } from '@/atoms/kanban'
 import { getSessionTitle } from '@/utils/session'
-import { addSessionProjectLabel, resolveUniqueSessionProjectName } from '@/utils/session-project-filter'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
 import { resolveEffectiveConnectionSlug, isSessionConnectionUnavailable } from '@config/llm-connections'
 
@@ -63,8 +62,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     enabledSources,
     skills,
     labels,
-    projectOptions,
+    projects,
     onSessionLabelsChange,
+    onSessionProjectChange,
     enabledModes,
     sessionStatuses,
     onSessionSourcesChange,
@@ -489,19 +489,21 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     setProjectDialogOpen(true)
   }, [])
 
-  const handleProjectSubmit = React.useCallback(() => {
-    if (!sessionMeta || !onSessionLabelsChange) return
+  const handleProjectSubmit = React.useCallback(async () => {
+    if (!sessionMeta || !activeWorkspaceId || !onSessionProjectChange) return
     const trimmed = newProjectName.trim()
     if (!trimmed) return
-    const projectName = resolveUniqueSessionProjectName(
-      trimmed,
-      (projectOptions ?? []).map(option => option.value).filter((value): value is string => Boolean(value)),
-    )
-    onSessionLabelsChange(sessionId, addSessionProjectLabel(sessionMeta.labels, projectName))
-    setProjectDialogOpen(false)
-    setNewProjectName('')
-    toast.success(`Moved “${sessionMeta.name || 'Session'}” to “${projectName}”`)
-  }, [newProjectName, onSessionLabelsChange, projectOptions, sessionId, sessionMeta])
+    try {
+      const project = await window.electronAPI.createProject(activeWorkspaceId, { name: trimmed })
+      await onSessionProjectChange(sessionId, project.id)
+      setProjectDialogOpen(false)
+      setNewProjectName('')
+      toast.success(`Moved “${sessionMeta.name || 'Session'}” to “${project.name}”`)
+    } catch (error) {
+      console.error('[ChatPage] Failed to create project:', error)
+      toast.error('Failed to create project')
+    }
+  }, [activeWorkspaceId, newProjectName, onSessionProjectChange, sessionId, sessionMeta])
 
   // Task orchestrator sessions (spec-backed, top-level) get an "Edit task" header action
   // that opens the board's full-pane Task editor prefilled from task.yaml — the same
@@ -689,7 +691,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       item={sessionMeta}
       sessionStatuses={sessionStatuses ?? []}
       labels={labels ?? []}
-      projectOptions={projectOptions ?? []}
+      projects={projects ?? []}
+      onSetProjectId={projectId => { void onSessionProjectChange?.(sessionId, projectId) }}
       onCreateProject={handleCreateProject}
       onLabelsChange={handleLabelsChange}
       onRename={handleRename}
@@ -707,7 +710,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     isCompactMode,
     sessionStatuses,
     labels,
-    projectOptions,
+    projects,
+    onSessionProjectChange,
     handleCreateProject,
     handleLabelsChange,
     handleRename,
@@ -746,7 +750,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     isAsyncOperationOngoing,
     sessionStatuses,
     labels,
-    projectOptions,
     handleLabelsChange,
     handleRename,
     handleFlag,
@@ -846,7 +849,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             title="New Project"
             value={newProjectName}
             onValueChange={setNewProjectName}
-            onSubmit={handleProjectSubmit}
+            onSubmit={() => { void handleProjectSubmit() }}
             placeholder="Project name"
           />
         </>
@@ -941,7 +944,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         title="New Project"
         value={newProjectName}
         onValueChange={setNewProjectName}
-        onSubmit={handleProjectSubmit}
+        onSubmit={() => { void handleProjectSubmit() }}
         placeholder="Project name"
       />
     </>

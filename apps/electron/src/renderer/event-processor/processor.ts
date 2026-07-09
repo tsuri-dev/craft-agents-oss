@@ -23,7 +23,6 @@ import {
   handleLabelsChanged,
   handleProjectIdChanged,
   handleSessionStatusChanged,
-  handleSessionBoardPositionChanged,
   handleSessionMetadataChanged,
   handleSessionFlagged,
   handleSessionUnflagged,
@@ -169,9 +168,6 @@ export function processEvent(
 
     case 'session_status_changed':
       return handleSessionStatusChanged(state, event)
-
-    case 'session_board_position_changed':
-      return handleSessionBoardPositionChanged(state, event)
 
     case 'session_metadata_changed':
       return handleSessionMetadataChanged(state, event)

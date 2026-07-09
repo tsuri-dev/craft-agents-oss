@@ -44,3 +44,13 @@ export {
 } from './storage.ts';
 
 export type { UploadProjectAssetInput } from './storage.ts';
+
+export {
+  LEGACY_PROJECT_LABEL_ID,
+  migrateLegacyProjectLabelsToProjects,
+} from './migration.ts';
+
+export type {
+  LegacyProjectLabelMigrationOptions,
+  LegacyProjectLabelMigrationSummary,
+} from './migration.ts';

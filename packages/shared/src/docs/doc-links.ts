@@ -64,7 +64,7 @@ export const DOCS: Record<DocFeature, DocInfo> = {
     path: '/statuses/overview',
     title: 'Statuses',
     summary:
-      'Organize conversations into workflow states like Todo, In Progress, and Done. Open statuses appear in your inbox; closed ones move to the archive.',
+      'Organize conversations into workflow states like Todo, In Progress, and Done. Open statuses are active workflow states; closed ones move to the archive.',
   },
   permissions: {
     path: '/core-concepts/permissions',

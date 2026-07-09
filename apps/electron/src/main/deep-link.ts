@@ -139,7 +139,7 @@ export function parseDeepLink(url: string): DeepLinkTarget | null {
 
     // Compound route prefixes
     const COMPOUND_ROUTE_PREFIXES = [
-      'allSessions', 'inbox', 'flagged', 'archived', 'state', 'label', 'view',
+      'allSessions', 'flagged', 'archived', 'state', 'label', 'view',
       'sources', 'settings', 'skills', 'automations', 'agents', 'plugins',
     ]
 

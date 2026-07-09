@@ -79,7 +79,7 @@ export type NavigatorType = 'sessions' | 'sources' | 'settings'
 /**
  * Session filter kinds that map to sidebar routes
  */
-export type SessionFilterKind = 'allSessions' | 'inbox' | 'flagged' | 'state'
+export type SessionFilterKind = 'allSessions' | 'flagged' | 'state'
 
 // =============================================================================
 // Details Page Metadata
@@ -130,9 +130,6 @@ export const NavigationRegistry = {
 
       let filtered = ctx.sessions
       switch (filter.kind) {
-        case 'inbox':
-          filtered = ctx.sessions.filter(s => s.hasUnread)
-          break
         case 'flagged':
           filtered = ctx.sessions.filter(s => s.isFlagged)
           break

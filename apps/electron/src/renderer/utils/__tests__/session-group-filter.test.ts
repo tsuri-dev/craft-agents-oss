@@ -18,7 +18,7 @@ describe('session-group-filter', () => {
     const options = buildSessionGroupFilterOptions([
       { labels: ['group::Launch'] },
       { labels: ['group::Launch', 'group::Research'] },
-      { labels: ['project::Craft'] },
+      { labels: ['source::Craft'] },
     ] as never[])
 
     expect(options).toEqual([

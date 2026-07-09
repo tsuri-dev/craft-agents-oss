@@ -15,7 +15,6 @@ import type {
   LabelsChangedEvent,
   ProjectIdChangedEvent,
   SessionStatusChangedEvent,
-  SessionBoardPositionChangedEvent,
   SessionMetadataChangedEvent,
   SessionFlaggedEvent,
   SessionUnflaggedEvent,
@@ -697,23 +696,6 @@ export function handleSessionStatusChanged(
   return {
     state: {
       session: { ...session, sessionStatus: event.sessionStatus },
-      streaming,
-    },
-    effects: [],
-  }
-}
-
-/**
- * Handle session_board_position_changed - update session's manual board order
- */
-export function handleSessionBoardPositionChanged(
-  state: SessionState,
-  event: SessionBoardPositionChangedEvent
-): ProcessResult {
-  const { session, streaming } = state
-  return {
-    state: {
-      session: { ...session, boardPosition: event.boardPosition },
       streaming,
     },
     effects: [],

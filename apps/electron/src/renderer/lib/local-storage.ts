@@ -22,9 +22,6 @@ export const KEYS = {
   collapsedSidebarItems: 'collapsed-sidebar-items',
   chatGroupingMode: 'chat-grouping-mode', // How to group chats: 'date' | 'status'
   collapsedSessionGroups: 'collapsed-session-groups', // Collapsed group keys in session list
-  sessionBoardViewMode: 'session-board-view-mode', // Session navigator mode: list | board
-  sessionBoardGroupBy: 'session-board-group-by', // Board column grouping: status | label | recent
-  sessionBoardHiddenStatuses: 'session-board-hidden-statuses', // Workspace-scoped hidden board columns
   showAgentTasks: 'show-agent-tasks', // Include delegated agent child sessions in session navigator
 
   // Focus mode

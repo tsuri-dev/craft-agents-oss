@@ -23,11 +23,10 @@ export interface Session {
   name?: string;                 // Optional user-defined name
   createdAt: number;
   lastUsedAt: number;
-  // Inbox/Archive features
+  // Session organization
   isArchived?: boolean;          // Whether this session is archived
   isFlagged?: boolean;           // Whether this session is flagged
   status?: SessionStatus;        // Workflow status (todo, in_progress, needs_review, done, cancelled)
-  boardPosition?: number;        // Manual board ordering within a status column
   // Read/unread tracking
   lastReadMessageId?: string;    // ID of the last message the user has read
 }
@@ -42,7 +41,7 @@ export interface StoredSession extends Session {
 
 /**
  * Session metadata for listing (without loading full messages)
- * Extended with archive status for Inbox/Archive features
+ * Extended with archive/session organization fields
  */
 export interface SessionMetadata {
   id: string;
@@ -53,10 +52,9 @@ export interface SessionMetadata {
   messageCount: number;
   preview?: string;        // Preview of first user message
   sdkSessionId?: string;
-  // Inbox/Archive features
+  // Session organization
   isArchived?: boolean;    // Whether this session is archived
   isFlagged?: boolean;     // Whether this session is flagged
   status?: SessionStatus;  // Workflow status
-  boardPosition?: number;  // Manual board ordering within a status column
   hidden?: boolean;        // Whether this session is hidden from session list
 }

@@ -20,9 +20,9 @@
 import type { EntityColor } from '../colors/types.ts'
 
 /**
- * Status category determines filtering behavior:
- * - 'open': Appears in inbox (listInboxSessions)
- * - 'closed': Appears in archive (listCompletedSessions)
+ * Status category determines workflow grouping behavior:
+ * - 'open': Active workflow states
+ * - 'closed': Completed workflow states (listCompletedSessions)
  */
 export type StatusCategory = 'open' | 'closed';
 
@@ -48,7 +48,7 @@ export interface StatusConfig {
    */
   icon?: string;
 
-  /** Category (open = inbox, closed = archive) */
+  /** Category (open = active, closed = completed/archive) */
   category: StatusCategory;
 
   /** If true, cannot be deleted/renamed (todo, done, cancelled) */

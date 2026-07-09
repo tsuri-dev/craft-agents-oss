@@ -544,15 +544,13 @@ export function NavigationProvider({
       // navigator unless the "Show agent tasks" toggle is enabled.
       const showAgentTasks = storage.get<boolean>(storage.KEYS.showAgentTasks, false)
       const visibleSessions = sessionMetas.filter(
-        s => !s.hidden && (!workspaceId || s.workspaceId === workspaceId) && (filter.kind === 'inbox' || showAgentTasks || !hasAgentTaskLabel(s.labels))
+        s => !s.hidden && (!workspaceId || s.workspaceId === workspaceId) && (showAgentTasks || !hasAgentTaskLabel(s.labels))
       )
 
       return visibleSessions.filter((session) => {
         switch (filter.kind) {
           case 'allSessions':
             return session.isArchived !== true
-          case 'inbox':
-            return session.hasUnread === true && session.isArchived !== true
           case 'flagged':
             return session.isFlagged === true && session.isArchived !== true
           case 'archived':
@@ -642,12 +640,10 @@ export function NavigationProvider({
         }
       }
 
-      // Sessions: auto-select last/first session. Inbox intentionally stays empty
-      // until the user selects a notification; board has no per-session detail.
+      // Sessions: auto-select last/first session. Board has no per-session detail.
       if (
         isSessionsNavigation(nextState) &&
         nextState.viewMode !== 'board' &&
-        nextState.filter.kind !== 'inbox' &&
         !nextState.details &&
         !options?.skipAutoSelect
       ) {
@@ -1221,9 +1217,6 @@ export function NavigationProvider({
       case 'allSessions':
         navigate(routes.view.allSessions(sessionId))
         break
-      case 'inbox':
-        navigate(routes.view.inbox(sessionId))
-        break
       case 'flagged':
         navigate(routes.view.flagged(sessionId))
         break
@@ -1253,9 +1246,8 @@ export function NavigationProvider({
     if (!isReady || !workspaceId) return
     // Don't auto-select when panel stack is empty (user closed all panels)
     if (store.get(panelStackAtom).length === 0) return
-    // Scoped to sessions with no explicit detail. Inbox remains empty until a
-    // notification/session is selected; board skip lives in resolveAutoSelection.
-    if (!isSessionsNavigation(navigationState) || navigationState.details || navigationState.filter.kind === 'inbox') return
+    // Scoped to sessions with no explicit detail; board skip lives in resolveAutoSelection.
+    if (!isSessionsNavigation(navigationState) || navigationState.details) return
 
     const resolved = resolveAutoSelection(navigationState)
     if (isSessionsNavigation(resolved) && resolved.details) {

@@ -48,7 +48,6 @@ interface ParsedInternalDeepLink {
 
 const COMPOUND_ROUTE_PREFIXES = new Set([
   'allSessions',
-  'inbox',
   'flagged',
   'archived',
   'state',

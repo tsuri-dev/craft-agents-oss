@@ -39,29 +39,15 @@ import {
 import { useMenuComponents } from '@/components/ui/menu-context'
 import { getStateColor, getStateIcon, type SessionStatusId } from '@/config/session-status-config'
 import type { SessionStatus } from '@/config/session-status-config'
-import { extractLabelId, formatLabelEntry, type LabelConfig } from '@craft-agent/shared/labels'
-import { LabelMenuItems, ProjectMenuItems, StatusMenuItems, ShareMenuItems } from './SessionMenuParts'
+import type { LabelConfig } from '@craft-agent/shared/labels'
+import { LabelMenuItems, StatusMenuItems, ShareMenuItems } from './SessionMenuParts'
 import { getFileManagerName } from '@/lib/platform'
 import type { SessionMeta } from '@/atoms/sessions'
 import { getSessionStatus, hasUnreadMeta, hasMessagesMeta } from '@/utils/session'
 import { useSessionMenuActions } from '@/hooks/useSessionMenuActions'
 import { getSessionGroupValues } from '@/utils/session-group-filter'
 import type { SessionGroupFilterOption } from '@/utils/session-group-filter'
-import { getSessionProjectValue, PROJECT_LABEL_ID, type SessionProjectFilterOption } from '@/utils/session-project-filter'
 import { formatPercent, formatTokenCount, formatUsd, getCacheReadRatio } from '@/utils/session-usage'
-
-function omitProjectLabel(labels: LabelConfig[]): LabelConfig[] {
-  const result: LabelConfig[] = []
-  for (const label of labels) {
-    if (label.id === PROJECT_LABEL_ID) continue
-    if (label.children?.length) {
-      result.push({ ...label, children: omitProjectLabel(label.children) })
-    } else {
-      result.push(label)
-    }
-  }
-  return result
-}
 
 export interface SessionMenuProjectOption {
   id: string
@@ -78,9 +64,7 @@ export interface SessionMenuProps {
   labels?: LabelConfig[]
   /** Callback when labels are toggled (receives full updated labels array) */
   onLabelsChange?: (labels: string[]) => void
-  /** Existing workspace projects available for the Project label shortcut */
-  projectOptions?: SessionProjectFilterOption[]
-  /** Callback to create a new project and add this session */
+  /** Callback to create an official Project and bind this session to it */
   onCreateProject?: () => void
   /** Existing session groups available in the workspace */
   groupOptions?: SessionGroupFilterOption[]
@@ -116,7 +100,6 @@ export function SessionMenu({
   sessionStatuses,
   labels = [],
   onLabelsChange,
-  projectOptions = [],
   onCreateProject,
   groupOptions = [],
   onCreateGroup,
@@ -142,11 +125,8 @@ export function SessionMenu({
   const sharedUrl = item.sharedUrl
   const currentSessionStatus = getSessionStatus(item)
   const sessionLabels = item.labels ?? []
-  const menuLabels = React.useMemo(() => omitProjectLabel(labels), [labels])
-  const nonProjectLabelCount = React.useMemo(
-    () => sessionLabels.filter(entry => extractLabelId(entry) !== PROJECT_LABEL_ID).length,
-    [sessionLabels],
-  )
+  const menuLabels = labels
+  const nonProjectLabelCount = sessionLabels.length
   const _hasMessages = hasMessagesMeta(item)
   const _hasUnread = hasUnreadMeta(item)
 
@@ -155,20 +135,6 @@ export function SessionMenu({
     () => getSessionGroupValues(item),
     [item]
   )
-  const activeProjectValue = React.useMemo(
-    () => getSessionProjectValue(item),
-    [item]
-  )
-
-  const handleProjectSelect = React.useCallback((projectValue: string | null) => {
-    if (!onLabelsChange) return
-    const nextLabels = sessionLabels.filter(entry => extractLabelId(entry) !== PROJECT_LABEL_ID)
-    const trimmed = projectValue?.trim()
-    if (trimmed) {
-      nextLabels.push(formatLabelEntry(PROJECT_LABEL_ID, trimmed))
-    }
-    onLabelsChange(nextLabels)
-  }, [sessionLabels, onLabelsChange])
   // Get menu components from context (works with both DropdownMenu and ContextMenu)
   const { MenuItem, Separator, Sub, SubTrigger, SubContent } = useMenuComponents()
 
@@ -231,29 +197,6 @@ export function SessionMenu({
         </SubContent>
       </Sub>
 
-      {/* Project is a first-class organization axis, backed by the valued project:: label. */}
-      {onLabelsChange && (
-        <Sub>
-          <SubTrigger className="pr-2">
-            <FolderOpen className="h-3.5 w-3.5" />
-            <span className="flex-1">Move to Project</span>
-            {activeProjectValue && (
-              <span className="ml-3 max-w-[120px] truncate text-[10px] text-foreground/50">
-                {activeProjectValue}
-              </span>
-            )}
-          </SubTrigger>
-          <SubContent>
-            <ProjectMenuItems
-              projectOptions={projectOptions}
-              activeProjectValue={activeProjectValue}
-              onProjectSelect={handleProjectSelect}
-              onCreateProject={onCreateProject}
-              menu={{ MenuItem, Separator }}
-            />
-          </SubContent>
-        </Sub>
-      )}
 
       {/* Labels submenu - hierarchical label tree with nested sub-menus and toggle checkmarks */}
       {menuLabels.length > 0 && (
@@ -322,8 +265,8 @@ export function SessionMenu({
         </Sub>
       )}
 
-      {/* Projects submenu - workspace projects + "No project" to clear binding */}
-      {projects.length > 0 && onSetProjectId && (
+      {/* Projects submenu - official workspace Projects + "No project" to clear binding */}
+      {onSetProjectId && (projects.length > 0 || onCreateProject) && (
         <Sub>
           <SubTrigger className="pr-2">
             <FolderKanban className="h-3.5 w-3.5" />
@@ -336,7 +279,7 @@ export function SessionMenu({
                 {t("sessionMenu.noProject")}
               </span>
             </MenuItem>
-            <Separator />
+            {projects.length > 0 && <Separator />}
             {projects.map((p) => {
               const isBound = item.projectId === p.id
               return (
@@ -346,6 +289,15 @@ export function SessionMenu({
                 </MenuItem>
               )
             })}
+            {onCreateProject && (
+              <>
+                <Separator />
+                <MenuItem onClick={onCreateProject}>
+                  <Plus className="h-3.5 w-3.5" />
+                  <span className="flex-1">New Project…</span>
+                </MenuItem>
+              </>
+            )}
           </SubContent>
         </Sub>
       )}

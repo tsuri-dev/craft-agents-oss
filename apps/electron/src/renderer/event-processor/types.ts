@@ -169,15 +169,6 @@ export interface SessionStatusChangedEvent {
 }
 
 /**
- * Session board position changed event
- */
-export interface SessionBoardPositionChangedEvent {
-  type: 'session_board_position_changed'
-  sessionId: string
-  boardPosition?: number
-}
-
-/**
  * Session metadata changed event — generic live push for programmatic metadata writes
  * (taskNodeCount, kanbanColumn) that don't ride the header-signature file-watch path.
  */
@@ -542,7 +533,6 @@ export type AgentEvent =
   | LabelsChangedEvent
   | ProjectIdChangedEvent
   | SessionStatusChangedEvent
-  | SessionBoardPositionChangedEvent
   | SessionMetadataChangedEvent
   | SessionFlaggedEvent
   | SessionUnflaggedEvent

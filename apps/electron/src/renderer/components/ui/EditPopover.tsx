@@ -410,7 +410,7 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Statuses are stored in statuses/config.json with fields: id, label, icon, category (open/closed), order, isFixed, isDefault. ' +
         'Fixed statuses (todo, done, cancelled) cannot be deleted but can be reordered or have their label changed. ' +
         'Icon can be an emoji, an https URL, or a local filename like "name.svg" that maps to statuses/icons/name.svg. ' +
-        'Category "open" shows in inbox, "closed" shows in archive. ' +
+        'Category "open" is for active workflow states, "closed" is for completed/archive states. ' +
         'After editing, call config_validate with target "statuses" to verify the changes. ' +
         'Confirm clearly when done.',
     },

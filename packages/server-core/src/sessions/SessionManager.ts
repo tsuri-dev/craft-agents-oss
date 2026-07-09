@@ -954,8 +954,6 @@ interface ManagedSession {
   // Session status (user-controlled) - determines open vs closed
   // Dynamic status ID referencing workspace status config
   sessionStatus?: string
-  // Manual board ordering within a session status column
-  boardPosition?: number
   // Read/unread tracking - ID of last message user has read
   lastReadMessageId?: string
   /**
@@ -1817,13 +1815,6 @@ export class SessionManager implements ISessionManager {
       changed = true
     }
 
-    // Board position
-    if (header.boardPosition !== undefined && managed.boardPosition !== header.boardPosition) {
-      managed.boardPosition = header.boardPosition
-      this.sendEvent({ type: 'session_board_position_changed', sessionId, boardPosition: header.boardPosition }, managed.workspace.id)
-      changed = true
-    }
-
     // Name
     if (managed.name !== header.name) {
       managed.name = header.name
@@ -2255,6 +2246,19 @@ export class SessionManager implements ISessionManager {
       const workspaces = getWorkspaces()
       for (const workspace of workspaces) {
         this.setupConfigWatcher(workspace.rootPath, workspace.id)
+      }
+
+      // One-time, idempotent migration from the fork's legacy `project::value`
+      // labels to upstream's first-class Projects + session.projectId model.
+      // Run before loading session metadata so the first renderer hydrate sees
+      // official project bindings and no legacy project labels.
+      const { migrateLegacyProjectLabelsToProjects } = await import('@craft-agent/shared/projects')
+      for (const workspace of workspaces) {
+        try {
+          await migrateLegacyProjectLabelsToProjects(workspace.rootPath, { logger: sessionLog })
+        } catch (error) {
+          sessionLog.warn('[projects] Failed to migrate legacy project labels', { workspaceId: workspace.id, error })
+        }
       }
 
       // Load existing sessions from disk
@@ -5006,22 +5010,6 @@ export class SessionManager implements ISessionManager {
       // Workaround: Bun's fs.watch({ recursive: true }) on Linux doesn't track
       // directories created after the watcher started.
       // https://github.com/oven-sh/bun/issues/15939
-      const watcher = this.configWatchers.get(managed.workspace.rootPath)
-      watcher?.notifyFileChange(`sessions/${sessionId}/session.jsonl`)
-    }
-  }
-
-  async setSessionBoardPosition(sessionId: string, boardPosition: number): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (managed) {
-      managed.boardPosition = boardPosition
-      // Guard: suppress external metadata revert from fs.watch during atomic write
-      managed._metadataWriteGuardUntil = Date.now() + 5000
-      // Persist in-memory state directly to avoid race with pending queue writes
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
-      // Notify all windows for this workspace
-      this.sendEvent({ type: 'session_board_position_changed', sessionId, boardPosition }, managed.workspace.id)
       const watcher = this.configWatchers.get(managed.workspace.rootPath)
       watcher?.notifyFileChange(`sessions/${sessionId}/session.jsonl`)
     }

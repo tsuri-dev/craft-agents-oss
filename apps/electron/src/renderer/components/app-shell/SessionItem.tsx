@@ -128,7 +128,6 @@ export function SessionItem({
           sessionStatuses={ctx.sessionStatuses}
           labels={ctx.labels}
           onLabelsChange={ctx.onLabelsChange ? (ls) => ctx.onLabelsChange!(item.id, ls) : undefined}
-          projectOptions={ctx.projectOptions}
           onCreateProject={ctx.onCreateProjectForSession ? () => ctx.onCreateProjectForSession!(item) : undefined}
           groupOptions={ctx.groupOptions}
           onCreateGroup={ctx.onCreateGroupForSession ? () => ctx.onCreateGroupForSession!(item) : undefined}

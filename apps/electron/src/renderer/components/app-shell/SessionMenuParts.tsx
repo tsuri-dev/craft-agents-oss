@@ -1,11 +1,10 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
-import { Check, Globe, Copy, RefreshCw, Link2Off, FolderOpen, Plus } from 'lucide-react'
+import { Check, Globe, Copy, RefreshCw, Link2Off } from 'lucide-react'
 import type { MenuComponents } from '@/components/ui/menu-context'
 import { getStatusIconStyle, type SessionStatusId, type SessionStatus } from '@/config/session-status-config'
 import { sortLabelsForDisplay, type LabelConfig } from '@craft-agent/shared/labels'
 import { LabelIcon } from '@/components/ui/label-icon'
-import { NO_PROJECT_FILTER_ID, PROJECT_LABEL_ID, type SessionProjectFilterOption } from '@/utils/session-project-filter'
 
 export interface ShareMenuItemsProps {
   /** Open the published share URL in the system browser. */
@@ -100,12 +99,6 @@ export interface LabelMenuItemsProps {
   labels: LabelConfig[]
   appliedLabelIds: Set<string>
   onToggle: (labelId: string) => void
-  /** Existing project values across the current workspace, used by the built-in Project label shortcut. */
-  projectOptions?: SessionProjectFilterOption[]
-  /** Current project value for the target session. */
-  activeProjectValue?: string | null
-  /** Selects an existing project value, or null to clear the Project label. */
-  onProjectSelect?: (projectValue: string | null) => void
   menu: Pick<MenuComponents, 'MenuItem' | 'Separator' | 'Sub' | 'SubTrigger' | 'SubContent'>
 }
 
@@ -136,86 +129,15 @@ export function LabelMenuItems({
   labels,
   appliedLabelIds,
   onToggle,
-  projectOptions = [],
-  activeProjectValue,
-  onProjectSelect,
   menu,
 }: LabelMenuItemsProps) {
   const { MenuItem, Separator, Sub, SubTrigger, SubContent } = menu
   const displayLabels = React.useMemo(() => sortLabelsForDisplay(labels), [labels])
-  const existingProjectOptions = React.useMemo(
-    () => projectOptions.filter(option => option.id !== NO_PROJECT_FILTER_ID && option.value),
-    [projectOptions],
-  )
-
   const renderItems = (nodes: LabelConfig[]): React.ReactNode => (
     <>
       {nodes.map(label => {
         const hasChildren = label.children && label.children.length > 0
         const isApplied = appliedLabelIds.has(label.id)
-        const isProjectLabel = label.id === PROJECT_LABEL_ID && label.valueType === 'string' && !!onProjectSelect
-
-        if (isProjectLabel) {
-          const options = activeProjectValue && !existingProjectOptions.some(option => option.value === activeProjectValue)
-            ? [{ id: activeProjectValue, label: activeProjectValue, value: activeProjectValue, count: 1 }, ...existingProjectOptions]
-            : existingProjectOptions
-
-          return (
-            <Sub key={label.id}>
-              <SubTrigger className="pr-2">
-                <LabelIcon label={label} size="sm" hasChildren />
-                <span className="flex-1">{label.name}</span>
-                {activeProjectValue && (
-                  <span className="ml-3 max-w-[120px] truncate text-[10px] text-foreground/50">
-                    {activeProjectValue}
-                  </span>
-                )}
-              </SubTrigger>
-              <SubContent>
-                <MenuItem
-                  onClick={() => onProjectSelect(null)}
-                  className={!activeProjectValue ? 'bg-foreground/5' : ''}
-                >
-                  <LabelIcon label={label} size="sm" />
-                  <span className="flex-1">No Project</span>
-                  <span className="w-3.5 ml-4">
-                    {!activeProjectValue && <Check className="h-3.5 w-3.5 text-foreground" />}
-                  </span>
-                </MenuItem>
-                {options.length > 0 ? (
-                  <>
-                    <Separator />
-                    {options.map(option => {
-                      const isSelected = option.value === activeProjectValue
-                      return (
-                        <MenuItem
-                          key={option.id}
-                          onClick={() => onProjectSelect(option.value)}
-                          className={isSelected ? 'bg-foreground/5' : ''}
-                        >
-                          <LabelIcon label={label} size="sm" />
-                          <span className="flex-1 truncate">{option.label}</span>
-                          <span className="text-[10px] tabular-nums text-muted-foreground">{option.count}</span>
-                          <span className="w-3.5 ml-2">
-                            {isSelected && <Check className="h-3.5 w-3.5 text-foreground" />}
-                          </span>
-                        </MenuItem>
-                      )
-                    })}
-                  </>
-                ) : (
-                  <>
-                    <Separator />
-                    <MenuItem disabled>
-                      <span className="flex-1 text-muted-foreground">No existing projects</span>
-                    </MenuItem>
-                  </>
-                )}
-              </SubContent>
-            </Sub>
-          )
-        }
-
         if (hasChildren) {
           const subtreeCount = countAppliedInSubtree(label, appliedLabelIds)
 
@@ -270,86 +192,4 @@ export function LabelMenuItems({
   )
 
   return renderItems(displayLabels)
-}
-
-export interface ProjectMenuItemsProps {
-  /** Existing project values across the current workspace. */
-  projectOptions?: SessionProjectFilterOption[]
-  /** Current project value for the target session. */
-  activeProjectValue?: string | null
-  /** Selects an existing project value, or null to clear the Project label. */
-  onProjectSelect: (projectValue: string | null) => void
-  /** Opens project creation and applies the new project to the target session. */
-  onCreateProject?: () => void
-  menu: Pick<MenuComponents, 'MenuItem' | 'Separator'>
-}
-
-/**
- * ProjectMenuItems - first-class Project selector for moving a session between projects.
- *
- * Project is stored as the valued label entry `project::value`, but the UI treats it
- * as its own organization axis instead of hiding it under Labels.
- */
-export function ProjectMenuItems({
-  projectOptions = [],
-  activeProjectValue,
-  onProjectSelect,
-  onCreateProject,
-  menu,
-}: ProjectMenuItemsProps) {
-  const { MenuItem, Separator } = menu
-  const existingProjectOptions = React.useMemo(
-    () => projectOptions.filter(option => option.id !== NO_PROJECT_FILTER_ID && option.value),
-    [projectOptions],
-  )
-  const options = activeProjectValue && !existingProjectOptions.some(option => option.value === activeProjectValue)
-    ? [{ id: activeProjectValue, label: activeProjectValue, value: activeProjectValue, count: 1 }, ...existingProjectOptions]
-    : existingProjectOptions
-  const hasProjectActions = Boolean(onCreateProject || activeProjectValue)
-
-  return (
-    <>
-      {onCreateProject && (
-        <MenuItem onClick={onCreateProject}>
-          <Plus className="h-3.5 w-3.5" />
-          <span className="flex-1">New Project…</span>
-        </MenuItem>
-      )}
-      {activeProjectValue && (
-        <MenuItem onClick={() => onProjectSelect(null)}>
-          <FolderOpen className="h-3.5 w-3.5" />
-          <span className="flex-1">Remove Project</span>
-        </MenuItem>
-      )}
-      {options.length > 0 ? (
-        <>
-          {hasProjectActions && <Separator />}
-          {options.map(option => {
-            const isSelected = option.value === activeProjectValue
-            return (
-              <MenuItem
-                key={option.id}
-                onClick={() => onProjectSelect(option.value)}
-                className={isSelected ? 'bg-foreground/5' : ''}
-              >
-                <FolderOpen className="h-3.5 w-3.5" />
-                <span className="flex-1 truncate">{option.label}</span>
-                <span className="text-[10px] tabular-nums text-muted-foreground">{option.count}</span>
-                <span className="w-3.5 ml-2">
-                  {isSelected && <Check className="h-3.5 w-3.5 text-foreground" />}
-                </span>
-              </MenuItem>
-            )
-          })}
-        </>
-      ) : (
-        <>
-          {hasProjectActions && <Separator />}
-          <MenuItem disabled>
-            <span className="flex-1 text-muted-foreground">No existing projects</span>
-          </MenuItem>
-        </>
-      )}
-    </>
-  )
 }

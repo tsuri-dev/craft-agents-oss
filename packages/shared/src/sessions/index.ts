@@ -51,7 +51,6 @@ export {
   flagSession,
   unflagSession,
   setSessionStatus,
-  setSessionBoardPosition,
   setSessionLabels,
   setSessionProjectId,
   unbindProjectFromSessions,
@@ -64,7 +63,6 @@ export {
   // Session filtering
   listFlaggedSessions,
   listCompletedSessions,
-  listInboxSessions,
   // Archive management
   archiveSession,
   unarchiveSession,

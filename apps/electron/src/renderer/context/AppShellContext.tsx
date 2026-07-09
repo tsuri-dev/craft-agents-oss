@@ -61,10 +61,14 @@ export interface AppShellContextType {
   activeSessionWorkingDirectory?: string
   /** All label configs (tree) for label menu and badge display */
   labels?: import('@craft-agent/shared/labels').LabelConfig[]
-  /** Existing workspace project values for the Project label shortcut */
+  /** Official workspace Project filter options */
   projectOptions?: import('../utils/session-project-filter').SessionProjectFilterOption[]
+  /** Official workspace Projects for menus/board grouping */
+  projects?: Array<{ id: string; slug: string; name: string; color?: string }>
   /** Callback when session labels change */
   onSessionLabelsChange?: (sessionId: string, labels: string[]) => void
+  /** Bind/unbind a session to an official Project. */
+  onSessionProjectChange?: (sessionId: string, projectId: string | null) => void | Promise<void>
   /**
    * Open All Sessions scoped to a task: replaces the view's label filter (and project
    * filter when given) with the task's scope — the same user-clearable header-chip
@@ -75,19 +79,6 @@ export interface AppShellContextType {
   enabledModes?: PermissionMode[]
   /** Dynamic todo states from workspace config (provided by AppShell, defaults to empty) */
   sessionStatuses?: SessionStatusConfig[]
-  /** Current All Sessions content mode. Board renders in the main content panel, not the navigator. */
-  sessionBoardViewMode?: 'list' | 'board'
-  onSessionBoardViewModeChange?: (mode: 'list' | 'board') => void
-  /** Current board grouping mode. */
-  sessionBoardGroupBy?: 'status' | 'label' | 'project' | 'recent'
-  onSessionBoardGroupByChange?: (groupBy: 'status' | 'label' | 'project' | 'recent') => void
-  /** Sessions after the navigator's current view filters; used by board mode to match All Sessions filtering. */
-  sessionBoardSessions?: import('../atoms/sessions').SessionMeta[]
-  /** Workspace-scoped hidden board status columns. */
-  hiddenBoardStatusIds?: Set<string>
-  onHideBoardStatus?: (statusId: string) => void
-  onShowBoardStatus?: (statusId: string) => void
-
   // Unified session options map
   /** All session-scoped options in one map. Use useSessionOptionsFor() hook for easy access. */
   sessionOptions: Map<string, SessionOptions>
@@ -105,7 +96,6 @@ export interface AppShellContextType {
   /** Track which session user is viewing (for unread state machine) */
   onSetActiveViewingSession: (sessionId: string) => void
   onSessionStatusChange: (sessionId: string, state: SessionStatus) => void
-  onSessionBoardPositionChange: (sessionId: string, position: number) => void
   onDeleteSession: (sessionId: string, skipConfirmation?: boolean) => Promise<boolean>
 
   // Permission handling

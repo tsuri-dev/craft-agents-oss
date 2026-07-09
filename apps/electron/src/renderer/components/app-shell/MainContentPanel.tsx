@@ -22,7 +22,6 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Panel } from './Panel'
 import { MultiSelectPanel } from './MultiSelectPanel'
-import { SessionBoard } from './SessionBoard'
 import { RequirementBoard } from './RequirementBoard'
 import { AgentProfileDetailPage, AgentProfilesOverviewPage } from './AgentProfiles'
 import { PluginIntroPage, PluginsHub } from './PluginsHub'
@@ -44,7 +43,7 @@ import {
 } from '@/contexts/NavigationContext'
 import { useSessionSelection, useIsMultiSelectActive, useSelectedIds, useSelectionCount } from '@/hooks/useSession'
 import { sourceSelection, skillSelection, automationSelection } from '@/hooks/useEntitySelection'
-import { extractLabelId, flattenLabels, getDescendantIds } from '@craft-agent/shared/labels'
+import { extractLabelId } from '@craft-agent/shared/labels'
 import type { SessionStatusId } from '@/config/session-status-config'
 import { SourceInfoPage, ChatPage } from '@/pages'
 import SkillInfoPage from '@/pages/SkillInfoPage'
@@ -63,7 +62,6 @@ import {
   buildSessionGroupFilterOptions,
   resolveUniqueSessionGroupName,
 } from '@/utils/session-group-filter'
-import { hasUnreadMeta } from '@/utils/session'
 
 class SourceDetailErrorBoundary extends React.Component<{
   sourceSlug: string
@@ -123,24 +121,16 @@ export function MainContentPanel({
 }: MainContentPanelProps) {
   const { t } = useTranslation()
   const globalNavState = useNavigationState()
-  const { navigate, navigateToSession } = useNavigation()
+  const { navigate } = useNavigation()
   const navState = navStateOverride ?? globalNavState
   const {
     activeWorkspaceId,
     workspaces,
     onSessionStatusChange,
-    onSessionBoardPositionChange,
     onArchiveSession,
     onSessionLabelsChange,
     sessionStatuses,
     labels,
-    sessionBoardViewMode,
-    sessionBoardGroupBy,
-    sessionBoardSessions,
-    onSessionBoardViewModeChange,
-    hiddenBoardStatusIds,
-    onHideBoardStatus,
-    onShowBoardStatus,
     onTestAutomation,
     onToggleAutomation,
     onDuplicateAutomation,
@@ -231,31 +221,6 @@ export function MainContentPanel({
     return metas
   }, [selectedIds, sessionMetaMap])
 
-  const boardSessions = useMemo(() => {
-    if (sessionBoardSessions) return sessionBoardSessions
-    if (!activeWorkspaceId) return []
-    const activeSessions = Array.from(sessionMetaMap.values()).filter(meta =>
-      meta.workspaceId === activeWorkspaceId &&
-      !meta.hidden &&
-      !meta.isArchived
-    )
-    if (!isSessionsNavigation(navState)) return activeSessions
-    const filter = navState.filter
-    if (!filter || filter.kind === 'allSessions') return activeSessions
-    if (filter.kind === 'inbox') return activeSessions.filter(meta => hasUnreadMeta(meta))
-    if (filter.kind === 'flagged') return activeSessions.filter(meta => meta.isFlagged)
-    if (filter.kind === 'state') return activeSessions.filter(meta => (meta.sessionStatus || 'todo') === filter.stateId)
-    if (filter.kind === 'label') {
-      if (filter.labelId === '__all__') return activeSessions.filter(meta => (meta.labels?.length ?? 0) > 0)
-      const labelIds = new Set([filter.labelId, ...getDescendantIds(labels ?? [], filter.labelId)])
-      return activeSessions.filter(meta => meta.labels?.some(label => labelIds.has(extractLabelId(label))))
-    }
-    if (filter.kind === 'view') return activeSessions
-    return activeSessions
-  }, [activeWorkspaceId, labels, navState, sessionBoardSessions, sessionMetaMap])
-
-  const flatLabels = useMemo(() => flattenLabels(labels ?? []), [labels])
-
   const groupOptions = useMemo(() => {
     const workspaceSessions = Array.from(sessionMetaMap.values()).filter(meta =>
       (!activeWorkspaceId || meta.workspaceId === activeWorkspaceId) &&
@@ -264,11 +229,6 @@ export function MainContentPanel({
     )
     return buildSessionGroupFilterOptions(workspaceSessions)
   }, [activeWorkspaceId, sessionMetaMap])
-
-  const handleBoardSelectSession = useCallback((sessionId: string) => {
-    onSessionBoardViewModeChange?.('list')
-    navigateToSession(sessionId)
-  }, [navigateToSession, onSessionBoardViewModeChange])
 
   const activeStatusId = useMemo((): SessionStatusId | null => {
     if (selectedMetas.length === 0) return null
@@ -568,7 +528,6 @@ export function MainContentPanel({
 
   // Chats navigator - show chat, multi-select panel, or empty state
   if (isSessionsNavigation(navState)) {
-    // Board view: full-width Kanban over all sessions (placement independent of status)
     if (navState.viewMode === 'board') {
       return wrapWithStoplight(
         <Panel variant="grow" className={className}>
@@ -599,27 +558,6 @@ export function MainContentPanel({
       )
     }
 
-    if (!navState.details && navState.filter?.kind !== 'archived' && navState.filter?.kind !== 'inbox' && sessionBoardViewMode === 'board') {
-      return wrapWithStoplight(
-        <Panel variant="grow" className={className}>
-          <div className="flex h-full min-h-0 flex-col bg-background">
-            <SessionBoard
-              sessions={boardSessions}
-              statuses={sessionStatuses ?? []}
-              hiddenStatusIds={hiddenBoardStatusIds ?? new Set()}
-              labels={flatLabels}
-              groupBy={sessionBoardGroupBy ?? 'status'}
-              onLabelsChange={onSessionLabelsChange}
-              onHideStatus={onHideBoardStatus ?? (() => {})}
-              onShowStatus={onShowBoardStatus ?? (() => {})}
-              onSelectSession={handleBoardSelectSession}
-              onSessionStatusChange={onSessionStatusChange}
-              onSessionBoardPositionChange={onSessionBoardPositionChange}
-            />
-          </div>
-        </Panel>
-      )
-    }
 
     if (navState.details) {
       return wrapWithStoplight(
@@ -633,7 +571,7 @@ export function MainContentPanel({
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
         <div className="flex items-center justify-center h-full text-muted-foreground">
-          <p className="text-sm">{navState.filter?.kind === 'inbox' ? 'Select a notification to view details' : t("session.noSessionSelected")}</p>
+          <p className="text-sm">{t("session.noSessionSelected")}</p>
         </div>
       </Panel>
     )

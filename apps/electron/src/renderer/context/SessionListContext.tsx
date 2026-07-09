@@ -24,7 +24,7 @@ export interface SessionListContextValue {
   onCreateGroupForSession?: (item: SessionMeta) => void
   onToggleGroupForSession?: (item: SessionMeta, groupName: string) => void
   /** Set or clear the project binding for a session (null = unbind) */
-  onSetProjectId?: (sessionId: string, projectId: string | null) => void
+  onSetProjectId?: (sessionId: string, projectId: string | null) => void | Promise<void>
   /** Available workspace projects for the context-menu submenu */
   projects?: Array<{ id: string; slug: string; name: string; color?: string }>
   onSelectSessionById: (sessionId: string) => void

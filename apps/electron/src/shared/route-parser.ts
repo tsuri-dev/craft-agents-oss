@@ -64,7 +64,7 @@ export interface ParsedCompoundRoute {
  * Known prefixes that indicate a compound route
  */
 const COMPOUND_ROUTE_PREFIXES = [
-  'allSessions', 'inbox', 'flagged', 'archived', 'state', 'label', 'view', 'board', 'sources', 'skills', 'automations', 'agents', 'plugins', 'projects', 'settings'
+  'allSessions', 'flagged', 'archived', 'state', 'label', 'view', 'board', 'sources', 'skills', 'automations', 'agents', 'plugins', 'projects', 'settings'
 ]
 
 /**
@@ -262,10 +262,6 @@ export function parseCompoundRoute(route: string): ParsedCompoundRoute | null {
       sessionFilter = { kind: 'allSessions' }
       detailsStartIndex = 1
       break
-    case 'inbox':
-      sessionFilter = { kind: 'inbox' }
-      detailsStartIndex = 1
-      break
     case 'flagged':
       sessionFilter = { kind: 'flagged' }
       detailsStartIndex = 1
@@ -379,9 +375,6 @@ export function buildCompoundRoute(parsed: ParsedCompoundRoute): string {
   switch (filter.kind) {
     case 'allSessions':
       base = 'allSessions'
-      break
-    case 'inbox':
-      base = 'inbox'
       break
     case 'flagged':
       base = 'flagged'
@@ -778,7 +771,7 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
     case 'session':
       if (parsed.id) {
         // Reconstruct filter from params
-        const filterKind = (parsed.params.filter || 'allSessions') as SessionFilter['kind']
+        const filterKind = parsed.params.filter || 'allSessions'
         let filter: SessionFilter
         if (filterKind === 'state' && parsed.params.stateId) {
           filter = { kind: 'state', stateId: parsed.params.stateId }
@@ -786,8 +779,11 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
           filter = { kind: 'label', labelId: parsed.params.labelId }
         } else if (filterKind === 'view' && parsed.params.viewId) {
           filter = { kind: 'view', viewId: parsed.params.viewId }
+        } else if (filterKind === 'flagged' || filterKind === 'archived') {
+          filter = { kind: filterKind }
         } else {
-          filter = { kind: filterKind as 'allSessions' | 'inbox' | 'flagged' | 'archived' }
+          // Legacy links that used the removed unread-only view fall back to All Sessions.
+          filter = { kind: 'allSessions' }
         }
         return {
           navigator: 'sessions',
@@ -800,12 +796,6 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
       return {
         navigator: 'sessions',
         filter: { kind: 'allSessions' },
-        details: null,
-      }
-    case 'inbox':
-      return {
-        navigator: 'sessions',
-        filter: { kind: 'inbox' },
         details: null,
       }
     case 'flagged':
