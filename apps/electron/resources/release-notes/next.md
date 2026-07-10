@@ -11,6 +11,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Open working directory restored** — Restored the chat input shortcut for opening the current working directory in VS Code, Cursor, Zed, Finder, Terminal, and other configured apps.
+
 ## Breaking Changes
 
 - **External messaging channels removed** — Telegram, WhatsApp, Lark / Feishu, and WeChat/iLink integrations have been removed from the desktop app, server runtime, IPC/RPC APIs, and bundled packages. Startup now performs best-effort cleanup of old messaging credentials/state and macOS OpenClaw remnants.

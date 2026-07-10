@@ -1993,13 +1993,18 @@ export function FreeFormInput({
             </div>
           )}
           {onWorkingDirectoryChange && (
-            <CompactWorkingDirectorySelector
-              workingDirectory={workingDirectory}
-              onWorkingDirectoryChange={onWorkingDirectoryChange}
-              sessionFolderPath={sessionFolderPath}
-              isEmptySession={false}
-              workspaceId={workspaceId}
-            />
+            <div className="flex min-w-0 shrink items-center gap-1">
+              <CompactWorkingDirectorySelector
+                workingDirectory={workingDirectory}
+                onWorkingDirectoryChange={onWorkingDirectoryChange}
+                sessionFolderPath={sessionFolderPath}
+                isEmptySession={false}
+                workspaceId={workspaceId}
+              />
+              {workingDirectory && (
+                <OpenDirectoryAppMenu workingDirectory={workingDirectory} />
+              )}
+            </div>
           )}
           </div>
           )}
@@ -2101,13 +2106,18 @@ export function FreeFormInput({
 
           {/* 3. Working Directory Selector Badge */}
           {onWorkingDirectoryChange && (
-            <WorkingDirectoryBadge
-              workingDirectory={workingDirectory}
-              onWorkingDirectoryChange={onWorkingDirectoryChange}
-              sessionFolderPath={sessionFolderPath}
-              isEmptySession={isEmptySession}
-              workspaceId={workspaceId}
-            />
+            <div className="flex min-w-0 shrink items-center gap-1">
+              <WorkingDirectoryBadge
+                workingDirectory={workingDirectory}
+                onWorkingDirectoryChange={onWorkingDirectoryChange}
+                sessionFolderPath={sessionFolderPath}
+                isEmptySession={isEmptySession}
+                workspaceId={workspaceId}
+              />
+              {workingDirectory && (
+                <OpenDirectoryAppMenu workingDirectory={workingDirectory} />
+              )}
+            </div>
           )}
 
           {tapdRequirementId && !isInlineAgentInput && (
