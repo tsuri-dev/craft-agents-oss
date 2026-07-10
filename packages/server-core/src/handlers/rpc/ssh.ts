@@ -94,6 +94,17 @@ function sshKeepAliveArgs(profile: Pick<SshConnectionProfile, 'keepAlive' | 'kee
   ]
 }
 
+function sshRemoteCommandOverrideArgs(): string[] {
+  return [
+    // Profiles may target hosts with RemoteCommand/RequestTTY configured in
+    // ~/.ssh/config. Craft Agent always supplies its own non-interactive remote
+    // command, so override those host defaults to avoid OpenSSH rejecting the
+    // command with "Cannot execute command-line and remote command.".
+    '-o', 'RemoteCommand=none',
+    '-o', 'RequestTTY=no',
+  ]
+}
+
 function requireNonEmpty(value: string | undefined, label: string): string {
   const trimmed = value?.trim()
   if (!trimmed) throw new Error(`${label} is required`)
@@ -180,6 +191,7 @@ async function testProfileWithKey(profile: SshConnectionProfile, key: SshPrivate
       '-o', 'BatchMode=yes',
       '-o', 'IdentitiesOnly=yes',
       '-o', 'ConnectTimeout=10',
+      ...sshRemoteCommandOverrideArgs(),
       ...sshKeepAliveArgs(profile),
       target,
       remoteCommand,

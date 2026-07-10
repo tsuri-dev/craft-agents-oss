@@ -291,6 +291,7 @@ ${entries.join('\n')}
     const cdPrefix = `cd ${shellQuote(target.remoteWorkingDirectory)} &&`;
     const keepAliveEnabled = target.keepAlive !== false;
     const keepAliveMinutes = target.keepAliveMinutes ?? 30;
+    const remoteCommandOverrideArgs = ' -o RemoteCommand=none -o RequestTTY=no';
     const keepAliveArgs = keepAliveEnabled
       ? ` -o ControlMaster=auto -o ControlPersist=${keepAliveMinutes}m -o ControlPath=/tmp/craft-agent-ssh-%C -o ServerAliveInterval=30 -o ServerAliveCountMax=3`
       : '';
@@ -304,8 +305,8 @@ This session is bound to an SSH remote machine.
 - Private key path: ${target.privateKeyPath ?? '(configured key path unavailable)'}
 - SSH connection reuse: ${keepAliveEnabled ? `enabled, keep control socket for ${keepAliveMinutes} minutes` : 'disabled'}
 
-When using shell commands for project work, run them on the remote machine under the remote working directory. You MUST include the SSH options below on every ssh command for this session so OpenSSH multiplexing is actually enabled:
-ssh ${keyArg}-p ${target.port} -o BatchMode=yes -o IdentitiesOnly=yes${keepAliveArgs} ${shellQuote(remote)} ${shellQuote(`${cdPrefix} <command>`)}
+When using shell commands for project work, run them on the remote machine under the remote working directory. You MUST include the SSH options below on every ssh command for this session so OpenSSH multiplexing is actually enabled and host-level RemoteCommand/RequestTTY defaults do not conflict with Craft Agent's command:
+ssh ${keyArg}-p ${target.port} -o BatchMode=yes -o IdentitiesOnly=yes${remoteCommandOverrideArgs}${keepAliveArgs} ${shellQuote(remote)} ${shellQuote(`${cdPrefix} <command>`)}
 
 If you verify the effective ssh configuration, include the same options in the verification command; checking plain ssh -G <host> does not reflect this session's per-command overrides.
 
